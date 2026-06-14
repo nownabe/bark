@@ -51,6 +51,22 @@ export interface ChangedFile {
   patch?: string;
 }
 
+/** GitHub レビューコメント API の生レスポンス(必要フィールドのみ)。 */
+export interface RawReviewComment {
+  id: number;
+  body: string;
+  path: string;
+  line: number | null;
+  user: { login: string } | null;
+}
+
+/** GitHub issue コメント API の生レスポンス(必要フィールドのみ)。 */
+export interface RawIssueComment {
+  id: number;
+  body: string;
+  user: { login: string } | null;
+}
+
 const API_BASE = 'https://api.github.com';
 
 /** diff 外コメント用の blob パーマリンク(§7.1, D4)。 */
@@ -122,6 +138,22 @@ export class GitHubClient {
     return files
       .filter((f) => f.filename.toLowerCase().endsWith('.md') && f.status !== 'removed')
       .map((f) => ({ path: f.filename, status: f.status, patch: f.patch }));
+  }
+
+  /** 既存のレビューコメント(diff 行に紐づく, §R6)。 */
+  async listReviewComments(ref: PrRef): Promise<RawReviewComment[]> {
+    const res = await this.request(
+      `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments?per_page=100`,
+    );
+    return (await res.json()) as RawReviewComment[];
+  }
+
+  /** 既存の通常 PR コメント(issue コメント, diff 外コメントの保存先 §D4)。 */
+  async listIssueComments(ref: PrRef): Promise<RawIssueComment[]> {
+    const res = await this.request(
+      `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments?per_page=100`,
+    );
+    return (await res.json()) as RawIssueComment[];
   }
 
   /** 指定 SHA 時点のファイル内容(raw テキスト = 正準ソース, §D9)。 */

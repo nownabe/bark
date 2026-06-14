@@ -43,6 +43,50 @@ export function offsetToLineCol(
   return { line: ans + 1, col: offset - lineStarts[ans] + 1 };
 }
 
+/** line/col(1-based)→ source offset。lineStarts は buildLineIndex の戻り値。 */
+export function lineColToOffset(line: number, col: number, lineStarts: number[]): number {
+  const base = lineStarts[Math.min(line - 1, lineStarts.length - 1)] ?? 0;
+  return base + (col - 1);
+}
+
+/** source offset → DOM 上の {node, offset}(アンカー復元・ハイライト用, §R6)。 */
+export function domPointForOffset(
+  root: HTMLElement,
+  offset: number,
+): { node: Node; offset: number } | null {
+  const spans = root.querySelectorAll<HTMLElement>('span[data-so]');
+  for (const span of spans) {
+    const so = Number(span.dataset.so);
+    const eo = Number(span.dataset.eo);
+    if (offset >= so && offset <= eo) {
+      const textNode = span.firstChild;
+      if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+        if (span.dataset.drLin === '1') {
+          const len = textNode.textContent?.length ?? 0;
+          return { node: textNode, offset: Math.min(offset - so, len) };
+        }
+        return { node: textNode, offset: 0 }; // 非線形トークンは先頭にクランプ
+      }
+    }
+  }
+  return null;
+}
+
+/** [start, end] の source offset から DOM Range を生成(見つからなければ null)。 */
+export function rangeForOffsets(root: HTMLElement, start: number, end: number): Range | null {
+  const s = domPointForOffset(root, start);
+  const e = domPointForOffset(root, end);
+  if (!s || !e) return null;
+  const range = document.createRange();
+  try {
+    range.setStart(s.node, s.offset);
+    range.setEnd(e.node, e.offset);
+  } catch {
+    return null;
+  }
+  return range;
+}
+
 /** 直近の data-so 持ち祖先要素の offset(ブロック単位フォールバック)。 */
 function ancestorOffset(start: Element | null, root: HTMLElement): number | null {
   let el: Element | null = start;

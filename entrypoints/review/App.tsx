@@ -7,7 +7,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import { rehypeSourcePos, sanitizeSchema } from '../../lib/markdown';
-import { buildLineIndex, resolveSelection, type SourceAnchor } from '../../lib/anchor';
+import {
+  buildLineIndex,
+  lineColToOffset,
+  rangeForOffsets,
+  resolveSelection,
+  type SourceAnchor,
+} from '../../lib/anchor';
+import { normalizeComments, type ExistingComment } from '../../lib/comments';
 import {
   buildBlobPermalink,
   GitHubApiError,
@@ -53,6 +60,7 @@ export function App() {
   const [anchor, setAnchor] = useState<SourceAnchor | null>(null);
   const [cid, setCid] = useState('');
   const [commentBody, setCommentBody] = useState('');
+  const [comments, setComments] = useState<ExistingComment[]>([]);
   const docRef = useRef<HTMLDivElement>(null);
 
   const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
@@ -117,6 +125,46 @@ export function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, headSha, selectedPath, ref?.owner, ref?.repo, ref?.number]);
+
+  // 既存コメントの取り込み(R6)。取得失敗は本文表示を妨げないよう握りつぶす。
+  useEffect(() => {
+    if (!client || !ref) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [reviews, issues] = await Promise.all([
+          client.listReviewComments(ref),
+          client.listIssueComments(ref),
+        ]);
+        if (!cancelled) setComments(normalizeComments(reviews, issues));
+      } catch {
+        /* ignore: コメント取得失敗は致命ではない */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, ref?.owner, ref?.repo, ref?.number]);
+
+  const jumpTo = (c: ExistingComment) => {
+    if (!docRef.current || !c.meta) return;
+    if (c.meta.path !== (selectedPath ?? 'sample')) {
+      setSelectedPath(c.meta.path); // 別ファイル: 切替のみ(切替後の自動ハイライトは後続)
+      return;
+    }
+    const start = lineColToOffset(c.meta.range.sl, c.meta.range.sc, lineStarts);
+    const end = lineColToOffset(c.meta.range.el, c.meta.range.ec, lineStarts);
+    const range = rangeForOffsets(docRef.current, start, end);
+    if (!range) return;
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    (range.startContainer.parentElement ?? docRef.current).scrollIntoView({
+      block: 'center',
+      behavior: 'smooth',
+    });
+  };
 
   const handleSelection = () => {
     if (!docRef.current) return;
@@ -265,6 +313,43 @@ export function App() {
         </main>
 
         <aside style={{ position: 'sticky', top: 24, border: '1px solid #d0d7de', borderRadius: 8, padding: 16, fontSize: 13 }}>
+          {ref ? (
+            <div style={{ marginBottom: 16, borderBottom: '1px solid #d0d7de', paddingBottom: 12 }}>
+              <h2 style={{ fontSize: 14, margin: '0 0 8px' }}>Comments ({comments.length})</h2>
+              {comments.length === 0 ? (
+                <p style={{ color: '#57606a', margin: 0 }}>既存コメントはありません。</p>
+              ) : (
+                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
+                  {comments.map((c) => (
+                    <li key={`${c.source}-${c.id}`} style={{ fontSize: 12, border: '1px solid #eaeef2', borderRadius: 6, padding: 8 }}>
+                      <div style={{ color: '#57606a', marginBottom: 4 }}>
+                        @{c.author} · {c.source}
+                        {c.meta ? (
+                          <span style={{ color: '#1a7f37' }}> · anchored</span>
+                        ) : (
+                          <span style={{ color: '#9a6700' }}>
+                            {' '}
+                            · {c.path ? `${c.path}:L${c.line ?? '?'}` : 'no anchor'}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{c.body || '(本文なし)'}</div>
+                      {c.meta ? (
+                        <button
+                          type="button"
+                          onClick={() => jumpTo(c)}
+                          style={{ marginTop: 6, fontSize: 11, border: '1px solid #d0d7de', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', background: 'none' }}
+                        >
+                          {c.meta.path === (selectedPath ?? 'sample') ? '本文へジャンプ' : `${c.meta.path} を開く`}
+                        </button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
+
           <h2 style={{ fontSize: 14, margin: '0 0 12px' }}>Selection anchor</h2>
           {anchor ? (
             <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', margin: 0 }}>
