@@ -47,7 +47,7 @@ git hooks run as children of the unsandboxed git process, so they execute **outs
 
 ## When a sandboxed command fails
 
-When work fails because of a sandbox restriction (not a real bug), **do not silently fall back to `dangerouslyDisableSandbox`**. Diagnose the cause and propose the narrowest `.claude/settings.json` change that fixes it, following the most-secure-first principle. Map the failure to the right setting:
+When work fails because of a sandbox or devbox configuration restriction (not a real bug), **do not silently fall back to `dangerouslyDisableSandbox`**. Diagnose the cause and **record the proposed fix in `env-suggestion.md`** (at the repo root) instead of changing the config yourself. Append one entry per failure: the symptom, the diagnosed cause, and the narrowest config change that would fix it, following the most-secure-first principle. The user reviews `env-suggestion.md` and applies the changes; this keeps every environment-loosening decision human-gated. Use this table to map the failure to the right setting to write down:
 
 | Failure symptom | Likely cause | Proposed setting (narrowest first) |
 |---|---|---|
@@ -58,8 +58,8 @@ When work fails because of a sandbox restriction (not a real bug), **do not sile
 | `Read-only file system` on `.git` | Intended: git writes must run outside the sandbox | Do **not** relax `.git` denyWrite. Ensure the command runs via `excludedCommands` (`git`/`gh`); a one-off may use `dangerouslyDisableSandbox` with user confirmation |
 
 Rules of thumb:
-- Add the **most specific** entry that unblocks the task (one host, one path, one subcommand) — never widen with `~/`, `/`, or `*`.
-- Propose the diff and explain why it is safe; let the user decide. Prefer changing the tool's behavior (caches/output into the project) over loosening the sandbox.
+- Write every proposal to `env-suggestion.md` — do not edit `.claude/settings.json`, `devbox.json`, or other config yourself. The file is the single place where all environment-improvement suggestions accumulate for the user to review.
+- Each entry must propose the **most specific** change that unblocks the task (one host, one path, one subcommand) — never widen with `~/`, `/`, or `*` — and explain why it is safe. Prefer changing the tool's behavior (caches/output into the project) over loosening the sandbox.
 - `dangerouslyDisableSandbox` is a last resort for genuine one-offs, always with user confirmation — not a substitute for fixing the config.
 - Remember settings changes apply on the **next** session, so a settings fix needs a restart to take effect (a `dangerouslyDisableSandbox` retry can unblock the current session in the meantime).
 
