@@ -43,9 +43,9 @@ function injectEntryButton() {
   } satisfies Partial<CSSStyleDeclaration>);
 
   btn.addEventListener('click', () => {
-    const params = new URLSearchParams(ref);
-    const url = `${browser.runtime.getURL('/review.html')}?${params.toString()}`;
-    window.open(url, '_blank');
+    // background に依頼して chrome.tabs.create で開く。content script から
+    // window.open(chrome-extension://...) すると ERR_BLOCKED_BY_CLIENT で弾かれるため。
+    void browser.runtime.sendMessage({ type: 'docreview/open', ref });
   });
 
   document.body.appendChild(btn);
