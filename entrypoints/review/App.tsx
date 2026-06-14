@@ -55,7 +55,10 @@ export function App() {
 
   const [files, setFiles] = useState<ChangedFile[]>([]);
   const [headSha, setHeadSha] = useState<string | null>(null);
+  const [headRef, setHeadRef] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState('');
   const [source, setSource] = useState<string>(ref ? '' : sampleDoc);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -92,10 +95,11 @@ export function App() {
     setError(null);
     (async () => {
       try {
-        const sha = await client.getPullHeadSha(ref);
+        const { headSha: sha, headRef: hr } = await client.getPull(ref);
         const md = await client.listMarkdownFiles(ref);
         if (cancelled) return;
         setHeadSha(sha);
+        setHeadRef(hr);
         setFiles(md);
         setSelectedPath((prev) => prev ?? md[0]?.path ?? null);
       } catch (e) {
@@ -313,6 +317,43 @@ export function App() {
     }
   };
 
+  // author 編集 → コミット(R5, §7.4)。Contents: Write 権限が必要。
+  const startEdit = () => {
+    setEditText(source);
+    setEditing(true);
+    setAnchor(null);
+  };
+
+  const commitEdit = async () => {
+    if (!client || !ref || !selectedPath || !headRef) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const blobSha = await client.getFileSha(ref, selectedPath, headRef);
+      await client.putFileContent(ref, {
+        path: selectedPath,
+        content: editText,
+        message: `docs: edit ${selectedPath} via DocReview`,
+        sha: blobSha,
+        branch: headRef,
+      });
+      // head が進むので再取得 → 既存コメントは R7 で再アンカーされる
+      const { headSha: sha } = await client.getPull(ref);
+      setHeadSha(sha);
+      setSource(await client.getFileContent(ref, selectedPath, sha));
+      setEditing(false);
+      const [reviews, issues] = await Promise.all([
+        client.listReviewComments(ref),
+        client.listIssueComments(ref),
+      ]);
+      setComments(normalizeComments(reviews, issues));
+    } catch (e) {
+      setError(errMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const saveToken = async () => {
     const t = tokenInput.trim();
     if (!t) return;
@@ -395,8 +436,17 @@ export function App() {
                 ))}
               </select>
             ) : null}
+            {selectedPath ? (
+              <button
+                type="button"
+                onClick={() => (editing ? setEditing(false) : startEdit())}
+                style={{ marginLeft: 'auto', fontSize: 12, background: 'none', border: '1px solid #d0d7de', borderRadius: 6, padding: '2px 8px', cursor: 'pointer' }}
+              >
+                {editing ? '閲覧に戻る' : '編集'}
+              </button>
+            ) : null}
             {token ? (
-              <button type="button" onClick={handleClearToken} style={{ marginLeft: 'auto', fontSize: 12, background: 'none', border: '1px solid #d0d7de', borderRadius: 6, padding: '2px 8px', cursor: 'pointer' }}>
+              <button type="button" onClick={handleClearToken} style={{ fontSize: 12, background: 'none', border: '1px solid #d0d7de', borderRadius: 6, padding: '2px 8px', cursor: 'pointer' }}>
                 トークン削除
               </button>
             ) : null}
@@ -413,8 +463,40 @@ export function App() {
       ) : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
-        <main ref={docRef} onMouseUp={handleSelection} style={{ lineHeight: 1.7, fontSize: 16 }}>
-          {source ? (
+        <main
+          ref={docRef}
+          onMouseUp={editing ? undefined : handleSelection}
+          style={{ lineHeight: 1.7, fontSize: 16 }}
+        >
+          {editing ? (
+            <div>
+              <textarea
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                style={{ width: '100%', minHeight: '60vh', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 14, padding: 8, lineHeight: 1.6 }}
+              />
+              <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={commitEdit}
+                  disabled={loading}
+                  style={{ fontSize: 13, background: '#1f883d', color: '#fff', border: 0, borderRadius: 6, padding: '6px 12px', cursor: 'pointer', opacity: loading ? 0.6 : 1 }}
+                >
+                  Commit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  style={{ fontSize: 13, background: 'none', border: '1px solid #d0d7de', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
+                >
+                  キャンセル
+                </button>
+                <span style={{ fontSize: 11, color: '#57606a' }}>
+                  ソースを編集 → head ブランチにコミット(Contents: Write が必要)
+                </span>
+              </div>
+            </div>
+          ) : source ? (
             <Markdown rehypePlugins={[rehypeSourcePos, [rehypeSanitize, sanitizeSchema]]}>
               {source}
             </Markdown>

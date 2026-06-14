@@ -79,7 +79,21 @@ export interface RawIssueComment {
   user: { login: string } | null;
 }
 
+/** PR の head 情報。 */
+export interface PullInfo {
+  headSha: string;
+  headRef: string;
+}
+
 const API_BASE = 'https://api.github.com';
+
+/** UTF-8 安全な base64(contents API のコミット内容用。日本語も安全)。 */
+function utf8ToBase64(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
 
 /** GitHub の Suggestion ブロック(§7.3)。diff 内なら「Apply suggestion」が出る。 */
 export function buildSuggestionBlock(replacement: string): string {
@@ -161,13 +175,50 @@ export class GitHubClient {
     await this.post(`/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`, { body });
   }
 
-  /** PR メタ。head の SHA を変更視覚化/アンカーの基準に使う (§7.9)。 */
-  async getPullHeadSha(ref: PrRef): Promise<string> {
+  /** PR メタ。head の SHA(基準, §7.9)と ref(コミット先ブランチ, §7.4)。 */
+  async getPull(ref: PrRef): Promise<PullInfo> {
     const res = await this.request(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`);
-    const json = (await res.json()) as { head?: { sha?: string } };
-    const sha = json.head?.sha;
-    if (!sha) throw new GitHubApiError(res.status, 'PR head sha not found');
-    return sha;
+    const json = (await res.json()) as { head?: { sha?: string; ref?: string } };
+    if (!json.head?.sha || !json.head?.ref) {
+      throw new GitHubApiError(res.status, 'PR head not found');
+    }
+    return { headSha: json.head.sha, headRef: json.head.ref };
+  }
+
+  async getPullHeadSha(ref: PrRef): Promise<string> {
+    return (await this.getPull(ref)).headSha;
+  }
+
+  /** 指定ブランチ時点のファイルの blob sha(コミット時の競合検出に必要, §7.4)。 */
+  async getFileSha(ref: PrRef, path: string, branch: string): Promise<string> {
+    const encoded = path.split('/').map(encodeURIComponent).join('/');
+    const res = await this.request(
+      `/repos/${ref.owner}/${ref.repo}/contents/${encoded}?ref=${encodeURIComponent(branch)}`,
+    );
+    const json = (await res.json()) as { sha?: string };
+    if (!json.sha) throw new GitHubApiError(res.status, 'file blob sha not found');
+    return json.sha;
+  }
+
+  /** 単一ファイルを head ブランチにコミット (§7.4, R5)。Contents: Write が必要。 */
+  async putFileContent(
+    ref: PrRef,
+    input: { path: string; content: string; message: string; sha: string; branch: string },
+  ): Promise<void> {
+    const encoded = input.path.split('/').map(encodeURIComponent).join('/');
+    const res = await fetch(`${API_BASE}/repos/${ref.owner}/${ref.repo}/contents/${encoded}`, {
+      method: 'PUT',
+      headers: this.headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        message: input.message,
+        content: utf8ToBase64(input.content),
+        sha: input.sha,
+        branch: input.branch,
+      }),
+    });
+    if (!res.ok) {
+      throw new GitHubApiError(res.status, `GitHub API ${res.status} for PUT contents: ${await res.text()}`);
+    }
   }
 
   /**
