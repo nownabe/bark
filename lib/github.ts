@@ -51,6 +51,18 @@ export interface ChangedFile {
   patch?: string;
 }
 
+/** レビューコメント投稿の入力(RIGHT 側, §7.2)。 */
+export interface ReviewCommentInput {
+  path: string;
+  /** 複数行の場合は終端行。 */
+  line: number;
+  side: 'RIGHT';
+  /** 複数行選択のときのみ。 */
+  start_line?: number;
+  start_side?: 'RIGHT';
+  body: string;
+}
+
 /** GitHub レビューコメント API の生レスポンス(必要フィールドのみ)。 */
 export interface RawReviewComment {
   id: number;
@@ -99,18 +111,49 @@ export class GitHubApiError extends Error {
 export class GitHubClient {
   constructor(private readonly token: string) {}
 
+  private headers(extra?: Record<string, string>): Record<string, string> {
+    return {
+      Authorization: `Bearer ${this.token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...extra,
+    };
+  }
+
   private async request(path: string, accept = 'application/vnd.github+json'): Promise<Response> {
-    const res = await fetch(`${API_BASE}${path}`, {
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        Accept: accept,
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-    });
+    const res = await fetch(`${API_BASE}${path}`, { headers: this.headers({ Accept: accept }) });
     if (!res.ok) {
       throw new GitHubApiError(res.status, `GitHub API ${res.status} for ${path}`);
     }
     return res;
+  }
+
+  private async post(path: string, payload: unknown): Promise<void> {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: this.headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      throw new GitHubApiError(res.status, `GitHub API ${res.status} for ${path}: ${await res.text()}`);
+    }
+  }
+
+  /** diff 内コメントを 1 レビューとして一括 Submit (§7.2, R4)。event 既定は COMMENT。 */
+  async submitReview(
+    ref: PrRef,
+    input: { commitId?: string; comments: ReviewCommentInput[] },
+  ): Promise<void> {
+    await this.post(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews`, {
+      commit_id: input.commitId,
+      event: 'COMMENT',
+      comments: input.comments,
+    });
+  }
+
+  /** diff 外コメント = 通常 PR(issue)コメントを投稿 (§D4)。 */
+  async createIssueComment(ref: PrRef, body: string): Promise<void> {
+    await this.post(`/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`, { body });
   }
 
   /** PR メタ。head の SHA を変更視覚化/アンカーの基準に使う (§7.9)。 */

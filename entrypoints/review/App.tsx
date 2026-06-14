@@ -21,8 +21,10 @@ import {
   GitHubClient,
   type ChangedFile,
   type PrRef,
+  type ReviewCommentInput,
 } from '../../lib/github';
 import { isRangeInDiff, parseRightRanges } from '../../lib/diff';
+import { listDrafts, saveDrafts, type PendingDraft } from '../../lib/drafts';
 import { clearToken, getToken, setToken as persistToken } from '../../lib/storage';
 import { embedMetadata, extractMetadata, type CommentMetadata } from '../../lib/metadata';
 import { sampleDoc } from './sample';
@@ -61,6 +63,7 @@ export function App() {
   const [cid, setCid] = useState('');
   const [commentBody, setCommentBody] = useState('');
   const [comments, setComments] = useState<ExistingComment[]>([]);
+  const [drafts, setDrafts] = useState<PendingDraft[]>([]);
   const docRef = useRef<HTMLDivElement>(null);
 
   const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
@@ -147,6 +150,12 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, ref?.owner, ref?.repo, ref?.number]);
 
+  // ローカル下書きの読み込み(R4)。
+  useEffect(() => {
+    if (ref) listDrafts(ref).then(setDrafts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref?.owner, ref?.repo, ref?.number]);
+
   const jumpTo = (c: ExistingComment) => {
     if (!docRef.current || !c.meta) return;
     if (c.meta.path !== (selectedPath ?? 'sample')) {
@@ -203,6 +212,93 @@ export function App() {
               : null,
         } as const)
     : null;
+
+  const addDraft = async () => {
+    if (!anchor || !ref) return;
+    const inDiff = isRangeInDiff(diffRanges, anchor.startLine, anchor.endLine);
+    const path = selectedPath ?? 'sample';
+    const id = cid || crypto.randomUUID();
+    const draft: PendingDraft = {
+      cid: id,
+      path,
+      inDiff,
+      range: { sl: anchor.startLine, sc: anchor.startCol, el: anchor.endLine, ec: anchor.endCol },
+      quote: anchor.quotedText,
+      sha: headSha ?? '',
+      thread: id,
+      body: commentBody.trim() || '(no comment)',
+      permalink:
+        !inDiff && headSha
+          ? buildBlobPermalink(ref, path, headSha, anchor.startLine, anchor.endLine)
+          : undefined,
+    };
+    const next = [...drafts, draft];
+    setDrafts(next);
+    await saveDrafts(ref, next);
+    setCommentBody('');
+    setAnchor(null);
+  };
+
+  const removeDraft = async (cidToRemove: string) => {
+    const next = drafts.filter((d) => d.cid !== cidToRemove);
+    setDrafts(next);
+    if (ref) await saveDrafts(ref, next);
+  };
+
+  const submitReview = async () => {
+    if (!client || !ref || drafts.length === 0) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const reviewComments: ReviewCommentInput[] = [];
+      const issueBodies: string[] = [];
+      for (const d of drafts) {
+        const meta: CommentMetadata = {
+          cid: d.cid,
+          path: d.path,
+          range: d.range,
+          quote: d.quote,
+          sha: d.sha,
+          thread: d.thread,
+        };
+        if (d.inDiff) {
+          reviewComments.push({
+            path: d.path,
+            side: 'RIGHT',
+            line: d.range.el,
+            ...(d.range.el !== d.range.sl
+              ? { start_line: d.range.sl, start_side: 'RIGHT' as const }
+              : {}),
+            body: embedMetadata(d.body, meta),
+          });
+        } else {
+          const quoted = d.quote
+            .split('\n')
+            .map((l) => `> ${l}`)
+            .join('\n');
+          const visible = `${d.body}\n\n${quoted}\n${d.permalink ?? ''}`.trimEnd();
+          issueBodies.push(embedMetadata(visible, meta));
+        }
+      }
+      if (reviewComments.length > 0) {
+        await client.submitReview(ref, { commitId: headSha ?? undefined, comments: reviewComments });
+      }
+      for (const body of issueBodies) {
+        await client.createIssueComment(ref, body);
+      }
+      setDrafts([]);
+      await saveDrafts(ref, []);
+      const [reviews, issues] = await Promise.all([
+        client.listReviewComments(ref),
+        client.listIssueComments(ref),
+      ]);
+      setComments(normalizeComments(reviews, issues));
+    } catch (e) {
+      setError(errMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const saveToken = async () => {
     const t = tokenInput.trim();
@@ -315,6 +411,45 @@ export function App() {
         <aside style={{ position: 'sticky', top: 24, border: '1px solid #d0d7de', borderRadius: 8, padding: 16, fontSize: 13 }}>
           {ref ? (
             <div style={{ marginBottom: 16, borderBottom: '1px solid #d0d7de', paddingBottom: 12 }}>
+              <h2 style={{ fontSize: 14, margin: '0 0 8px' }}>Pending ({drafts.length})</h2>
+              {drafts.length === 0 ? (
+                <p style={{ color: '#57606a', margin: 0 }}>下書きはありません。選択してコメントを追加してください。</p>
+              ) : (
+                <>
+                  <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
+                    {drafts.map((d) => (
+                      <li key={d.cid} style={{ fontSize: 12, border: '1px solid #eaeef2', borderRadius: 6, padding: 8 }}>
+                        <div style={{ color: '#57606a', marginBottom: 4 }}>
+                          {d.path} L{d.range.sl}
+                          {d.range.el !== d.range.sl ? `–L${d.range.el}` : ''} ·{' '}
+                          {d.inDiff ? 'review' : 'issue'}
+                        </div>
+                        <div style={{ whiteSpace: 'pre-wrap' }}>{d.body}</div>
+                        <button
+                          type="button"
+                          onClick={() => removeDraft(d.cid)}
+                          style={{ marginTop: 6, fontSize: 11, border: '1px solid #d0d7de', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', background: 'none' }}
+                        >
+                          削除
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={submitReview}
+                    disabled={loading}
+                    style={{ marginTop: 10, fontSize: 13, background: '#1f883d', color: '#fff', border: 0, borderRadius: 6, padding: '6px 12px', cursor: 'pointer', opacity: loading ? 0.6 : 1 }}
+                  >
+                    Submit review ({drafts.length})
+                  </button>
+                </>
+              )}
+            </div>
+          ) : null}
+
+          {ref ? (
+            <div style={{ marginBottom: 16, borderBottom: '1px solid #d0d7de', paddingBottom: 12 }}>
               <h2 style={{ fontSize: 14, margin: '0 0 8px' }}>Comments ({comments.length})</h2>
               {comments.length === 0 ? (
                 <p style={{ color: '#57606a', margin: 0 }}>既存コメントはありません。</p>
@@ -410,6 +545,15 @@ export function App() {
                 placeholder="この選択範囲へのコメント"
                 style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, padding: 6 }}
               />
+              {ref ? (
+                <button
+                  type="button"
+                  onClick={addDraft}
+                  style={{ marginTop: 8, fontSize: 12, background: '#1f883d', color: '#fff', border: 0, borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}
+                >
+                  下書きに追加
+                </button>
+              ) : null}
               <details style={{ marginTop: 8 }}>
                 <summary style={{ cursor: 'pointer', color: '#57606a' }}>
                   投稿予定の GitHub 本文(メタデータ埋め込み)
