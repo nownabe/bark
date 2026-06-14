@@ -12,7 +12,7 @@ import { commentHighlightField, commentHighlightTheme, setCommentHighlights } fr
 import { richMarkdown, richMarkdownTheme } from './richMarkdown';
 import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from './suggestMode';
 import { diffToSuggestions } from '../../lib/suggest';
-import { buildLineIndex, type SourceAnchor } from '../../lib/anchor';
+import { buildLineIndex, lineColToOffset, type SourceAnchor } from '../../lib/anchor';
 import { normalizeComments, type ExistingComment } from '../../lib/comments';
 import { reanchorComment, type AnchorStatus } from '../../lib/reanchor';
 import {
@@ -83,12 +83,12 @@ export function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [anchor, setAnchor] = useState<SourceAnchor | null>(null);
   const [commentBody, setCommentBody] = useState('');
-  const [kind, setKind] = useState<'comment' | 'suggestion'>('comment');
-  const [suggestionText, setSuggestionText] = useState('');
   const [comments, setComments] = useState<ExistingComment[]>([]);
   const [drafts, setDrafts] = useState<PendingDraft[]>([]);
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [showHelp, setShowHelp] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
   const cmRef = useRef<ReactCodeMirrorRef>(null);
 
   const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
@@ -222,17 +222,26 @@ export function App() {
     cmRef.current?.view?.dispatch({ effects: setBaseText.of(baseSource) });
   }, [baseSource]);
 
-  // コメントアンカーを CM 本文にハイライト(R6)
+  // コメント/下書きアンカーを CM 本文にハイライト(R6)。pending は青で区別。
   useEffect(() => {
     const view = cmRef.current?.view;
     if (!view) return;
-    const ranges = comments
-      .filter((c) => c.meta && c.meta.path === (selectedPath ?? 'sample'))
+    const curPath = selectedPath ?? 'sample';
+    const existing = comments
+      .filter((c) => c.meta && c.meta.path === curPath)
       .map((c) => reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? ''))
       .filter((r) => r.status !== 'outdated' && r.endOffset > r.startOffset)
       .map((r) => ({ from: r.startOffset, to: r.endOffset }));
-    view.dispatch({ effects: setCommentHighlights.of(ranges) });
-  }, [comments, source, lineStarts, headSha, selectedPath]);
+    const pending = drafts
+      .filter((d) => d.path === curPath)
+      .map((d) => ({
+        from: lineColToOffset(d.range.sl, d.range.sc, lineStarts),
+        to: lineColToOffset(d.range.el, d.range.ec, lineStarts),
+        pending: true,
+      }))
+      .filter((r) => r.to > r.from);
+    view.dispatch({ effects: setCommentHighlights.of([...existing, ...pending]) });
+  }, [comments, drafts, source, lineStarts, headSha, selectedPath]);
 
   const jumpTo = (c: ExistingComment) => {
     const view = cmRef.current?.view;
@@ -247,7 +256,6 @@ export function App() {
     view.focus();
   };
 
-  const effectiveKind = role === 'reviewer' ? kind : 'comment';
   const meta: CommentMetadata | null = anchor
     ? {
         cid: 'preview',
@@ -256,7 +264,7 @@ export function App() {
         quote: anchor.quotedText,
         sha: headSha ?? '',
         thread: 'preview',
-        kind: effectiveKind,
+        kind: 'comment',
       }
     : null;
   const previewBody = meta ? embedMetadata(commentBody || '(コメント本文)', meta) : '';
@@ -282,8 +290,7 @@ export function App() {
       sha: headSha ?? '',
       thread: id,
       body: commentBody.trim() || '(no comment)',
-      kind: effectiveKind,
-      suggestion: effectiveKind === 'suggestion' ? suggestionText : undefined,
+      kind: 'comment',
       permalink:
         !inDiff && headSha
           ? buildBlobPermalink(ref, path, headSha, anchor.startLine, anchor.endLine)
@@ -293,8 +300,6 @@ export function App() {
     setDrafts(next);
     await saveDrafts(ref, next);
     setCommentBody('');
-    setSuggestionText('');
-    setKind('comment');
     setAnchor(null);
   };
 
@@ -563,10 +568,37 @@ export function App() {
                 トークン削除
               </button>
             ) : null}
+            <button
+              type="button"
+              className="help-btn"
+              title="使い方"
+              aria-label="使い方"
+              onClick={() => setShowHelp((v) => !v)}
+            >
+              ?
+            </button>
           </>
         ) : (
           <span className="topbar__meta">sample document (PR 指定なし)</span>
         )}
+        {showHelp ? (
+          <div className="popover" role="dialog">
+            <h3>使い方</h3>
+            <ul>
+              <li>本文は常に編集可能(Markdown ソースが正準)。</li>
+              <li><strong>Preview / Raw</strong>: 表示を切替(どちらも編集可)。</li>
+              <li><strong>author</strong>: 本文を編集して <strong>Commit</strong>。テキスト選択でコメント。</li>
+              <li><strong>reviewer</strong>: テキスト選択でコメント。本文を編集すると変更が記録され、「編集を提案に変換」で Suggestion 化。</li>
+              <li>右の <strong>Pending</strong> に溜めて <strong>Submit review</strong> で GitHub に一括反映。</li>
+              <li>コメントは付けた位置がハイライトされ、スレッドで返信できます。</li>
+            </ul>
+            <div className="composer__row">
+              <button type="button" className="btn btn--sm" onClick={() => setShowHelp(false)}>
+                閉じる
+              </button>
+            </div>
+          </div>
+        ) : null}
       </header>
 
       {loading ? <p className="notice notice--muted">読み込み中…</p> : null}
@@ -582,7 +614,11 @@ export function App() {
               ref={cmRef}
               value={source}
               extensions={cmExtensions}
-              basicSetup={{ lineNumbers: viewMode === 'raw', foldGutter: viewMode === 'raw' }}
+              basicSetup={{
+                lineNumbers: viewMode === 'raw',
+                foldGutter: viewMode === 'raw',
+                highlightSelectionMatches: false,
+              }}
               onChange={(v) => setSource(v)}
               onUpdate={(vu) => {
                 if (vu.selectionSet) {
@@ -592,26 +628,13 @@ export function App() {
               }}
             />
           </div>
-          <p className="doc__hint">
-            本文は常に編集可能(ソースが正準)。テキストを選択して右でコメント/提案を追加できます。
-          </p>
         </main>
 
         <aside className="sidebar">
           {/* composer (selection) */}
           {anchor ? (
             <section className="panel">
-              <h2 className="panel__title">{role === 'author' ? 'Comment' : 'Comment / Suggestion'}</h2>
-              {role === 'reviewer' ? (
-                <div className="radio-row">
-                  <label>
-                    <input type="radio" name="kind" checked={kind === 'comment'} onChange={() => setKind('comment')} /> コメント
-                  </label>
-                  <label>
-                    <input type="radio" name="kind" checked={kind === 'suggestion'} onChange={() => setKind('suggestion')} /> Suggestion
-                  </label>
-                </div>
-              ) : null}
+              <h2 className="panel__title">Comment</h2>
               {routing ? (
                 <p className="composer__routing">
                   {routing.kind === 'review' ? (
@@ -632,16 +655,6 @@ export function App() {
                 rows={3}
                 placeholder="この選択範囲へのコメント"
               />
-              {effectiveKind === 'suggestion' ? (
-                <textarea
-                  className="field field--mono"
-                  value={suggestionText}
-                  onChange={(e) => setSuggestionText(e.target.value)}
-                  rows={3}
-                  placeholder="置換後のソース行(対象行を丸ごと置き換えます)"
-                  style={{ marginTop: 6 }}
-                />
-              ) : null}
               <div className="composer__row">
                 <button type="button" className="btn btn--primary btn--sm" onClick={addDraft}>
                   下書きに追加
@@ -760,10 +773,41 @@ export function App() {
             </section>
           ) : null}
 
-          {/* debug (collapsed by default) */}
+        </aside>
+      </div>
+
+      {/* floating debug (left-bottom) */}
+      <button
+        type="button"
+        className="debug-fab"
+        title="デバッグ情報"
+        aria-label="デバッグ情報"
+        onClick={() => setShowDebug((v) => !v)}
+      >
+        🐛
+      </button>
+      {showDebug ? (
+        <div className="debug-popover debug" role="dialog">
+          <div className="composer__row" style={{ justifyContent: 'space-between', marginTop: 0 }}>
+            <strong>Debug</strong>
+            <button type="button" className="btn btn--sm" onClick={() => setShowDebug(false)}>
+              閉じる
+            </button>
+          </div>
+          <dl>
+            <dt>role / view</dt>
+            <dd>
+              {role} / {viewMode}
+            </dd>
+            <dt>head</dt>
+            <dd>{headSha ? headSha.slice(0, 7) : '-'}</dd>
+            <dt>edited</dt>
+            <dd>{source !== baseSource ? 'yes' : 'no'}</dd>
+            <dt>drafts</dt>
+            <dd>{drafts.length}</dd>
+          </dl>
           {anchor ? (
-            <details className="panel debug">
-              <summary>Debug</summary>
+            <>
               <dl>
                 <dt>offset</dt>
                 <dd>
@@ -784,10 +828,12 @@ export function App() {
                   {restored.meta.range.el}:{restored.meta.range.ec}
                 </p>
               ) : null}
-            </details>
-          ) : null}
-        </aside>
-      </div>
+            </>
+          ) : (
+            <p className="empty">本文を選択するとアンカー情報を表示します。</p>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

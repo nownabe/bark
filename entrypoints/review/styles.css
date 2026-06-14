@@ -177,17 +177,9 @@ select.input:focus {
   color: var(--muted);
 }
 
+/* pageless: 枠なし。本文はそのまま広がる */
 .doc {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-}
-.doc__hint {
-  color: var(--muted);
-  font-size: 11px;
-  margin: 6px 2px 0;
+  background: transparent;
 }
 
 /* ---- sidebar ---- */
@@ -357,14 +349,92 @@ select.input:focus {
   font-size: 12px;
 }
 
-/* ---- CodeMirror tuning ---- */
+/* ---- CodeMirror tuning (pageless) ---- */
 .cm-editor {
   font-size: 15px;
+  background: transparent;
 }
 .cm-editor .cm-content {
-  padding: 16px 8px;
-  max-width: 820px;
+  padding: 8px 0 40vh;
+}
+.cm-editor .cm-gutters {
+  background: transparent;
+  border: none;
 }
 .cm-editor.cm-focused {
   outline: none;
+}
+
+/* ---- help popover ---- */
+.help-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+.help-btn:hover {
+  background: var(--bg-subtle);
+}
+.popover {
+  position: absolute;
+  top: 48px;
+  right: 20px;
+  z-index: 30;
+  width: 340px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.16);
+  padding: 16px;
+  font-size: 13px;
+}
+.popover h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.popover ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.popover li {
+  margin: 4px 0;
+}
+
+/* ---- floating debug ---- */
+.debug-fab {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  font-size: 16px;
+}
+.debug-fab:hover {
+  background: var(--bg-subtle);
+}
+.debug-popover {
+  position: fixed;
+  left: 16px;
+  bottom: 60px;
+  z-index: 40;
+  width: 380px;
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.16);
+  padding: 14px;
 }

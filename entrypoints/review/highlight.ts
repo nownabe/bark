@@ -3,9 +3,17 @@
 import { StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 
-export const setCommentHighlights = StateEffect.define<Array<{ from: number; to: number }>>();
+export interface HighlightRange {
+  from: number;
+  to: number;
+  /** 未送信の下書き(pending)か。色を分ける。 */
+  pending?: boolean;
+}
+
+export const setCommentHighlights = StateEffect.define<HighlightRange[]>();
 
 const commentMark = Decoration.mark({ class: 'dr-comment-hl' });
+const pendingMark = Decoration.mark({ class: 'dr-pending-hl' });
 
 export const commentHighlightField = StateField.define<DecorationSet>({
   create() {
@@ -18,7 +26,7 @@ export const commentHighlightField = StateField.define<DecorationSet>({
         next = Decoration.set(
           effect.value
             .filter((r) => r.from < r.to)
-            .map((r) => commentMark.range(r.from, r.to)),
+            .map((r) => (r.pending ? pendingMark : commentMark).range(r.from, r.to)),
           true, // sort
         );
       }
@@ -30,4 +38,5 @@ export const commentHighlightField = StateField.define<DecorationSet>({
 
 export const commentHighlightTheme = EditorView.baseTheme({
   '.dr-comment-hl': { backgroundColor: 'rgba(255, 212, 0, 0.35)' },
+  '.dr-pending-hl': { backgroundColor: 'rgba(9, 105, 218, 0.22)' },
 });
