@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
+import { GFM } from '@lezer/markdown';
 import { EditorView } from '@codemirror/view';
 import { cmSelectionToAnchor } from './cmAnchor';
 import { commentHighlightField, commentHighlightTheme, setCommentHighlights } from './highlight';
@@ -79,7 +80,12 @@ export function App() {
     [files, selectedPath],
   );
   const cmExtensions = useMemo(() => {
-    const base = [markdown(), EditorView.lineWrapping, commentHighlightField, commentHighlightTheme];
+    const base = [
+      markdown({ extensions: [GFM] }),
+      EditorView.lineWrapping,
+      commentHighlightField,
+      commentHighlightTheme,
+    ];
     return viewMode === 'preview' ? [...base, richMarkdown, richMarkdownTheme] : base;
   }, [viewMode]);
 
