@@ -10,6 +10,8 @@ import { EditorView } from '@codemirror/view';
 import { cmSelectionToAnchor } from './cmAnchor';
 import { commentHighlightField, commentHighlightTheme, setCommentHighlights } from './highlight';
 import { richMarkdown, richMarkdownTheme } from './richMarkdown';
+import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from './suggestMode';
+import { diffToSuggestions } from '../../lib/suggest';
 import { buildLineIndex, type SourceAnchor } from '../../lib/anchor';
 import { normalizeComments, type ExistingComment } from '../../lib/comments';
 import { reanchorComment, type AnchorStatus } from '../../lib/reanchor';
@@ -73,6 +75,7 @@ export function App() {
   const [headRef, setHeadRef] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [source, setSource] = useState<string>(ref ? '' : sampleDoc);
+  const [baseSource, setBaseSource] = useState<string>(ref ? '' : sampleDoc);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -95,14 +98,17 @@ export function App() {
     [files, selectedPath],
   );
   const cmExtensions = useMemo(() => {
-    const base = [
+    const ext = [
       markdown({ extensions: [GFM], codeLanguages: languages }),
       EditorView.lineWrapping,
       commentHighlightField,
       commentHighlightTheme,
+      baseTextField,
     ];
-    return viewMode === 'preview' ? [...base, richMarkdown, richMarkdownTheme] : base;
-  }, [viewMode]);
+    if (viewMode === 'preview') ext.push(richMarkdown, richMarkdownTheme);
+    if (role === 'reviewer') ext.push(suggestDecorations, suggestTheme);
+    return ext;
+  }, [viewMode, role]);
 
   // コメントを位置順に整列し thread でグループ化
   const threads = useMemo<Thread[]>(() => {
@@ -170,7 +176,10 @@ export function App() {
     (async () => {
       try {
         const text = await client.getFileContent(ref, selectedPath, headSha);
-        if (!cancelled) setSource(text);
+        if (!cancelled) {
+          setSource(text);
+          setBaseSource(text);
+        }
       } catch (e) {
         if (!cancelled) setError(errMessage(e));
       } finally {
@@ -207,6 +216,11 @@ export function App() {
     if (ref) listDrafts(ref).then(setDrafts);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref?.owner, ref?.repo, ref?.number]);
+
+  // tracked-changes 用に base テキストを CM へ反映(reviewer サジェスト)
+  useEffect(() => {
+    cmRef.current?.view?.dispatch({ effects: setBaseText.of(baseSource) });
+  }, [baseSource]);
 
   // コメントアンカーを CM 本文にハイライト(R6)
   useEffect(() => {
@@ -392,7 +406,9 @@ export function App() {
       });
       const { headSha: sha } = await client.getPull(ref);
       setHeadSha(sha);
-      setSource(await client.getFileContent(ref, selectedPath, sha));
+      const newText = await client.getFileContent(ref, selectedPath, sha);
+      setSource(newText);
+      setBaseSource(newText);
       const [reviews, issues] = await Promise.all([
         client.listReviewComments(ref),
         client.listIssueComments(ref),
@@ -420,7 +436,37 @@ export function App() {
     setHeadSha(null);
     setSelectedPath(null);
     setSource(ref ? '' : sampleDoc);
+    setBaseSource(ref ? '' : sampleDoc);
     setAnchor(null);
+  };
+
+  // 編集 → 提案変換(reviewer)。base との行差分を Suggestion ドラフト化。
+  const convertEditsToSuggestions = async () => {
+    if (!ref || source === baseSource) return;
+    const hunks = diffToSuggestions(baseSource, source);
+    if (hunks.length === 0) return;
+    const path = selectedPath ?? 'sample';
+    const newDrafts: PendingDraft[] = hunks.map((h) => {
+      const inDiff = isRangeInDiff(diffRanges, h.sl, h.el);
+      const id = crypto.randomUUID();
+      return {
+        cid: id,
+        path,
+        inDiff,
+        range: { sl: h.sl, sc: 1, el: h.el, ec: 1 },
+        quote: h.quote,
+        sha: headSha ?? '',
+        thread: id,
+        body: '(編集の提案)',
+        kind: 'suggestion',
+        suggestion: h.replacement,
+        permalink:
+          !inDiff && headSha ? buildBlobPermalink(ref, path, headSha, h.sl, h.el) : undefined,
+      };
+    });
+    const next = [...drafts, ...newDrafts];
+    setDrafts(next);
+    await saveDrafts(ref, next);
   };
 
   if (!tokenLoaded) return <p className="notice notice--muted">Loading…</p>;
@@ -505,6 +551,11 @@ export function App() {
             {role === 'author' && selectedPath ? (
               <button type="button" className="btn btn--primary" onClick={commitEdit} disabled={loading}>
                 Commit
+              </button>
+            ) : null}
+            {role === 'reviewer' && source !== baseSource ? (
+              <button type="button" className="btn btn--primary" onClick={convertEditsToSuggestions}>
+                編集を提案に変換
               </button>
             ) : null}
             {token ? (
