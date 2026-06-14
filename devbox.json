@@ -8,14 +8,15 @@
     "less@latest",
     "bubblewrap@latest",
     "socat@latest",
-    "gnupg@latest"
+    "gnupg@latest",
+    "direnv@latest"
   ],
   "env": {
     "BUN_INSTALL_CACHE_DIR": "$PWD/.cache/bun"
   },
   "shell": {
     "init_hook": [
-      "echo 'Welcome to devbox!' > /dev/null"
+      "eval \"$(direnv hook bash)\""
     ],
     "scripts": {
       "test": [
