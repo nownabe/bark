@@ -14,7 +14,9 @@
       "gh"
     ],
     "network": {
-      "allowedDomains": []
+      "allowedDomains": [
+        "registry.npmjs.org"
+      ]
     },
     "filesystem": {
       "denyRead": [
