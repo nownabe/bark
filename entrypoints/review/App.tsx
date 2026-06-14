@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
+import { languages } from '@codemirror/language-data';
 import { GFM } from '@lezer/markdown';
 import { EditorView } from '@codemirror/view';
 import { cmSelectionToAnchor } from './cmAnchor';
@@ -81,7 +82,7 @@ export function App() {
   );
   const cmExtensions = useMemo(() => {
     const base = [
-      markdown({ extensions: [GFM] }),
+      markdown({ extensions: [GFM], codeLanguages: languages }),
       EditorView.lineWrapping,
       commentHighlightField,
       commentHighlightTheme,
