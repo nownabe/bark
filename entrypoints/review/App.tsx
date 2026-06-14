@@ -9,12 +9,12 @@ import rehypeSanitize from 'rehype-sanitize';
 import { rehypeSourcePos, sanitizeSchema } from '../../lib/markdown';
 import {
   buildLineIndex,
-  lineColToOffset,
   rangeForOffsets,
   resolveSelection,
   type SourceAnchor,
 } from '../../lib/anchor';
 import { normalizeComments, type ExistingComment } from '../../lib/comments';
+import { reanchorComment } from '../../lib/reanchor';
 import {
   buildBlobPermalink,
   buildSuggestionBlock,
@@ -165,9 +165,10 @@ export function App() {
       setSelectedPath(c.meta.path); // 別ファイル: 切替のみ(切替後の自動ハイライトは後続)
       return;
     }
-    const start = lineColToOffset(c.meta.range.sl, c.meta.range.sc, lineStarts);
-    const end = lineColToOffset(c.meta.range.el, c.meta.range.ec, lineStarts);
-    const range = rangeForOffsets(docRef.current, start, end);
+    // 再アンカリング(R7): createdAtSha と head が異なれば quote で再解決。
+    const r = reanchorComment(source, lineStarts, c.meta, headSha ?? '');
+    if (r.status === 'outdated') return;
+    const range = rangeForOffsets(docRef.current, r.startOffset, r.endOffset);
     if (!range) return;
     const sel = window.getSelection();
     sel?.removeAllRanges();
@@ -473,7 +474,17 @@ export function App() {
                       <div style={{ color: '#57606a', marginBottom: 4 }}>
                         @{c.author} · {c.source}
                         {c.meta ? (
-                          <span style={{ color: '#1a7f37' }}> · anchored</span>
+                          (() => {
+                            const sameFile = c.meta.path === (selectedPath ?? 'sample');
+                            const status = sameFile
+                              ? reanchorComment(source, lineStarts, c.meta, headSha ?? '').status
+                              : null;
+                            if (status === 'reanchored')
+                              return <span style={{ color: '#9a6700' }}> · 再アンカー</span>;
+                            if (status === 'outdated')
+                              return <span style={{ color: '#cf222e' }}> · 位置不明</span>;
+                            return <span style={{ color: '#1a7f37' }}> · anchored</span>;
+                          })()
                         ) : (
                           <span style={{ color: '#9a6700' }}>
                             {' '}
