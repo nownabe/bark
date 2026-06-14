@@ -15,6 +15,7 @@ import {
   type PrRef,
 } from '../../lib/github';
 import { clearToken, getToken, setToken as persistToken } from '../../lib/storage';
+import { embedMetadata, extractMetadata, type CommentMetadata } from '../../lib/metadata';
 import { sampleDoc } from './sample';
 
 function errMessage(e: unknown): string {
@@ -48,6 +49,8 @@ export function App() {
   const [loading, setLoading] = useState(false);
 
   const [anchor, setAnchor] = useState<SourceAnchor | null>(null);
+  const [cid, setCid] = useState('');
+  const [commentBody, setCommentBody] = useState('');
   const docRef = useRef<HTMLDivElement>(null);
 
   const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
@@ -112,8 +115,26 @@ export function App() {
   const handleSelection = () => {
     if (!docRef.current) return;
     const resolved = resolveSelection(docRef.current, source, lineStarts);
-    if (resolved) setAnchor(resolved);
+    if (resolved) {
+      setAnchor(resolved);
+      setCid(crypto.randomUUID());
+    }
   };
+
+  // コンポーザ: 選択範囲 → メタデータ → 投稿予定の GitHub 本文 + ライブ往復(#2)。
+  // 実投稿は #3(diff 内外ルーティング)+ 書き込みスコープのスライスで実装する。
+  const meta: CommentMetadata | null = anchor
+    ? {
+        cid: cid || 'preview',
+        path: selectedPath ?? 'sample',
+        range: { sl: anchor.startLine, sc: anchor.startCol, el: anchor.endLine, ec: anchor.endCol },
+        quote: anchor.quotedText,
+        sha: headSha ?? '',
+        thread: cid || 'preview',
+      }
+    : null;
+  const previewBody = meta ? embedMetadata(commentBody || '(コメント本文)', meta) : '';
+  const restored = previewBody ? extractMetadata(previewBody) : null;
 
   const saveToken = async () => {
     const t = tokenInput.trim();
@@ -249,6 +270,36 @@ export function App() {
           ) : (
             <p style={{ color: '#57606a', margin: 0 }}>本文中のテキストをドラッグ選択してください。</p>
           )}
+
+          {anchor ? (
+            <div style={{ marginTop: 16, borderTop: '1px solid #d0d7de', paddingTop: 12 }}>
+              <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>Comment (composer)</h3>
+              <textarea
+                value={commentBody}
+                onChange={(e) => setCommentBody(e.target.value)}
+                rows={3}
+                placeholder="この選択範囲へのコメント"
+                style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, padding: 6 }}
+              />
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ cursor: 'pointer', color: '#57606a' }}>
+                  投稿予定の GitHub 本文(メタデータ埋め込み)
+                </summary>
+                <pre style={{ whiteSpace: 'pre-wrap', background: '#f6f8fa', padding: 8, borderRadius: 6, fontSize: 11, marginTop: 6 }}>
+                  {previewBody}
+                </pre>
+              </details>
+              {restored?.meta ? (
+                <p style={{ color: '#1a7f37', fontSize: 12, margin: '8px 0 0' }}>
+                  ✓ ライブ往復 OK: アンカー復元 L{restored.meta.range.sl}:{restored.meta.range.sc}–L
+                  {restored.meta.range.el}:{restored.meta.range.ec}
+                </p>
+              ) : null}
+              <p style={{ color: '#57606a', fontSize: 11, margin: '8px 0 0' }}>
+                ※ 実際の GitHub 投稿は次スライス(#3 + 書き込みスコープ)で実装。
+              </p>
+            </div>
+          ) : null}
         </aside>
       </div>
     </>,
