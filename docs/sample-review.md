@@ -17,7 +17,7 @@ fugafuga
 文字単位ではなくトークン境界にクランプされる挙動になります。
 
 
-hogehoge
+hogehogeaaa
 
 ## リスト
 
