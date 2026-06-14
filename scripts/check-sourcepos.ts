@@ -5,9 +5,10 @@
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
+import rehypeSanitize from 'rehype-sanitize';
 import { visit } from 'unist-util-visit';
 import type { Element, Root, Text } from 'hast';
-import { rehypeSourcePos } from '../lib/markdown';
+import { rehypeSourcePos, sanitizeSchema } from '../lib/markdown';
 
 const md = `# Title
 
@@ -17,7 +18,12 @@ Hello **world**, \`code\`, and a [link](https://example.com).
 - item two
 `;
 
-const processor = unified().use(remarkParse).use(remarkRehype).use(rehypeSourcePos);
+// rehypeSourcePos の後に sanitize を通しても data-so/span が残ることを確認(§9)。
+const processor = unified()
+  .use(remarkParse)
+  .use(remarkRehype)
+  .use(rehypeSourcePos)
+  .use(rehypeSanitize, sanitizeSchema);
 const tree = processor.runSync(processor.parse(md)) as Root;
 
 let elementsWithSo = 0;

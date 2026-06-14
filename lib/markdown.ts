@@ -10,6 +10,7 @@
 
 import { SKIP, visit } from 'unist-util-visit';
 import type { Element, Root, Text } from 'hast';
+import { defaultSchema } from 'rehype-sanitize';
 
 /** 既にラップ済みの span を識別するマーカー属性。 */
 const WRAP_MARKER = 'dataDrText';
@@ -54,3 +55,22 @@ export function rehypeSourcePos() {
     });
   };
 }
+
+/**
+ * rehype-sanitize 用スキーマ(§9)。実ソースは untrusted なので XSS 除去するが、
+ * rehypeSourcePos が焼き込んだ data-so/data-eo 等と span は保持する必要がある。
+ * **rehypeSourcePos の後**に sanitize を通す前提(position はその時点で不要)。
+ */
+export const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    '*': [
+      ...(defaultSchema.attributes?.['*'] ?? []),
+      'dataSo',
+      'dataEo',
+      'dataDrText',
+      'dataDrLin',
+    ],
+  },
+};
