@@ -1,0 +1,12 @@
+# devbox / toolchain
+.devbox/
+.cache/
+
+# node / wxt
+node_modules/
+.output/
+.wxt/
+
+# misc
+*.log
+.DS_Store
