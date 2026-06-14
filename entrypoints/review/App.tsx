@@ -1,8 +1,6 @@
 // SPA shell — Design Doc §6.
-// ドキュメント面は CodeMirror 6 に一本化(常時編集可、ソースが正準 §13)。
-// Obsidian の Source ⇄ Live Preview を意識した構成で、選択は CM の offset から
-// 直接 SourceAnchor 化する(旧 react-markdown DOM 逆引きは退役)。
-// 役割トグル: author=編集→Commit & コメント / reviewer=Suggestion & コメント。
+// ドキュメント面は CodeMirror 6(常時編集可、ソース正準 §13)。Obsidian 風 Raw/Preview。
+// 固定ヘッダに操作集約、コメントは位置順 + スレッド化、デバッグ情報は折りたたみ。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
@@ -14,7 +12,7 @@ import { commentHighlightField, commentHighlightTheme, setCommentHighlights } fr
 import { richMarkdown, richMarkdownTheme } from './richMarkdown';
 import { buildLineIndex, type SourceAnchor } from '../../lib/anchor';
 import { normalizeComments, type ExistingComment } from '../../lib/comments';
-import { reanchorComment } from '../../lib/reanchor';
+import { reanchorComment, type AnchorStatus } from '../../lib/reanchor';
 import {
   buildBlobPermalink,
   buildSuggestionBlock,
@@ -33,6 +31,14 @@ import { sampleDoc } from './sample';
 type Role = 'author' | 'reviewer';
 type ViewMode = 'raw' | 'preview';
 
+interface Thread {
+  id: string;
+  comments: ExistingComment[];
+  root: ExistingComment;
+  path: string | undefined;
+  pos: number;
+}
+
 function errMessage(e: unknown): string {
   if (e instanceof GitHubApiError) {
     if (e.status === 401 || e.status === 403) {
@@ -43,6 +49,12 @@ function errMessage(e: unknown): string {
   }
   return e instanceof Error ? e.message : String(e);
 }
+
+const STATUS_LABEL: Record<AnchorStatus, string> = {
+  current: 'anchored',
+  reanchored: '再アンカー',
+  outdated: '位置不明',
+};
 
 export function App() {
   const params = new URLSearchParams(window.location.search);
@@ -72,6 +84,8 @@ export function App() {
   const [suggestionText, setSuggestionText] = useState('');
   const [comments, setComments] = useState<ExistingComment[]>([]);
   const [drafts, setDrafts] = useState<PendingDraft[]>([]);
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
   const cmRef = useRef<ReactCodeMirrorRef>(null);
 
   const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
@@ -90,7 +104,31 @@ export function App() {
     return viewMode === 'preview' ? [...base, richMarkdown, richMarkdownTheme] : base;
   }, [viewMode]);
 
-  // 保存済みトークンの読み込み
+  // コメントを位置順に整列し thread でグループ化
+  const threads = useMemo<Thread[]>(() => {
+    const map = new Map<string, ExistingComment[]>();
+    for (const c of comments) {
+      const key = c.meta?.thread || `solo:${c.source}:${c.id}`;
+      const arr = map.get(key);
+      if (arr) arr.push(c);
+      else map.set(key, [c]);
+    }
+    const list: Thread[] = [...map.entries()].map(([id, cs]) => {
+      const root = cs[0];
+      const pos = root.meta
+        ? root.meta.range.sl * 100000 + root.meta.range.sc
+        : (root.line ?? 1e9) * 100000;
+      return { id, comments: cs, root, path: root.meta?.path ?? root.path, pos };
+    });
+    const curPath = selectedPath ?? 'sample';
+    list.sort((a, b) => {
+      const af = a.path === curPath ? 0 : 1;
+      const bf = b.path === curPath ? 0 : 1;
+      return af - bf || a.pos - b.pos;
+    });
+    return list;
+  }, [comments, selectedPath]);
+
   useEffect(() => {
     getToken().then((t) => {
       setToken(t);
@@ -98,7 +136,6 @@ export function App() {
     });
   }, []);
 
-  // PR の head(sha + ref)と変更 .md 一覧
   useEffect(() => {
     if (!client || !ref) return;
     let cancelled = false;
@@ -125,7 +162,6 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, ref?.owner, ref?.repo, ref?.number]);
 
-  // 選択ファイルの内容(正準ソース)
   useEffect(() => {
     if (!client || !ref || !headSha || !selectedPath) return;
     let cancelled = false;
@@ -147,7 +183,6 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, headSha, selectedPath, ref?.owner, ref?.repo, ref?.number]);
 
-  // 既存コメントの取り込み(R6)
   useEffect(() => {
     if (!client || !ref) return;
     let cancelled = false;
@@ -168,13 +203,12 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, ref?.owner, ref?.repo, ref?.number]);
 
-  // ローカル下書きの読み込み(R4)
   useEffect(() => {
     if (ref) listDrafts(ref).then(setDrafts);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref?.owner, ref?.repo, ref?.number]);
 
-  // コメントアンカーを CM 本文にハイライト(R6)。source/コメント変化で再計算。
+  // コメントアンカーを CM 本文にハイライト(R6)
   useEffect(() => {
     const view = cmRef.current?.view;
     if (!view) return;
@@ -190,7 +224,7 @@ export function App() {
     const view = cmRef.current?.view;
     if (!view || !c.meta) return;
     if (c.meta.path !== (selectedPath ?? 'sample')) {
-      setSelectedPath(c.meta.path); // 別ファイル: 切替のみ
+      setSelectedPath(c.meta.path);
       return;
     }
     const r = reanchorComment(source, lineStarts, c.meta, headSha ?? '');
@@ -199,7 +233,6 @@ export function App() {
     view.focus();
   };
 
-  // コンポーザ用メタデータ + ライブ往復(#2)
   const effectiveKind = role === 'reviewer' ? kind : 'comment';
   const meta: CommentMetadata | null = anchor
     ? {
@@ -215,17 +248,10 @@ export function App() {
   const previewBody = meta ? embedMetadata(commentBody || '(コメント本文)', meta) : '';
   const restored = previewBody ? extractMetadata(previewBody) : null;
 
-  // diff 内/外ルーティング(#3)
   const routing = anchor
     ? isRangeInDiff(diffRanges, anchor.startLine, anchor.endLine)
       ? ({ kind: 'review' } as const)
-      : ({
-          kind: 'issue',
-          permalink:
-            ref && headSha && selectedPath
-              ? buildBlobPermalink(ref, selectedPath, headSha, anchor.startLine, anchor.endLine)
-              : null,
-        } as const)
+      : ({ kind: 'issue' } as const)
     : null;
 
   const addDraft = async () => {
@@ -256,6 +282,34 @@ export function App() {
     setSuggestionText('');
     setKind('comment');
     setAnchor(null);
+  };
+
+  // スレッド返信: root の anchor を引き継ぎ、同じ thread id で draft 追加
+  const addReply = async (root: ExistingComment) => {
+    if (!ref || !root.meta || !replyText.trim()) return;
+    const m = root.meta;
+    const ranges = parseRightRanges(files.find((f) => f.path === m.path)?.patch);
+    const inDiff = isRangeInDiff(ranges, m.range.sl, m.range.el);
+    const draft: PendingDraft = {
+      cid: crypto.randomUUID(),
+      path: m.path,
+      inDiff,
+      range: m.range,
+      quote: m.quote,
+      sha: headSha ?? m.sha,
+      thread: m.thread,
+      body: replyText.trim(),
+      kind: 'comment',
+      permalink:
+        !inDiff && headSha
+          ? buildBlobPermalink(ref, m.path, headSha, m.range.sl, m.range.el)
+          : undefined,
+    };
+    const next = [...drafts, draft];
+    setDrafts(next);
+    await saveDrafts(ref, next);
+    setReplyText('');
+    setReplyTo(null);
   };
 
   const removeDraft = async (cidToRemove: string) => {
@@ -323,7 +377,6 @@ export function App() {
     }
   };
 
-  // author 編集 → コミット(R5, §7.4)。常時編集なので現在の source をそのままコミット。
   const commitEdit = async () => {
     if (!client || !ref || !selectedPath || !headRef) return;
     setLoading(true);
@@ -370,95 +423,60 @@ export function App() {
     setAnchor(null);
   };
 
-  const wrap = (children: React.ReactNode) => (
-    <div style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 1100, margin: '0 auto', padding: '24px 16px' }}>
-      {children}
-    </div>
-  );
-
-  if (!tokenLoaded) return wrap(<p>Loading…</p>);
+  if (!tokenLoaded) return <p className="notice notice--muted">Loading…</p>;
 
   if (ref && !token) {
-    return wrap(
-      <div style={{ maxWidth: 560 }}>
-        <h1 style={{ fontSize: 20 }}>DocReview</h1>
+    return (
+      <div className="gate">
+        <h1>DocReview</h1>
         <p>
           {owner}/{repo} #{prNum} を開くには GitHub の fine-grained PAT が必要です。
         </p>
-        <p style={{ color: '#57606a', fontSize: 13 }}>
+        <p className="notice--muted" style={{ fontSize: 13 }}>
           対象リポジトリに <code>Contents: Read and Write</code> /{' '}
           <code>Pull requests: Read and Write</code> を付与したトークンを発行してください(§7.6)。
           トークンは <code>chrome.storage.local</code> にのみ保存され、外部には送信されません(§9)。
         </p>
         <input
+          className="field"
           type="password"
           value={tokenInput}
           onChange={(e) => setTokenInput(e.target.value)}
           placeholder="github_pat_..."
-          style={{ width: '100%', padding: 8, fontSize: 14, boxSizing: 'border-box' }}
+          style={{ marginBottom: 12 }}
         />
-        <button
-          type="button"
-          onClick={saveToken}
-          style={{ marginTop: 12, padding: '8px 14px', background: '#1f883d', color: '#fff', border: 0, borderRadius: 6, cursor: 'pointer' }}
-        >
+        <button type="button" className="btn btn--primary" onClick={saveToken}>
           保存して開く
         </button>
-      </div>,
+      </div>
     );
   }
 
-  const roleButton = (r: Role, label: string) => (
-    <button
-      type="button"
-      onClick={() => setRole(r)}
-      style={{
-        fontSize: 12,
-        padding: '2px 10px',
-        border: '1px solid #d0d7de',
-        background: role === r ? '#0969da' : 'none',
-        color: role === r ? '#fff' : '#1f2328',
-        cursor: 'pointer',
-      }}
-    >
-      {label}
-    </button>
-  );
+  const statusFor = (c: ExistingComment): AnchorStatus | null => {
+    if (!c.meta || c.meta.path !== (selectedPath ?? 'sample')) return null;
+    return reanchorComment(source, lineStarts, c.meta, headSha ?? '').status;
+  };
 
-  const modeButton = (m: ViewMode, label: string) => (
-    <button
-      type="button"
-      onClick={() => setViewMode(m)}
-      style={{
-        fontSize: 12,
-        padding: '2px 10px',
-        border: '1px solid #d0d7de',
-        background: viewMode === m ? '#1f2328' : 'none',
-        color: viewMode === m ? '#fff' : '#1f2328',
-        cursor: 'pointer',
-      }}
-    >
-      {label}
-    </button>
-  );
-
-  return wrap(
-    <>
-      <header style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, fontSize: 13, color: '#57606a' }}>
+  return (
+    <div className="app">
+      <header className="topbar">
+        <span className="topbar__brand">DocReview</span>
         {ref ? (
           <>
-            <strong style={{ color: '#1f2328' }}>
-              {owner}/{repo} #{prNum}
-            </strong>
-            {headSha ? <span>@ {headSha.slice(0, 7)}</span> : null}
+            <span className="topbar__meta">
+              <strong>
+                {owner}/{repo} #{prNum}
+              </strong>
+              {headSha ? <span>@ {headSha.slice(0, 7)}</span> : null}
+            </span>
             {files.length > 0 ? (
               <select
+                className="input"
                 value={selectedPath ?? ''}
                 onChange={(e) => {
                   setSelectedPath(e.target.value);
                   setAnchor(null);
                 }}
-                style={{ fontSize: 13, padding: 4 }}
               >
                 {files.map((f) => (
                   <option key={f.path} value={f.path}>
@@ -467,44 +485,48 @@ export function App() {
                 ))}
               </select>
             ) : null}
-            <span style={{ display: 'inline-flex', borderRadius: 6, overflow: 'hidden' }}>
-              {modeButton('preview', 'Preview')}
-              {modeButton('raw', 'Raw')}
-            </span>
-            <span style={{ display: 'inline-flex', marginLeft: 'auto', borderRadius: 6, overflow: 'hidden' }}>
-              {roleButton('author', 'author')}
-              {roleButton('reviewer', 'reviewer')}
-            </span>
+            <span className="topbar__spacer" />
+            <div className="seg">
+              <button type="button" aria-pressed={viewMode === 'preview'} className="seg--dark" onClick={() => setViewMode('preview')}>
+                Preview
+              </button>
+              <button type="button" aria-pressed={viewMode === 'raw'} className="seg--dark" onClick={() => setViewMode('raw')}>
+                Raw
+              </button>
+            </div>
+            <div className="seg">
+              <button type="button" aria-pressed={role === 'author'} onClick={() => setRole('author')}>
+                author
+              </button>
+              <button type="button" aria-pressed={role === 'reviewer'} onClick={() => setRole('reviewer')}>
+                reviewer
+              </button>
+            </div>
             {role === 'author' && selectedPath ? (
-              <button
-                type="button"
-                onClick={commitEdit}
-                disabled={loading}
-                style={{ fontSize: 12, background: '#1f883d', color: '#fff', border: 0, borderRadius: 6, padding: '2px 10px', cursor: 'pointer', opacity: loading ? 0.6 : 1 }}
-              >
+              <button type="button" className="btn btn--primary" onClick={commitEdit} disabled={loading}>
                 Commit
               </button>
             ) : null}
             {token ? (
-              <button type="button" onClick={handleClearToken} style={{ fontSize: 12, background: 'none', border: '1px solid #d0d7de', borderRadius: 6, padding: '2px 8px', cursor: 'pointer' }}>
+              <button type="button" className="btn" onClick={handleClearToken}>
                 トークン削除
               </button>
             ) : null}
           </>
         ) : (
-          <span>sample document (PR 指定なしで開いています)</span>
+          <span className="topbar__meta">sample document (PR 指定なし)</span>
         )}
       </header>
 
-      {loading ? <p style={{ color: '#57606a' }}>読み込み中…</p> : null}
-      {error ? <p style={{ color: '#cf222e' }}>{error}</p> : null}
+      {loading ? <p className="notice notice--muted">読み込み中…</p> : null}
+      {error ? <p className="notice notice--error">{error}</p> : null}
       {ref && !loading && !error && files.length === 0 ? (
-        <p style={{ color: '#57606a' }}>この PR に変更された .md ファイルがありません。</p>
+        <p className="notice notice--muted">この PR に変更された .md ファイルがありません。</p>
       ) : null}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
-        <main style={{ minWidth: 0 }}>
-          <div style={{ border: '1px solid #d0d7de', borderRadius: 6, overflow: 'hidden' }}>
+      <div className="layout">
+        <main>
+          <div className="doc">
             <CodeMirror
               ref={cmRef}
               value={source}
@@ -519,189 +541,202 @@ export function App() {
               }}
             />
           </div>
-          <p style={{ color: '#57606a', fontSize: 11, marginTop: 6 }}>
+          <p className="doc__hint">
             本文は常に編集可能(ソースが正準)。テキストを選択して右でコメント/提案を追加できます。
           </p>
         </main>
 
-        <aside style={{ position: 'sticky', top: 24, border: '1px solid #d0d7de', borderRadius: 8, padding: 16, fontSize: 13 }}>
+        <aside className="sidebar">
+          {/* composer (selection) */}
+          {anchor ? (
+            <section className="panel">
+              <h2 className="panel__title">{role === 'author' ? 'Comment' : 'Comment / Suggestion'}</h2>
+              {role === 'reviewer' ? (
+                <div className="radio-row">
+                  <label>
+                    <input type="radio" name="kind" checked={kind === 'comment'} onChange={() => setKind('comment')} /> コメント
+                  </label>
+                  <label>
+                    <input type="radio" name="kind" checked={kind === 'suggestion'} onChange={() => setKind('suggestion')} /> Suggestion
+                  </label>
+                </div>
+              ) : null}
+              {routing ? (
+                <p className="composer__routing">
+                  {routing.kind === 'review' ? (
+                    <span className="badge badge--review">review</span>
+                  ) : (
+                    <span className="badge badge--issue">issue + permalink</span>
+                  )}{' '}
+                  <span className="notice--muted">
+                    L{anchor.startLine}
+                    {anchor.endLine !== anchor.startLine ? `–L${anchor.endLine}` : ''}
+                  </span>
+                </p>
+              ) : null}
+              <textarea
+                className="field"
+                value={commentBody}
+                onChange={(e) => setCommentBody(e.target.value)}
+                rows={3}
+                placeholder="この選択範囲へのコメント"
+              />
+              {effectiveKind === 'suggestion' ? (
+                <textarea
+                  className="field field--mono"
+                  value={suggestionText}
+                  onChange={(e) => setSuggestionText(e.target.value)}
+                  rows={3}
+                  placeholder="置換後のソース行(対象行を丸ごと置き換えます)"
+                  style={{ marginTop: 6 }}
+                />
+              ) : null}
+              <div className="composer__row">
+                <button type="button" className="btn btn--primary btn--sm" onClick={addDraft}>
+                  下書きに追加
+                </button>
+                <button type="button" className="btn btn--sm" onClick={() => setAnchor(null)}>
+                  キャンセル
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {/* pending drafts */}
           {ref ? (
-            <div style={{ marginBottom: 16, borderBottom: '1px solid #d0d7de', paddingBottom: 12 }}>
-              <h2 style={{ fontSize: 14, margin: '0 0 8px' }}>Pending ({drafts.length})</h2>
+            <section className="panel">
+              <h2 className="panel__title">Pending ({drafts.length})</h2>
               {drafts.length === 0 ? (
-                <p style={{ color: '#57606a', margin: 0 }}>下書きはありません。選択してコメントを追加してください。</p>
+                <p className="empty">下書きはありません。</p>
               ) : (
                 <>
-                  <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
-                    {drafts.map((d) => (
-                      <li key={d.cid} style={{ fontSize: 12, border: '1px solid #eaeef2', borderRadius: 6, padding: 8 }}>
-                        <div style={{ color: '#57606a', marginBottom: 4 }}>
-                          {d.path} L{d.range.sl}
-                          {d.range.el !== d.range.sl ? `–L${d.range.el}` : ''} ·{' '}
+                  {drafts.map((d) => (
+                    <div key={d.cid} className="thread">
+                      <div className="comment__meta">
+                        <span className={`badge badge--${d.inDiff ? 'review' : 'issue'}`}>
                           {d.inDiff ? 'review' : 'issue'}
-                          {d.kind === 'suggestion' ? ' · suggestion' : ''}
-                        </div>
-                        <div style={{ whiteSpace: 'pre-wrap' }}>{d.body}</div>
-                        <button
-                          type="button"
-                          onClick={() => removeDraft(d.cid)}
-                          style={{ marginTop: 6, fontSize: 11, border: '1px solid #d0d7de', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', background: 'none' }}
-                        >
+                        </span>
+                        {d.kind === 'suggestion' ? <span className="badge badge--suggestion">suggestion</span> : null}
+                        <span>
+                          {d.path} L{d.range.sl}
+                          {d.range.el !== d.range.sl ? `–L${d.range.el}` : ''}
+                        </span>
+                      </div>
+                      <div className="comment__body">{d.body}</div>
+                      <div className="comment__actions">
+                        <button type="button" className="btn btn--sm" onClick={() => removeDraft(d.cid)}>
                           削除
                         </button>
-                      </li>
-                    ))}
-                  </ul>
-                  <button
-                    type="button"
-                    onClick={submitReview}
-                    disabled={loading}
-                    style={{ marginTop: 10, fontSize: 13, background: '#1f883d', color: '#fff', border: 0, borderRadius: 6, padding: '6px 12px', cursor: 'pointer', opacity: loading ? 0.6 : 1 }}
-                  >
+                      </div>
+                    </div>
+                  ))}
+                  <button type="button" className="btn btn--primary" onClick={submitReview} disabled={loading} style={{ marginTop: 4 }}>
                     Submit review ({drafts.length})
                   </button>
                 </>
               )}
-            </div>
+            </section>
           ) : null}
 
+          {/* existing comments — position-sorted threads */}
           {ref ? (
-            <div style={{ marginBottom: 16, borderBottom: '1px solid #d0d7de', paddingBottom: 12 }}>
-              <h2 style={{ fontSize: 14, margin: '0 0 8px' }}>Comments ({comments.length})</h2>
-              {comments.length === 0 ? (
-                <p style={{ color: '#57606a', margin: 0 }}>既存コメントはありません。</p>
+            <section className="panel">
+              <h2 className="panel__title">Comments ({comments.length})</h2>
+              {threads.length === 0 ? (
+                <p className="empty">既存コメントはありません。</p>
               ) : (
-                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
-                  {comments.map((c) => (
-                    <li key={`${c.source}-${c.id}`} style={{ fontSize: 12, border: '1px solid #eaeef2', borderRadius: 6, padding: 8 }}>
-                      <div style={{ color: '#57606a', marginBottom: 4 }}>
-                        @{c.author} · {c.source}
-                        {c.meta ? (
-                          (() => {
-                            const sameFile = c.meta.path === (selectedPath ?? 'sample');
-                            const status = sameFile
-                              ? reanchorComment(source, lineStarts, c.meta, headSha ?? '').status
-                              : null;
-                            if (status === 'reanchored')
-                              return <span style={{ color: '#9a6700' }}> · 再アンカー</span>;
-                            if (status === 'outdated')
-                              return <span style={{ color: '#cf222e' }}> · 位置不明</span>;
-                            return <span style={{ color: '#1a7f37' }}> · anchored</span>;
-                          })()
-                        ) : (
-                          <span style={{ color: '#9a6700' }}>
-                            {' '}
-                            · {c.path ? `${c.path}:L${c.line ?? '?'}` : 'no anchor'}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ whiteSpace: 'pre-wrap' }}>{c.body || '(本文なし)'}</div>
-                      {c.meta ? (
-                        <button
-                          type="button"
-                          onClick={() => jumpTo(c)}
-                          style={{ marginTop: 6, fontSize: 11, border: '1px solid #d0d7de', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', background: 'none' }}
-                        >
-                          {c.meta.path === (selectedPath ?? 'sample') ? '本文へジャンプ' : `${c.meta.path} を開く`}
-                        </button>
+                threads.map((t) => {
+                  const st = statusFor(t.root);
+                  return (
+                    <div key={t.id} className="thread">
+                      {t.root.meta ? (
+                        <div className="thread__quote">{t.root.meta.quote}</div>
                       ) : null}
-                    </li>
-                  ))}
-                </ul>
+                      {t.comments.map((c, i) => (
+                        <div key={`${c.source}-${c.id}`} className="comment">
+                          <div className="comment__meta">
+                            <span className="comment__author">@{c.author}</span>
+                            <span>{c.source}</span>
+                            {i === 0 && st ? <span className={`badge badge--${st}`}>{STATUS_LABEL[st]}</span> : null}
+                            {i === 0 && !c.meta ? (
+                              <span className="badge badge--issue">
+                                {c.path ? `${c.path}:L${c.line ?? '?'}` : 'no anchor'}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="comment__body">{c.body || '(本文なし)'}</div>
+                        </div>
+                      ))}
+                      <div className="comment__actions">
+                        {t.root.meta ? (
+                          <button type="button" className="btn btn--sm" onClick={() => jumpTo(t.root)}>
+                            {t.path === (selectedPath ?? 'sample') ? '本文へ' : `${t.path} を開く`}
+                          </button>
+                        ) : null}
+                        {t.root.meta ? (
+                          <button
+                            type="button"
+                            className="btn btn--sm"
+                            onClick={() => {
+                              setReplyTo(replyTo === t.id ? null : t.id);
+                              setReplyText('');
+                            }}
+                          >
+                            返信
+                          </button>
+                        ) : null}
+                      </div>
+                      {replyTo === t.id ? (
+                        <div style={{ marginTop: 8 }}>
+                          <textarea
+                            className="field"
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value)}
+                            rows={2}
+                            placeholder="返信(同じスレッドに追加)"
+                          />
+                          <div className="composer__row">
+                            <button type="button" className="btn btn--primary btn--sm" onClick={() => addReply(t.root)}>
+                              下書きに追加
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })
               )}
-            </div>
+            </section>
           ) : null}
 
-          <h2 style={{ fontSize: 14, margin: '0 0 12px' }}>Selection</h2>
+          {/* debug (collapsed by default) */}
           {anchor ? (
-            <>
-              <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', margin: 0 }}>
-                <dt style={{ color: '#57606a' }}>range</dt>
-                <dd style={{ margin: 0 }}>
+            <details className="panel debug">
+              <summary>Debug</summary>
+              <dl>
+                <dt>offset</dt>
+                <dd>
+                  {anchor.startOffset}–{anchor.endOffset}
+                </dd>
+                <dt>range</dt>
+                <dd>
                   L{anchor.startLine}:{anchor.startCol}–L{anchor.endLine}:{anchor.endCol}
                 </dd>
-                <dt style={{ color: '#57606a' }}>quoted</dt>
-                <dd style={{ margin: 0 }}>
-                  <pre style={{ whiteSpace: 'pre-wrap', background: '#f6f8fa', padding: 8, borderRadius: 6, margin: 0, fontSize: 12 }}>
-                    {anchor.quotedText}
-                  </pre>
-                </dd>
               </dl>
-
-              <div style={{ marginTop: 16, borderTop: '1px solid #d0d7de', paddingTop: 12 }}>
-                <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>
-                  {role === 'author' ? 'Comment' : 'Comment / Suggestion'}
-                </h3>
-                {role === 'reviewer' ? (
-                  <div style={{ marginBottom: 8, fontSize: 12 }}>
-                    <label style={{ marginRight: 12 }}>
-                      <input type="radio" name="kind" checked={kind === 'comment'} onChange={() => setKind('comment')} />{' '}
-                      コメント
-                    </label>
-                    <label>
-                      <input type="radio" name="kind" checked={kind === 'suggestion'} onChange={() => setKind('suggestion')} />{' '}
-                      Suggestion
-                    </label>
-                  </div>
-                ) : null}
-                {routing ? (
-                  <div style={{ marginBottom: 8, fontSize: 12 }}>
-                    {routing.kind === 'review' ? (
-                      <span style={{ color: '#1a7f37' }}>
-                        → レビューコメント(diff 内 RIGHT L{anchor.startLine}
-                        {anchor.endLine !== anchor.startLine ? `–L${anchor.endLine}` : ''})
-                      </span>
-                    ) : (
-                      <span style={{ color: '#9a6700' }}>
-                        → 通常 PR コメント(diff 外 · 引用+パーマリンク)
-                      </span>
-                    )}
-                  </div>
-                ) : null}
-                <textarea
-                  value={commentBody}
-                  onChange={(e) => setCommentBody(e.target.value)}
-                  rows={3}
-                  placeholder="この選択範囲へのコメント"
-                  style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, padding: 6 }}
-                />
-                {effectiveKind === 'suggestion' ? (
-                  <textarea
-                    value={suggestionText}
-                    onChange={(e) => setSuggestionText(e.target.value)}
-                    rows={3}
-                    placeholder="置換後のソース行(対象行を丸ごと置き換えます)"
-                    style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, padding: 6, marginTop: 6, fontFamily: 'monospace' }}
-                  />
-                ) : null}
-                {ref ? (
-                  <button
-                    type="button"
-                    onClick={addDraft}
-                    style={{ marginTop: 8, fontSize: 12, background: '#1f883d', color: '#fff', border: 0, borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}
-                  >
-                    下書きに追加
-                  </button>
-                ) : null}
-                <details style={{ marginTop: 8 }}>
-                  <summary style={{ cursor: 'pointer', color: '#57606a' }}>投稿予定の GitHub 本文</summary>
-                  <pre style={{ whiteSpace: 'pre-wrap', background: '#f6f8fa', padding: 8, borderRadius: 6, fontSize: 11, marginTop: 6 }}>
-                    {previewBody}
-                  </pre>
-                </details>
-                {restored?.meta ? (
-                  <p style={{ color: '#1a7f37', fontSize: 12, margin: '8px 0 0' }}>
-                    ✓ ライブ往復 OK: L{restored.meta.range.sl}:{restored.meta.range.sc}–L
-                    {restored.meta.range.el}:{restored.meta.range.ec}
-                  </p>
-                ) : null}
-              </div>
-            </>
-          ) : (
-            <p style={{ color: '#57606a', margin: 0 }}>本文中のテキストを選択してください。</p>
-          )}
+              <div style={{ marginTop: 8 }}>quoted:</div>
+              <pre>{anchor.quotedText}</pre>
+              <div style={{ marginTop: 8 }}>投稿予定の GitHub 本文:</div>
+              <pre>{previewBody}</pre>
+              {restored?.meta ? (
+                <p style={{ color: 'var(--green)' }}>
+                  ✓ ライブ往復 OK: L{restored.meta.range.sl}:{restored.meta.range.sc}–L
+                  {restored.meta.range.el}:{restored.meta.range.ec}
+                </p>
+              ) : null}
+            </details>
+          ) : null}
         </aside>
       </div>
-    </>,
+    </div>
   );
 }
