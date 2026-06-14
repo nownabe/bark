@@ -15,9 +15,7 @@
     "BUN_INSTALL_CACHE_DIR": "$PWD/.cache/bun"
   },
   "shell": {
-    "init_hook": [
-      "eval \"$(direnv hook bash)\""
-    ],
+    "init_hook": [],
     "scripts": {
       "test": [
         "echo \"Error: no test specified\" && exit 1"
