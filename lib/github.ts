@@ -47,9 +47,24 @@ export interface ReviewComment {
 export interface ChangedFile {
   path: string;
   status: string; // added | modified | removed | renamed | ...
+  /** unified-diff(diff 内/外判定 §7.1 用)。大きい/binary だと undefined。 */
+  patch?: string;
 }
 
 const API_BASE = 'https://api.github.com';
+
+/** diff 外コメント用の blob パーマリンク(§7.1, D4)。 */
+export function buildBlobPermalink(
+  ref: PrRef,
+  path: string,
+  sha: string,
+  startLine: number,
+  endLine: number,
+): string {
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  const lines = startLine === endLine ? `L${startLine}` : `L${startLine}-L${endLine}`;
+  return `https://github.com/${ref.owner}/${ref.repo}/blob/${sha}/${encoded}#${lines}`;
+}
 
 export class GitHubApiError extends Error {
   constructor(
@@ -99,10 +114,14 @@ export class GitHubClient {
     const res = await this.request(
       `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/files?per_page=100`,
     );
-    const files = (await res.json()) as Array<{ filename: string; status: string }>;
+    const files = (await res.json()) as Array<{
+      filename: string;
+      status: string;
+      patch?: string;
+    }>;
     return files
       .filter((f) => f.filename.toLowerCase().endsWith('.md') && f.status !== 'removed')
-      .map((f) => ({ path: f.filename, status: f.status }));
+      .map((f) => ({ path: f.filename, status: f.status, patch: f.patch }));
   }
 
   /** 指定 SHA 時点のファイル内容(raw テキスト = 正準ソース, §D9)。 */

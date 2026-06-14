@@ -9,11 +9,13 @@ import rehypeSanitize from 'rehype-sanitize';
 import { rehypeSourcePos, sanitizeSchema } from '../../lib/markdown';
 import { buildLineIndex, resolveSelection, type SourceAnchor } from '../../lib/anchor';
 import {
+  buildBlobPermalink,
   GitHubApiError,
   GitHubClient,
   type ChangedFile,
   type PrRef,
 } from '../../lib/github';
+import { isRangeInDiff, parseRightRanges } from '../../lib/diff';
 import { clearToken, getToken, setToken as persistToken } from '../../lib/storage';
 import { embedMetadata, extractMetadata, type CommentMetadata } from '../../lib/metadata';
 import { sampleDoc } from './sample';
@@ -55,6 +57,10 @@ export function App() {
 
   const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
   const lineStarts = useMemo(() => buildLineIndex(source), [source]);
+  const diffRanges = useMemo(
+    () => parseRightRanges(files.find((f) => f.path === selectedPath)?.patch),
+    [files, selectedPath],
+  );
 
   // 保存済みトークンの読み込み
   useEffect(() => {
@@ -135,6 +141,20 @@ export function App() {
     : null;
   const previewBody = meta ? embedMetadata(commentBody || '(コメント本文)', meta) : '';
   const restored = previewBody ? extractMetadata(previewBody) : null;
+
+  // diff 内/外ルーティング(#3): 選択行が全て diff 内ならレビューコメント、
+  // そうでなければ通常 PR コメント(引用 + パーマリンク)。
+  const routing = anchor
+    ? isRangeInDiff(diffRanges, anchor.startLine, anchor.endLine)
+      ? ({ kind: 'review' } as const)
+      : ({
+          kind: 'issue',
+          permalink:
+            ref && headSha && selectedPath
+              ? buildBlobPermalink(ref, selectedPath, headSha, anchor.startLine, anchor.endLine)
+              : null,
+        } as const)
+    : null;
 
   const saveToken = async () => {
     const t = tokenInput.trim();
@@ -274,6 +294,30 @@ export function App() {
           {anchor ? (
             <div style={{ marginTop: 16, borderTop: '1px solid #d0d7de', paddingTop: 12 }}>
               <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>Comment (composer)</h3>
+              {routing ? (
+                <div style={{ marginBottom: 8, fontSize: 12 }}>
+                  {routing.kind === 'review' ? (
+                    <span style={{ color: '#1a7f37' }}>
+                      → レビューコメント(diff 内 RIGHT L{anchor.startLine}
+                      {anchor.endLine !== anchor.startLine ? `–L${anchor.endLine}` : ''})
+                    </span>
+                  ) : (
+                    <span style={{ color: '#9a6700' }}>
+                      → 通常 PR コメント(diff 外 · 引用+パーマリンク)
+                      {routing.permalink ? (
+                        <a
+                          href={routing.permalink}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ display: 'block', wordBreak: 'break-all', marginTop: 4 }}
+                        >
+                          {routing.permalink}
+                        </a>
+                      ) : null}
+                    </span>
+                  )}
+                </div>
+              ) : null}
               <textarea
                 value={commentBody}
                 onChange={(e) => setCommentBody(e.target.value)}
