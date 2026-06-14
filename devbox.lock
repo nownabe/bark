@@ -257,6 +257,106 @@
       "last_modified": "2026-06-12T02:02:01Z",
       "resolved": "github:NixOS/nixpkgs/173d0ad7a974f8543a9ab01d2271b2e290341b33?lastModified=1781229721"
     },
+    "gnupg@latest": {
+      "last_modified": "2026-05-21T08:15:18Z",
+      "resolved": "github:NixOS/nixpkgs/4a29d733e8a7d5b824c3d8c958a946a9867b3eb2#gnupg",
+      "source": "devbox-search",
+      "version": "2.4.9",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/cgh6iwzz5jgx9z5whka4vgj210i6npc6-gnupg-2.4.9",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/378ps6wb53l7snnqx8vdvzg29vz03yqk-gnupg-2.4.9-man",
+              "default": true
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/xhxk663jyiagjvw5q6pfqbcj7v957r05-gnupg-2.4.9-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/adgxsr0mfyc9hmc9h5kzk4wnjjvrfw9n-gnupg-2.4.9-info"
+            }
+          ],
+          "store_path": "/nix/store/cgh6iwzz5jgx9z5whka4vgj210i6npc6-gnupg-2.4.9"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/ka4i8zz5ni3rzqnzcxbfvwr95fk8pn6q-gnupg-2.4.9",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/s4f39zw16ycmxd3ch0mgbbsz0dfrrm0g-gnupg-2.4.9-man",
+              "default": true
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/cpg8xyzhf2zk8qc9n5s8j5rv41xi0phs-gnupg-2.4.9-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/a97p4fpbjx5jflyxhq0l3smajw14ma98-gnupg-2.4.9-info"
+            }
+          ],
+          "store_path": "/nix/store/ka4i8zz5ni3rzqnzcxbfvwr95fk8pn6q-gnupg-2.4.9"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/gkrz15qn898zz74nzgki4ycnhihf9vnp-gnupg-2.4.9",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/b7ivld6yz2yhc86lcgazq9235kwz13im-gnupg-2.4.9-man",
+              "default": true
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/px66gazyvdjs4dz70502yx2i5167nci0-gnupg-2.4.9-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/jyx45sbh2gsbh9ydqcmgckb2rv7rvf9f-gnupg-2.4.9-info"
+            }
+          ],
+          "store_path": "/nix/store/gkrz15qn898zz74nzgki4ycnhihf9vnp-gnupg-2.4.9"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/wx7vk8babxkgy813r70yc67vcwnmagbx-gnupg-2.4.9",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/mprsyk9jpnrw0z75p3wa6j1ybqczb5q2-gnupg-2.4.9-man",
+              "default": true
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/whpx4dzq1g7n16i63bi45lb4vry6p48d-gnupg-2.4.9-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/6jz46fyzkd7qwcrh356l6q2hf893y6h6-gnupg-2.4.9-info"
+            }
+          ],
+          "store_path": "/nix/store/wx7vk8babxkgy813r70yc67vcwnmagbx-gnupg-2.4.9"
+        }
+      }
+    },
     "less@latest": {
       "last_modified": "2026-05-21T08:15:18Z",
       "resolved": "github:NixOS/nixpkgs/4a29d733e8a7d5b824c3d8c958a946a9867b3eb2#less",
