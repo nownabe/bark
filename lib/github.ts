@@ -95,6 +95,16 @@ function utf8ToBase64(s: string): string {
   return btoa(bin);
 }
 
+/** `Link` ヘッダから rel="next" の URL を取り出す(無ければ null)。 */
+export function parseNextLink(link: string | null): string | null {
+  if (!link) return null;
+  for (const part of link.split(',')) {
+    const m = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 /** GitHub の Suggestion ブロック(§7.3)。diff 内なら「Apply suggestion」が出る。 */
 export function buildSuggestionBlock(replacement: string): string {
   return `\`\`\`suggestion\n${replacement}\n\`\`\``;
@@ -139,12 +149,31 @@ export class GitHubClient {
     };
   }
 
+  /** レート制限を区別したエラー生成(§10)。 */
+  private errorFor(res: Response, where: string): GitHubApiError {
+    if (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0') {
+      return new GitHubApiError(403, 'GitHub API レート制限に達しました。しばらく待って再試行してください。');
+    }
+    return new GitHubApiError(res.status, `GitHub API ${res.status} for ${where}`);
+  }
+
   private async request(path: string, accept = 'application/vnd.github+json'): Promise<Response> {
     const res = await fetch(`${API_BASE}${path}`, { headers: this.headers({ Accept: accept }) });
-    if (!res.ok) {
-      throw new GitHubApiError(res.status, `GitHub API ${res.status} for ${path}`);
-    }
+    if (!res.ok) throw this.errorFor(res, path);
     return res;
+  }
+
+  /** Link ヘッダの rel="next" を辿って全ページを連結取得(ページネーション, §10)。 */
+  private async getAllPages<T>(path: string): Promise<T[]> {
+    let url: string | null = `${API_BASE}${path}`;
+    const all: T[] = [];
+    while (url) {
+      const res: Response = await fetch(url, { headers: this.headers() });
+      if (!res.ok) throw this.errorFor(res, url);
+      all.push(...((await res.json()) as T[]));
+      url = parseNextLink(res.headers.get('Link'));
+    }
+    return all;
   }
 
   private async post(path: string, payload: unknown): Promise<void> {
@@ -226,14 +255,9 @@ export class GitHubClient {
    * TODO: per_page=100 を超える PR のページネーション(Link ヘッダ)対応。
    */
   async listMarkdownFiles(ref: PrRef): Promise<ChangedFile[]> {
-    const res = await this.request(
+    const files = await this.getAllPages<{ filename: string; status: string; patch?: string }>(
       `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/files?per_page=100`,
     );
-    const files = (await res.json()) as Array<{
-      filename: string;
-      status: string;
-      patch?: string;
-    }>;
     return files
       .filter((f) => f.filename.toLowerCase().endsWith('.md') && f.status !== 'removed')
       .map((f) => ({ path: f.filename, status: f.status, patch: f.patch }));
@@ -241,18 +265,16 @@ export class GitHubClient {
 
   /** 既存のレビューコメント(diff 行に紐づく, §R6)。 */
   async listReviewComments(ref: PrRef): Promise<RawReviewComment[]> {
-    const res = await this.request(
+    return this.getAllPages<RawReviewComment>(
       `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments?per_page=100`,
     );
-    return (await res.json()) as RawReviewComment[];
   }
 
   /** 既存の通常 PR コメント(issue コメント, diff 外コメントの保存先 §D4)。 */
   async listIssueComments(ref: PrRef): Promise<RawIssueComment[]> {
-    const res = await this.request(
+    return this.getAllPages<RawIssueComment>(
       `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments?per_page=100`,
     );
-    return (await res.json()) as RawIssueComment[];
   }
 
   /** 指定 SHA 時点のファイル内容(raw テキスト = 正準ソース, §D9)。 */
