@@ -19,6 +19,10 @@ export interface PendingDraft {
   thread: string;
   /** 可視本文。 */
   body: string;
+  /** comment | suggestion(§7.3)。 */
+  kind: 'comment' | 'suggestion';
+  /** suggestion の置換後ソース行(kind==='suggestion' のとき)。 */
+  suggestion?: string;
   /** diff 外コメント用の blob パーマリンク。 */
   permalink?: string;
 }

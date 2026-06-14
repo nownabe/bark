@@ -28,6 +28,8 @@ export interface CommentMetadata {
   sha: string;
   /** 会話のまとまり(threadId, §7.1)。 */
   thread: string;
+  /** comment | suggestion(§7.2)。省略時は comment 扱い。 */
+  kind?: 'comment' | 'suggestion';
 }
 
 const MARKER_RE = /\n*<!--\s*docreview:v1\s+([A-Za-z0-9+/=]+)\s*-->\s*$/;

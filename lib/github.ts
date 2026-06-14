@@ -81,6 +81,11 @@ export interface RawIssueComment {
 
 const API_BASE = 'https://api.github.com';
 
+/** GitHub の Suggestion ブロック(§7.3)。diff 内なら「Apply suggestion」が出る。 */
+export function buildSuggestionBlock(replacement: string): string {
+  return `\`\`\`suggestion\n${replacement}\n\`\`\``;
+}
+
 /** diff 外コメント用の blob パーマリンク(§7.1, D4)。 */
 export function buildBlobPermalink(
   ref: PrRef,

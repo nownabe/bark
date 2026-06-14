@@ -17,6 +17,7 @@ import {
 import { normalizeComments, type ExistingComment } from '../../lib/comments';
 import {
   buildBlobPermalink,
+  buildSuggestionBlock,
   GitHubApiError,
   GitHubClient,
   type ChangedFile,
@@ -62,6 +63,8 @@ export function App() {
   const [anchor, setAnchor] = useState<SourceAnchor | null>(null);
   const [cid, setCid] = useState('');
   const [commentBody, setCommentBody] = useState('');
+  const [kind, setKind] = useState<'comment' | 'suggestion'>('comment');
+  const [suggestionText, setSuggestionText] = useState('');
   const [comments, setComments] = useState<ExistingComment[]>([]);
   const [drafts, setDrafts] = useState<PendingDraft[]>([]);
   const docRef = useRef<HTMLDivElement>(null);
@@ -227,6 +230,8 @@ export function App() {
       sha: headSha ?? '',
       thread: id,
       body: commentBody.trim() || '(no comment)',
+      kind,
+      suggestion: kind === 'suggestion' ? suggestionText : undefined,
       permalink:
         !inDiff && headSha
           ? buildBlobPermalink(ref, path, headSha, anchor.startLine, anchor.endLine)
@@ -236,6 +241,8 @@ export function App() {
     setDrafts(next);
     await saveDrafts(ref, next);
     setCommentBody('');
+    setSuggestionText('');
+    setKind('comment');
     setAnchor(null);
   };
 
@@ -260,7 +267,10 @@ export function App() {
           quote: d.quote,
           sha: d.sha,
           thread: d.thread,
+          kind: d.kind,
         };
+        const suggestion =
+          d.kind === 'suggestion' ? `\n\n${buildSuggestionBlock(d.suggestion ?? '')}` : '';
         if (d.inDiff) {
           reviewComments.push({
             path: d.path,
@@ -269,14 +279,16 @@ export function App() {
             ...(d.range.el !== d.range.sl
               ? { start_line: d.range.sl, start_side: 'RIGHT' as const }
               : {}),
-            body: embedMetadata(d.body, meta),
+            body: embedMetadata(`${d.body}${suggestion}`, meta),
           });
         } else {
           const quoted = d.quote
             .split('\n')
             .map((l) => `> ${l}`)
             .join('\n');
-          const visible = `${d.body}\n\n${quoted}\n${d.permalink ?? ''}`.trimEnd();
+          // diff 外の suggestion は「Apply」ボタンにならないため fenced block に降格(§7.3)。
+          const note = d.kind === 'suggestion' ? '\n\n(diff 外のため提案は適用ボタンになりません)' : '';
+          const visible = `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ''}`.trimEnd();
           issueBodies.push(embedMetadata(visible, meta));
         }
       }
@@ -423,6 +435,7 @@ export function App() {
                           {d.path} L{d.range.sl}
                           {d.range.el !== d.range.sl ? `–L${d.range.el}` : ''} ·{' '}
                           {d.inDiff ? 'review' : 'issue'}
+                          {d.kind === 'suggestion' ? ' · suggestion' : ''}
                         </div>
                         <div style={{ whiteSpace: 'pre-wrap' }}>{d.body}</div>
                         <button
@@ -514,6 +527,26 @@ export function App() {
           {anchor ? (
             <div style={{ marginTop: 16, borderTop: '1px solid #d0d7de', paddingTop: 12 }}>
               <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>Comment (composer)</h3>
+              <div style={{ marginBottom: 8, fontSize: 12 }}>
+                <label style={{ marginRight: 12 }}>
+                  <input
+                    type="radio"
+                    name="kind"
+                    checked={kind === 'comment'}
+                    onChange={() => setKind('comment')}
+                  />{' '}
+                  コメント
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="kind"
+                    checked={kind === 'suggestion'}
+                    onChange={() => setKind('suggestion')}
+                  />{' '}
+                  Suggestion
+                </label>
+              </div>
               {routing ? (
                 <div style={{ marginBottom: 8, fontSize: 12 }}>
                   {routing.kind === 'review' ? (
@@ -545,6 +578,15 @@ export function App() {
                 placeholder="この選択範囲へのコメント"
                 style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, padding: 6 }}
               />
+              {kind === 'suggestion' ? (
+                <textarea
+                  value={suggestionText}
+                  onChange={(e) => setSuggestionText(e.target.value)}
+                  rows={3}
+                  placeholder="置換後のソース行(対象行を丸ごと置き換えます)"
+                  style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, padding: 6, marginTop: 6, fontFamily: 'monospace' }}
+                />
+              ) : null}
               {ref ? (
                 <button
                   type="button"
