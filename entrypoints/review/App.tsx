@@ -9,6 +9,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { EditorView } from '@codemirror/view';
 import { cmSelectionToAnchor } from './cmAnchor';
 import { commentHighlightField, commentHighlightTheme, setCommentHighlights } from './highlight';
+import { richMarkdown, richMarkdownTheme } from './richMarkdown';
 import { buildLineIndex, type SourceAnchor } from '../../lib/anchor';
 import { normalizeComments, type ExistingComment } from '../../lib/comments';
 import { reanchorComment } from '../../lib/reanchor';
@@ -28,6 +29,7 @@ import { embedMetadata, extractMetadata, type CommentMetadata } from '../../lib/
 import { sampleDoc } from './sample';
 
 type Role = 'author' | 'reviewer';
+type ViewMode = 'raw' | 'preview';
 
 function errMessage(e: unknown): string {
   if (e instanceof GitHubApiError) {
@@ -61,6 +63,7 @@ export function App() {
   const [loading, setLoading] = useState(false);
 
   const [role, setRole] = useState<Role>('reviewer');
+  const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [anchor, setAnchor] = useState<SourceAnchor | null>(null);
   const [commentBody, setCommentBody] = useState('');
   const [kind, setKind] = useState<'comment' | 'suggestion'>('comment');
@@ -75,10 +78,10 @@ export function App() {
     () => parseRightRanges(files.find((f) => f.path === selectedPath)?.patch),
     [files, selectedPath],
   );
-  const cmExtensions = useMemo(
-    () => [markdown(), EditorView.lineWrapping, commentHighlightField, commentHighlightTheme],
-    [],
-  );
+  const cmExtensions = useMemo(() => {
+    const base = [markdown(), EditorView.lineWrapping, commentHighlightField, commentHighlightTheme];
+    return viewMode === 'preview' ? [...base, richMarkdown, richMarkdownTheme] : base;
+  }, [viewMode]);
 
   // 保存済みトークンの読み込み
   useEffect(() => {
@@ -415,6 +418,23 @@ export function App() {
     </button>
   );
 
+  const modeButton = (m: ViewMode, label: string) => (
+    <button
+      type="button"
+      onClick={() => setViewMode(m)}
+      style={{
+        fontSize: 12,
+        padding: '2px 10px',
+        border: '1px solid #d0d7de',
+        background: viewMode === m ? '#1f2328' : 'none',
+        color: viewMode === m ? '#fff' : '#1f2328',
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  );
+
   return wrap(
     <>
       <header style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, fontSize: 13, color: '#57606a' }}>
@@ -440,6 +460,10 @@ export function App() {
                 ))}
               </select>
             ) : null}
+            <span style={{ display: 'inline-flex', borderRadius: 6, overflow: 'hidden' }}>
+              {modeButton('preview', 'Preview')}
+              {modeButton('raw', 'Raw')}
+            </span>
             <span style={{ display: 'inline-flex', marginLeft: 'auto', borderRadius: 6, overflow: 'hidden' }}>
               {roleButton('author', 'author')}
               {roleButton('reviewer', 'reviewer')}
@@ -478,6 +502,7 @@ export function App() {
               ref={cmRef}
               value={source}
               extensions={cmExtensions}
+              basicSetup={{ lineNumbers: viewMode === 'raw', foldGutter: viewMode === 'raw' }}
               onChange={(v) => setSource(v)}
               onUpdate={(vu) => {
                 if (vu.selectionSet) {
