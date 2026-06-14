@@ -25,3 +25,17 @@
 - **提案(最小)**: `.claude/settings.json` の `sandbox.network.allowedDomains` に **`api.github.com`** を追加する。
   これで拡張のロジック(取得・投稿)を実 API で統合テストでき、毎回 sandbox を外さずに済む。
   - トークンは `.envrc` の `GH_PAT`(direnv)から渡す。settings 反映は次回セッションから。
+
+---
+
+## `bun install`/`bun add` 後に全 bash が bwrap 初期化失敗(`.cache/bun/...` を mkdir できない)
+
+- **症状**: `bwrap: Can't mkdir parents for .../.cache/bun/<pkg>@@@1/...: No such file or directory`。
+  git を含むあらゆる bash が(セッション途中で)実行不能になる。
+- **原因(推定)**: サンドボックス設定はセッション開始時の `.cache/bun` の中身を基に個別ファイルを
+  bind-mount しようとするが、`bun add`/`bun install` がキャッシュ構成を作り替えるとパスが食い違い、
+  以降の全コマンドで bwrap 初期化に失敗する。
+- **回避(今回)**: 当該 git コマンドを `dangerouslyDisableSandbox` で実行。
+- **提案**: (a) bun でキャッシュ更新(`bun add`/`install`)を行ったら**セッションを再起動**して
+  サンドボックス設定を現在のキャッシュに再導出する運用にする。または (b) サンドボックスが
+  `.cache/`(と `node_modules/`)配下を個別ファイル列挙せず丸ごと扱うよう設定できるか検討する。
