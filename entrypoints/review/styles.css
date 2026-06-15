@@ -118,6 +118,13 @@ body {
   font-size: 11px;
   padding: 3px 9px;
 }
+.btn--danger {
+  color: var(--red);
+  border-color: #f3b7bc;
+}
+.btn--danger:hover {
+  background: #ffe0e0;
+}
 
 select.input {
   font: inherit;
@@ -284,6 +291,28 @@ select.input:focus {
 .badge--reanchored { background: #fff1d6; color: var(--amber); }
 .badge--outdated { background: #ffe0e0; color: var(--red); }
 
+/* suggestion in comment card (old -> new) */
+.sugg-old {
+  font-size: 12px;
+  white-space: pre-wrap;
+  text-decoration: line-through;
+  color: #86181d;
+  background: rgba(207, 34, 46, 0.08);
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin-top: 6px;
+}
+.sugg-new {
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: #1a7f37;
+  background: rgba(31, 136, 61, 0.1);
+  border-left: 3px solid rgba(31, 136, 61, 0.7);
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin-top: 4px;
+}
+
 /* ---- composer ---- */
 .composer__routing {
   font-size: 12px;
@@ -410,6 +439,14 @@ select.input:focus {
 }
 .popover li {
   margin: 4px 0;
+}
+.popover__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* ---- floating debug ---- */

@@ -3,6 +3,17 @@
 //  - diffToSuggestions: 行単位 LCS でハンクに分け、GitHub Suggestion(行置換)に変換
 import { diff_match_patch } from 'diff-match-patch';
 
+/** コメント本文から ```suggestion ブロックの置換テキストを取り出す(無ければ null)。 */
+export function extractSuggestionBlock(body: string): string | null {
+  const m = body.match(/```suggestion\n?([\s\S]*?)```/);
+  return m ? m[1].replace(/\n$/, '') : null;
+}
+
+/** コメント本文から suggestion ブロックを除いた可視テキスト。 */
+export function stripSuggestionBlock(body: string): string {
+  return body.replace(/```suggestion\n?[\s\S]*?```/g, '').trim();
+}
+
 /** 文字単位差分 [op(-1 del / 0 eq / 1 ins), text]。インライン tracked-changes 装飾用。 */
 export function charDiffs(base: string, edited: string): Array<[number, string]> {
   const dmp = new diff_match_patch();

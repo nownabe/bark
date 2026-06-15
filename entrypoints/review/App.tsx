@@ -11,7 +11,8 @@ import { cmSelectionToAnchor } from './cmAnchor';
 import { commentHighlightField, commentHighlightTheme, setCommentHighlights } from './highlight';
 import { richMarkdown, richMarkdownTheme } from './richMarkdown';
 import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from './suggestMode';
-import { diffToSuggestions } from '../../lib/suggest';
+import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from './suggestionView';
+import { diffToSuggestions, extractSuggestionBlock, stripSuggestionBlock } from '../../lib/suggest';
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from '../../lib/anchor';
 import { normalizeComments, type ExistingComment } from '../../lib/comments';
 import { reanchorComment, type AnchorStatus } from '../../lib/reanchor';
@@ -52,10 +53,10 @@ function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-const STATUS_LABEL: Record<AnchorStatus, string> = {
-  current: 'anchored',
-  reanchored: '再アンカー',
-  outdated: '位置不明',
+// ユーザー向けに意味のある状態のみ表示(current=正常は出さない)。
+const STATUS_LABEL: Partial<Record<AnchorStatus, string>> = {
+  reanchored: '位置がずれています',
+  outdated: '位置が見つかりません',
 };
 
 export function App() {
@@ -108,6 +109,8 @@ export function App() {
       EditorView.lineWrapping,
       commentHighlightField,
       commentHighlightTheme,
+      suggestionMarksField,
+      suggestionViewTheme,
       baseTextField,
     ];
     if (viewMode === 'preview') ext.push(richMarkdown, richMarkdownTheme);
@@ -252,6 +255,23 @@ export function App() {
       .filter(clip);
     view.dispatch({ effects: setCommentHighlights.of([...existing, ...pending]) });
   }, [comments, drafts, source, lineStarts, headSha, selectedPath]);
+
+  // 送信済み Suggestion を本文に tracked-changes 表示(旧=取り消し線 / 新=緑ブロック)
+  useEffect(() => {
+    const view = cmRef.current?.view;
+    if (!view) return;
+    const docLen = view.state.doc.length;
+    const curPath = selectedPath ?? 'sample';
+    const marks = comments
+      .filter((c) => c.meta?.kind === 'suggestion' && c.meta.path === curPath)
+      .map((c) => {
+        const r = reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? '');
+        return { from: r.startOffset, to: r.endOffset, status: r.status, replacement: extractSuggestionBlock(c.body) ?? '' };
+      })
+      .filter((m) => m.status !== 'outdated' && m.from >= 0 && m.to <= docLen && m.from < m.to)
+      .map(({ from, to, replacement }) => ({ from, to, replacement }));
+    view.dispatch({ effects: setSuggestionMarks.of(marks) });
+  }, [comments, source, lineStarts, headSha, selectedPath]);
 
   const jumpTo = (c: ExistingComment) => {
     const view = cmRef.current?.view;
@@ -591,11 +611,6 @@ export function App() {
                 Commit
               </button>
             ) : null}
-            {token ? (
-              <button type="button" className="btn" onClick={handleClearToken}>
-                トークン削除
-              </button>
-            ) : null}
             <button
               type="button"
               className="help-btn"
@@ -620,7 +635,21 @@ export function App() {
               <li>コメントも提案も同じ <strong>Pending</strong> に溜め、<strong>Submit review</strong> で一括送信。</li>
               <li>サイドの項目をクリックすると本文の該当位置へ移動・ハイライト。スレッドで返信できます。</li>
             </ul>
-            <div className="composer__row">
+            <div className="popover__footer">
+              {token ? (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--danger"
+                  onClick={() => {
+                    handleClearToken();
+                    setShowHelp(false);
+                  }}
+                >
+                  トークンを削除
+                </button>
+              ) : (
+                <span />
+              )}
               <button type="button" className="btn btn--sm" onClick={() => setShowHelp(false)}>
                 閉じる
               </button>
@@ -797,14 +826,29 @@ export function App() {
                           <div className="comment__meta">
                             <span className="comment__author">@{c.author}</span>
                             <span>{c.source}</span>
-                            {i === 0 && st ? <span className={`badge badge--${st}`}>{STATUS_LABEL[st]}</span> : null}
+                            {i === 0 && c.meta?.kind === 'suggestion' ? (
+                              <span className="badge badge--suggestion">suggestion</span>
+                            ) : null}
+                            {i === 0 && st && STATUS_LABEL[st] ? (
+                              <span className={`badge badge--${st}`}>{STATUS_LABEL[st]}</span>
+                            ) : null}
                             {i === 0 && !c.meta ? (
                               <span className="badge badge--issue">
                                 {c.path ? `${c.path}:L${c.line ?? '?'}` : 'no anchor'}
                               </span>
                             ) : null}
                           </div>
-                          <div className="comment__body">{c.body || '(本文なし)'}</div>
+                          {c.meta?.kind === 'suggestion' ? (
+                            <>
+                              {stripSuggestionBlock(c.body) ? (
+                                <div className="comment__body">{stripSuggestionBlock(c.body)}</div>
+                              ) : null}
+                              <div className="sugg-old">{c.meta.quote}</div>
+                              <div className="sugg-new">{extractSuggestionBlock(c.body) || '(削除)'}</div>
+                            </>
+                          ) : (
+                            <div className="comment__body">{c.body || '(本文なし)'}</div>
+                          )}
                         </div>
                       ))}
                       {t.root.meta ? (
