@@ -1,14 +1,17 @@
 {
   "name": "bark",
-  "private": true,
   "version": "0.0.0",
-  "type": "module",
+  "private": true,
   "description": "Google Docs-like Markdown review for GitHub Pull Requests (Chrome MV3 extension)",
+  "type": "module",
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
     "zip": "wxt zip",
     "compile": "tsc --noEmit",
+    "lint": "oxlint",
+    "fmt": "oxfmt --write",
+    "fmt:check": "oxfmt --check",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
@@ -34,6 +37,8 @@
     "@types/unist": "^3.0.3",
     "@vitejs/plugin-react": "^4.3.4",
     "@wxt-dev/module-react": "^1.1.0",
+    "oxfmt": "^0.55.0",
+    "oxlint": "^1.70.0",
     "typescript": "^5.5.0",
     "wxt": "^0.19.0"
   },

@@ -1,0 +1,22 @@
+name: GitHub Workflow
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Run actionlint
+        # The image bundles actionlint + shellcheck (for embedded run-script checks).
+        uses: docker://rhysd/actionlint:1.7.7
+        with:
+          args: -color
