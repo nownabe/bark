@@ -16,9 +16,8 @@ in English.
 
 ## Toolchain: mise
 
-- The project toolchain (`bun`, `oxlint`, `oxfmt`, `actionlint`, `ghalint`, `zizmor`, `direnv`) is declared in `mise.toml` with pinned versions; `mise.lock` records the resolved versions (`[settings] lockfile = true`). Run `mise install` to materialize them. Unlike devbox, mise installs tools under `~/.local/share/mise` instead of into the project tree, so there is nothing toolchain-related to add to `.gitignore`.
+- The project toolchain (`bun`, `oxlint`, `oxfmt`, `actionlint`, `ghalint`, `zizmor`, `direnv`) is declared in `mise.toml` with pinned versions; `mise.lock` records the resolved versions (`[settings] lockfile = true`). Run `mise install` to materialize them. mise installs tools outside the project tree, so there is nothing toolchain-related to add to `.gitignore`.
 - **Launch agents with the mise toolchain active** — e.g. `mise exec -- claude`, or let `direnv` activate mise through the project `.envrc` (see `.envrc.example`) — then run `claude`.
-- mise replaced devbox because devbox's Nix-profile directory symlinks (`.devbox/nix/profile/...`) made the Claude Code sandbox's bwrap initialization fail, taking down every sandboxed command. See `env-suggestion.md` for the full diagnosis.
 
 ## Sandbox (the autonomy engine)
 
@@ -57,13 +56,13 @@ git hooks run as children of the unsandboxed git process, so they execute **outs
 
 When work fails because of a sandbox or toolchain configuration restriction (not a real bug), **do not silently fall back to `dangerouslyDisableSandbox`**. Diagnose the cause and **record the proposed fix in `env-suggestion.md`** (at the repo root) instead of changing the config yourself. Append one entry per failure: the symptom, the diagnosed cause, and the narrowest config change that would fix it, following the most-secure-first principle. The user reviews `env-suggestion.md` and applies the changes; this keeps every environment-loosening decision human-gated. Use this table to map the failure to the right setting to write down:
 
-| Failure symptom                                                                                 | Likely cause                                      | Proposed setting (narrowest first)                                                                                                                                                                          |
-| ----------------------------------------------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Network/DNS/TLS error on an outbound request (`getaddrinfo`, `connection refused`, cert errors) | Domain not in the egress allowlist                | Add the exact host to `sandbox.network.allowedDomains` (e.g. `registry.npmjs.org`) — never `*`                                                                                                              |
-| `Read-only file system` / permission denied on a write outside the project                      | Write blocked by sandbox                          | Add the specific path to `sandbox.filesystem.allowWrite` (e.g. a cache dir). Prefer redirecting the tool's output into the project (e.g. `BUN_INSTALL_CACHE_DIR=$PWD/.cache/bun`) over widening the sandbox |
-| `No such file` / permission denied reading a path under `$HOME`                                 | Path blocked by `denyRead: ["~/"]`                | Add the specific path to `sandbox.filesystem.allowRead` (e.g. `~/.cache/<tool>`) — never re-add `~/` broadly                                                                                                |
-| A bash command prompts every time                                                               | No matching permission rule                       | Add a tight `permissions.allow` rule for the exact subcommand (e.g. `Bash(bun test:*)`)                                                                                                                     |
-| `Read-only file system` on `.git`                                                               | Intended: git writes must run outside the sandbox | Do **not** relax `.git` denyWrite. Ensure the command runs via `excludedCommands` (`git`/`gh`); a one-off may use `dangerouslyDisableSandbox` with user confirmation                                        |
+| Failure symptom                                                                                 | Likely cause                                      | Proposed setting (narrowest first)                                                                                                                                   |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Network/DNS/TLS error on an outbound request (`getaddrinfo`, `connection refused`, cert errors) | Domain not in the egress allowlist                | Add the exact host to `sandbox.network.allowedDomains` (e.g. `registry.npmjs.org`) — never `*`                                                                       |
+| `Read-only file system` / permission denied on a write outside the project                      | Write blocked by sandbox                          | Add the specific path to `sandbox.filesystem.allowWrite` (e.g. a cache dir), or redirect the tool's output into the project, rather than widening the sandbox        |
+| `No such file` / permission denied reading a path under `$HOME`                                 | Path blocked by `denyRead: ["~/"]`                | Add the specific path to `sandbox.filesystem.allowRead` (e.g. `~/.cache/<tool>`) — never re-add `~/` broadly                                                         |
+| A bash command prompts every time                                                               | No matching permission rule                       | Add a tight `permissions.allow` rule for the exact subcommand (e.g. `Bash(bun test:*)`)                                                                              |
+| `Read-only file system` on `.git`                                                               | Intended: git writes must run outside the sandbox | Do **not** relax `.git` denyWrite. Ensure the command runs via `excludedCommands` (`git`/`gh`); a one-off may use `dangerouslyDisableSandbox` with user confirmation |
 
 Rules of thumb:
 
@@ -75,4 +74,3 @@ Rules of thumb:
 ## Reminders
 
 - Sandbox config changes take effect on the **next** session start — restart to verify.
-- The global `~/.claude/settings.json` is home-manager (Nix) managed and read-only; global changes go through the Nix config, not direct edits.
