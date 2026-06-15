@@ -1,20 +1,20 @@
-// reviewer 編集 → Suggestion 変換 + tracked-changes 用の差分(R3/§7.3, Google Docs サジェスト相当)。
-//  - charDiffs: 文字単位差分(インライン装飾: 追加=下線 / 削除=取り消し線ウィジェット用)
-//  - diffToSuggestions: 行単位 LCS でハンクに分け、GitHub Suggestion(行置換)に変換
+// Reviewer edit → suggestion conversion + diff for tracked changes (R3/§7.3, equivalent to Google Docs suggestions).
+//  - charDiffs: char-level diff (for inline decoration: insert=underline / delete=strikethrough widget)
+//  - diffToSuggestions: split into hunks via line-level LCS and convert to GitHub suggestions (line replacement)
 import { diff_match_patch } from 'diff-match-patch';
 
-/** コメント本文から ```suggestion ブロックの置換テキストを取り出す(無ければ null)。 */
+/** Extract the replacement text of a ```suggestion block from a comment body (null if absent). */
 export function extractSuggestionBlock(body: string): string | null {
   const m = body.match(/```suggestion\n?([\s\S]*?)```/);
   return m ? m[1].replace(/\n$/, '') : null;
 }
 
-/** コメント本文から suggestion ブロックを除いた可視テキスト。 */
+/** The visible text of a comment body with the suggestion block removed. */
 export function stripSuggestionBlock(body: string): string {
   return body.replace(/```suggestion\n?[\s\S]*?```/g, '').trim();
 }
 
-/** 文字単位差分 [op(-1 del / 0 eq / 1 ins), text]。インライン tracked-changes 装飾用。 */
+/** Char-level diff [op(-1 del / 0 eq / 1 ins), text]. For inline tracked-changes decoration. */
 export function charDiffs(base: string, edited: string): Array<[number, string]> {
   const dmp = new diff_match_patch();
   const diffs = dmp.diff_main(base, edited);
@@ -23,12 +23,12 @@ export function charDiffs(base: string, edited: string): Array<[number, string]>
 }
 
 export interface SuggestionHunk {
-  /** 置換対象の base 行範囲(1-based, 両端含む)。 */
+  /** The base line range being replaced (1-based, inclusive). */
   sl: number;
   el: number;
-  /** 置換後テキスト(空文字 = 行削除)。 */
+  /** Replacement text (empty string = line deletion). */
   replacement: string;
-  /** 削除された元テキスト(アンカー quote 用)。 */
+  /** The original deleted text (for the anchor quote). */
   quote: string;
 }
 
@@ -69,8 +69,8 @@ function lcsDiff(a: string[], b: string[]): LineOp[] {
 }
 
 /**
- * base → edited の差分を、行を置換する GitHub Suggestion ハンクに変換する。
- * v1 は「削除 or 置換」ハンクのみ(純粋な行挿入は対象行が無いため対象外)。
+ * Convert the base → edited diff into GitHub suggestion hunks that replace lines.
+ * v1 handles "delete or replace" hunks only (pure line insertions are excluded since there's no target line).
  */
 export function diffToSuggestions(base: string, edited: string): SuggestionHunk[] {
   const ops = lcsDiff(splitLines(base), splitLines(edited));
@@ -103,7 +103,7 @@ export function diffToSuggestions(base: string, edited: string): SuggestionHunk[
         quote: del.join('\n'),
       });
     }
-    // 純挿入(del.length===0)は対象行が無いため v1 では非対応
+    // Pure insertion (del.length===0) is unsupported in v1 since there's no target line
   }
   return hunks;
 }

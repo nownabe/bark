@@ -1,7 +1,7 @@
-// 既存コメントの正規化 — Design Doc §R6.
-// レビューコメント / issue コメントの生レスポンスを、ツールの統一形に変換する。
-// ツール製コメントは埋め込みメタデータから文字単位アンカーを復元し、メタデータが
-// 無い「外来」コメントは GitHub の line 情報へ degrade する(§12-8)。
+// Normalizing existing comments — Design Doc §R6.
+// Convert the raw responses for review / issue comments into the tool's unified shape.
+// For tool-authored comments, restore the char-level anchor from embedded metadata;
+// "foreign" comments without metadata degrade to GitHub's line info (§12-8).
 import { extractMetadata, type CommentMetadata } from './metadata';
 import type { RawIssueComment, RawReviewComment } from './github';
 
@@ -9,11 +9,11 @@ export interface ExistingComment {
   id: number;
   source: 'review' | 'issue';
   author: string;
-  /** メタデータを除いた可視本文。 */
+  /** Visible body with metadata stripped. */
   body: string;
-  /** ツール製なら復元したアンカー、外来なら null。 */
+  /** The restored anchor for tool-authored comments, null for foreign ones. */
   meta: CommentMetadata | null;
-  /** degrade 用: GitHub ネイティブの path/line(review コメントのみ)。 */
+  /** For degraded mode: GitHub-native path/line (review comments only). */
   path?: string;
   line?: number;
 }

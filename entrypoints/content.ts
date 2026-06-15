@@ -1,6 +1,6 @@
-// Content script — injects the "Open in DocReview" entry point on PR pages.
-// Design Doc §6 (Content Script). Scaffold: only injects the button; the review
-// experience (rendering, anchoring) lives in the SPA page and is built later.
+// Content script — injects the "Open in Bark" entry point on PR pages.
+// Design Doc §6 (Content Script). It only injects the button; the review
+// experience (rendering, anchoring) lives in the SPA page.
 export default defineContentScript({
   matches: ['https://github.com/*/pull/*'],
   main() {
@@ -20,12 +20,12 @@ function parsePr(): { owner: string; repo: string; pr: string } | null {
 function injectEntryButton() {
   const ref = parsePr();
   if (!ref) return;
-  if (document.getElementById('docreview-entry')) return;
+  if (document.getElementById('bark-entry')) return;
 
   const btn = document.createElement('button');
-  btn.id = 'docreview-entry';
+  btn.id = 'bark-entry';
   btn.type = 'button';
-  btn.textContent = 'Open in DocReview';
+  btn.textContent = 'Open in Bark';
   Object.assign(btn.style, {
     position: 'fixed',
     bottom: '20px',
@@ -43,9 +43,10 @@ function injectEntryButton() {
   } satisfies Partial<CSSStyleDeclaration>);
 
   btn.addEventListener('click', () => {
-    // background に依頼して chrome.tabs.create で開く。content script から
-    // window.open(chrome-extension://...) すると ERR_BLOCKED_BY_CLIENT で弾かれるため。
-    void browser.runtime.sendMessage({ type: 'docreview/open', ref });
+    // Ask the background worker to open the page via chrome.tabs.create;
+    // window.open(chrome-extension://...) from a content script is blocked
+    // with ERR_BLOCKED_BY_CLIENT.
+    void browser.runtime.sendMessage({ type: 'bark/open', ref });
   });
 
   document.body.appendChild(btn);

@@ -1,20 +1,20 @@
-// Diff 内/外ルーティング — Design Doc §7.1 / 決定 D4.
+// In/out-of-diff routing — Design Doc §7.1 / decision D4.
 //
-// GitHub のレビューコメントは diff ハンク内の行にしか付けられない。pulls/{n}/files
-// が返す unified-diff の patch を解析し、RIGHT(新ファイル)側でコメント可能な行範囲を
-// 求める。選択範囲が全て diff 内なら → レビューコメント、そうでなければ → 通常 PR
-// コメント(引用+パーマリンク)に振り分ける。
+// GitHub review comments can only attach to lines inside a diff hunk. Parse the
+// unified-diff patch returned by pulls/{n}/files to find the commentable line ranges
+// on the RIGHT (new file) side. If the whole selection is in-diff → review comment;
+// otherwise → regular PR comment (quote + permalink).
 
-/** RIGHT(新ファイル)側でコメント可能な行範囲(両端含む)。 */
+/** Commentable line range on the RIGHT (new file) side (inclusive). */
 export interface RightRange {
   newStart: number;
   newEnd: number;
 }
 
 /**
- * unified-diff の patch を、RIGHT 側でコメント可能な新ファイル行範囲の配列に変換。
- * 追加行(+)と文脈行(空白始まり)はハンク内で RIGHT に現れコメント可能。
- * 削除行(-)は LEFT のみで新ファイル行番号を進めない。
+ * Convert a unified-diff patch into an array of commentable new-file line ranges on the RIGHT side.
+ * Added lines (+) and context lines (starting with a space) appear on the RIGHT within a hunk and are commentable.
+ * Deleted lines (-) are LEFT-only and do not advance the new-file line number.
  */
 export function parseRightRanges(patch: string | undefined): RightRange[] {
   if (!patch) return [];
@@ -40,24 +40,24 @@ export function parseRightRanges(patch: string | undefined): RightRange[] {
       end = newLine;
       newLine++;
     } else if (line.startsWith('-') && !line.startsWith('---')) {
-      // 削除行: LEFT のみ。newLine は進めず、RIGHT 側の連続性も保つ(flush しない)。
+      // Deleted line: LEFT only. Don't advance newLine, and keep RIGHT-side continuity (no flush).
     } else if (line.startsWith(' ')) {
       if (start === -1) start = newLine;
       end = newLine;
       newLine++;
     }
-    // それ以外(\ No newline, ファイルヘッダ, 空文字)は無視
+    // Ignore everything else (\ No newline, file headers, empty string)
   }
   flush();
   return ranges;
 }
 
-/** 行が RIGHT 側 diff 内か。 */
+/** Whether a line is in the RIGHT-side diff. */
 export function isLineInDiff(ranges: RightRange[], line: number): boolean {
   return ranges.some((r) => line >= r.newStart && line <= r.newEnd);
 }
 
-/** [startLine, endLine] の全行が diff 内なら true(= レビューコメント可能)。 */
+/** True if every line in [startLine, endLine] is in-diff (= eligible for a review comment). */
 export function isRangeInDiff(ranges: RightRange[], startLine: number, endLine: number): boolean {
   for (let l = startLine; l <= endLine; l++) {
     if (!isLineInDiff(ranges, l)) return false;

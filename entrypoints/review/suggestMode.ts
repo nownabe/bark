@@ -1,7 +1,8 @@
-// reviewer サジェストモードの tracked-changes 装飾(Google Docs 風)。
-// baseTextField に元ソースを保持し、現在の doc との文字差分を:
-//   追加 = 下線/緑(.dr-ins)、削除 = 取り消し線ウィジェット(.dr-del)
-// として表示する。ソースは正準のまま編集可能。
+// Tracked-changes decorations for the reviewer's suggest mode (Google Docs style).
+// baseTextField holds the original source, and the character-level diff against the
+// current doc is shown as:
+//   insertion = underline/green (.dr-ins), deletion = strikethrough widget (.dr-del)
+// The source stays canonical and remains editable.
 import { StateEffect, StateField } from '@codemirror/state';
 import {
   Decoration,
@@ -57,7 +58,7 @@ function build(view: EditorView): DecorationSet {
       if (text.length > 0) decos.push(Decoration.mark({ class: 'dr-ins' }).range(pos, pos + text.length));
       pos += text.length;
     } else {
-      // 削除テキストは doc に無いので、現在位置にウィジェットで取り消し線表示
+      // The deleted text is not in the doc, so show it as a strikethrough widget at the current position.
       decos.push(Decoration.widget({ widget: new DeletedWidget(text), side: -1 }).range(pos));
     }
   }

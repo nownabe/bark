@@ -1,6 +1,6 @@
 // Live read-only integration test against PR #2 (uses GH_PAT).
 // Run: direnv exec . bun scripts/check-integration.ts
-// Read のみ(PR を汚さない)。書き込み検証は別途。
+// Read-only (does not pollute the PR). Write verification is done separately.
 import { GitHubClient } from '../lib/github';
 import { normalizeComments } from '../lib/comments';
 

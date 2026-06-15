@@ -1,7 +1,7 @@
-// ローカル下書き(pending)— Design Doc §7.2 / §7.7 / R4.
-// コメントを「pending」としてローカルに溜め、Submit で GitHub に一括反映する。
-// v1 は軽量データなので chrome.storage.local に保持(IndexedDB はスナップショット等
-// 大きいデータを扱う後続スライスで導入)。キーは pr:{owner}/{repo}#{n}:drafts。
+// Local drafts (pending) — Design Doc §7.2 / §7.7 / R4.
+// Accumulate comments locally as "pending" and flush them to GitHub in bulk on Submit.
+// v1 holds lightweight data in chrome.storage.local (IndexedDB is introduced in a later
+// slice that handles large data such as snapshots). Key: pr:{owner}/{repo}#{n}:drafts.
 import { browser } from 'wxt/browser';
 import { storageKeys } from './storage';
 import type { AnchorRange } from './metadata';
@@ -10,20 +10,20 @@ import type { PrRef } from './github';
 export interface PendingDraft {
   cid: string;
   path: string;
-  /** 全行 diff 内か(true=レビューコメント / false=通常コメント, §7.1)。 */
+  /** Whether all lines are in-diff (true=review comment / false=regular comment, §7.1). */
   inDiff: boolean;
   range: AnchorRange;
   quote: string;
-  /** createdAtSha (§7.9)。 */
+  /** createdAtSha (§7.9). */
   sha: string;
   thread: string;
-  /** 可視本文。 */
+  /** Visible body. */
   body: string;
-  /** comment | suggestion(§7.3)。 */
+  /** comment | suggestion (§7.3). */
   kind: 'comment' | 'suggestion';
-  /** suggestion の置換後ソース行(kind==='suggestion' のとき)。 */
+  /** Replacement source lines for a suggestion (when kind==='suggestion'). */
   suggestion?: string;
-  /** diff 外コメント用の blob パーマリンク。 */
+  /** Blob permalink for out-of-diff comments. */
   permalink?: string;
 }
 

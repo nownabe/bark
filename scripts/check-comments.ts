@@ -1,4 +1,4 @@
-// Verification for 難所#2/R6: normalize existing comments and restore anchors.
+// Verification for hard-problem #2/R6: normalize existing comments and restore anchors.
 // Run: bun scripts/check-comments.ts
 import { embedMetadata, type CommentMetadata } from '../lib/metadata';
 import { normalizeComments } from '../lib/comments';
@@ -22,9 +22,9 @@ const meta: CommentMetadata = {
 };
 
 const reviews: RawReviewComment[] = [
-  // ツール製(メタデータ付き)
+  // Tool-authored (with metadata)
   { id: 1, body: embedMetadata('ここ直して', meta), path: 'docs/spec.md', line: 3, user: { login: 'alice' } },
-  // 外来(メタデータ無し)→ degrade
+  // Foreign (no metadata) → degrade
   { id: 2, body: 'plain review comment', path: 'docs/spec.md', line: 5, user: { login: 'bob' } },
 ];
 const issues: RawIssueComment[] = [
@@ -32,19 +32,19 @@ const issues: RawIssueComment[] = [
 ];
 
 const result = normalizeComments(reviews, issues);
-check('3 件に正規化', result.length === 3);
+check('normalized to 3 items', result.length === 3);
 
 const tool = result.find((c) => c.id === 1)!;
-check('ツール製は meta 復元', JSON.stringify(tool.meta) === JSON.stringify(meta));
-check('ツール製の可視本文', tool.body === 'ここ直して');
-check('ツール製の author', tool.author === 'alice');
+check('tool-authored restores meta', JSON.stringify(tool.meta) === JSON.stringify(meta));
+check('tool-authored visible body', tool.body === 'ここ直して');
+check('tool-authored author', tool.author === 'alice');
 
 const foreign = result.find((c) => c.id === 2)!;
-check('外来 review は meta=null', foreign.meta === null);
-check('外来 review は path/line で degrade', foreign.path === 'docs/spec.md' && foreign.line === 5);
+check('foreign review has meta=null', foreign.meta === null);
+check('foreign review degrades to path/line', foreign.path === 'docs/spec.md' && foreign.line === 5);
 
 const issue = result.find((c) => c.id === 3)!;
-check('issue は source=issue', issue.source === 'issue' && issue.meta === null);
+check('issue has source=issue', issue.source === 'issue' && issue.meta === null);
 
 if (failures > 0) {
   console.error(`FAIL: ${failures} check(s) failed`);

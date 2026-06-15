@@ -1,23 +1,23 @@
-// Source-position mapping — Design Doc §7.1 (アンカリングの核).
+// Source-position mapping — Design Doc §7.1 (the core of anchoring).
 //
-// remark/rehype がノードに持つ `position`(ソース上の line/col/offset)を、
-// レンダリング後の DOM から辿れるよう `data-so` / `data-eo`(start/end offset)
-// として要素に焼き込む rehype プラグイン。
+// A rehype plugin that bakes the `position` (source line/col/offset) carried by
+// remark/rehype nodes into elements as `data-so` / `data-eo` (start/end offset),
+// so it can be traced back from the rendered DOM.
 //
-// さらに **テキストノードを span でラップ**して各テキスト断片の開始 offset を
-// 持たせることで、ブロック単位ではなく **文字単位**の選択 → ソース offset 変換を
-// 可能にする(span 内のテキストはソースと 1:1 対応するため offset + 選択位置で解決)。
+// It also **wraps text nodes in spans** that carry each text fragment's start offset,
+// enabling **char-level** (not just block-level) selection → source offset conversion
+// (text inside a span maps 1:1 to the source, so it resolves via offset + selection position).
 
 import { SKIP, visit } from 'unist-util-visit';
 import type { Element, Root, Text } from 'hast';
 import { defaultSchema } from 'rehype-sanitize';
 
-/** 既にラップ済みの span を識別するマーカー属性。 */
+/** Marker attribute that identifies an already-wrapped span. */
 const WRAP_MARKER = 'dataDrText';
 
 export function rehypeSourcePos() {
   return (tree: Root) => {
-    // 1. 位置を持つ要素に data-so / data-eo を付与
+    // 1. Add data-so / data-eo to elements that have a position
     visit(tree, 'element', (node: Element) => {
       const pos = node.position;
       if (pos?.start.offset != null && pos.end.offset != null) {
@@ -27,17 +27,17 @@ export function rehypeSourcePos() {
       }
     });
 
-    // 2. テキストノードを offset 付き span でラップ(文字単位精度)
+    // 2. Wrap text nodes in offset-bearing spans (char-level precision)
     visit(tree, 'text', (node: Text, index, parent) => {
       if (index == null || parent == null || parent.type === 'root') return;
       const el = parent as Element;
-      if (el.tagName === 'span' && el.properties?.[WRAP_MARKER] != null) return; // 二重ラップ防止
+      if (el.tagName === 'span' && el.properties?.[WRAP_MARKER] != null) return; // Prevent double wrapping
       const pos = node.position;
       if (pos?.start.offset == null || pos.end.offset == null) return;
 
-      // 線形 = レンダリングテキスト長がソース範囲長と一致(区切り記号を含まない)。
-      // inline code (`code`) のように position が区切り記号を含むトークンは非線形で、
-      // 文字単位の `so + offset` 解決ができないため、選択時はトークン境界にクランプする。
+      // linear = the rendered text length equals the source range length (no delimiters included).
+      // Tokens whose position includes delimiters, like inline code (`code`), are non-linear and
+      // cannot be resolved char-by-char via `so + offset`, so selections clamp to the token boundary.
       const linear = node.value.length === pos.end.offset - pos.start.offset;
       const span: Element = {
         type: 'element',
@@ -51,15 +51,15 @@ export function rehypeSourcePos() {
         children: [node],
       };
       el.children[index] = span;
-      return [SKIP, index + 1]; // ラップした span の中(同じ text)を再訪しない
+      return [SKIP, index + 1]; // Don't revisit inside the wrapped span (the same text)
     });
   };
 }
 
 /**
- * rehype-sanitize 用スキーマ(§9)。実ソースは untrusted なので XSS 除去するが、
- * rehypeSourcePos が焼き込んだ data-so/data-eo 等と span は保持する必要がある。
- * **rehypeSourcePos の後**に sanitize を通す前提(position はその時点で不要)。
+ * Schema for rehype-sanitize (§9). The actual source is untrusted, so strip XSS, but
+ * the data-so/data-eo etc. baked in by rehypeSourcePos and the spans must be preserved.
+ * Assumes sanitize runs **after rehypeSourcePos** (position is no longer needed by then).
  */
 export const sanitizeSchema = {
   ...defaultSchema,

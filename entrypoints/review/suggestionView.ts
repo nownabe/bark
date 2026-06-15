@@ -1,6 +1,7 @@
-// 送信済み Suggestion を本文上に Google Docs 風に表示(R3 表示側)。
-// 対象の旧テキストを取り消し線、置換後テキストをその直後に緑のブロックで表示する。
-// block デコレーションを使うため StateField で提供。
+// Display submitted Suggestions over the document in Google Docs style (R3 display side).
+// The target old text is shown with strikethrough, and the replacement text is shown
+// in a green block right after it.
+// Provided via StateField because it uses block decorations.
 import { StateEffect, StateField } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 
@@ -22,7 +23,7 @@ class InsertWidget extends WidgetType {
   toDOM() {
     const div = document.createElement('div');
     div.className = 'dr-sugg-new';
-    div.textContent = this.text.length > 0 ? this.text : '(この範囲を削除)';
+    div.textContent = this.text.length > 0 ? this.text : '(delete this range)';
     return div;
   }
   ignoreEvent() {

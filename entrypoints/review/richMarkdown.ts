@@ -1,10 +1,10 @@
-// Obsidian Live Preview-lite — CM6 の構文木から Markdown を装飾。ソースは正準のまま編集可能。
-//  - インライン: 見出し/太字/斜体/inline code を装飾、非アクティブ行の記号(##, **, `, >)を隠す
-//  - ブロック: コードブロック/引用/リストを行デコレーションで装飾
-//  - テーブル: カーソルが外にあるとき HTML テーブルウィジェットで描画(中に入ると元のソース編集)
+// Obsidian Live Preview-lite — decorate Markdown from the CM6 syntax tree. The source stays canonical and remains editable.
+//  - Inline: decorate headings/bold/italic/inline code, and hide the markers (##, **, `, >) on inactive lines
+//  - Block: decorate code blocks/blockquotes/lists with line decorations
+//  - Table: render as an HTML table widget when the cursor is outside (edit the original source when the cursor moves inside)
 //
-// 注: テーブルは block デコレーションのため、ViewPlugin ではなく **StateField** で提供する必要がある
-//     (CM6: "Block decorations may not be specified via plugins")。
+// Note: because tables use block decorations, they must be provided via a **StateField** rather than a ViewPlugin
+//     (CM6: "Block decorations may not be specified via plugins").
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { type EditorState, type Range, StateField } from '@codemirror/state';
@@ -57,7 +57,7 @@ class TableWidget extends WidgetType {
         row.insertCell().textContent = cell;
       }
     }
-    // クリックでテーブル内にカーソルを置き、ソース編集に切り替える
+    // On click, place the cursor inside the table and switch to source editing.
     table.addEventListener('mousedown', (e) => {
       e.preventDefault();
       view.dispatch({ selection: { anchor: this.from + 1 } });
@@ -78,7 +78,7 @@ function buildDecorations(state: EditorState): DecorationSet {
 
   syntaxTree(state).iterate({
     enter: (node) => {
-      // テーブル: カーソルが外なら HTML ウィジェットで置換、中ならソース表示
+      // Table: replace with an HTML widget when the cursor is outside, show source when inside.
       if (node.name === 'Table') {
         const inside = cursor >= node.from && cursor <= node.to;
         if (!inside) {
@@ -89,10 +89,10 @@ function buildDecorations(state: EditorState): DecorationSet {
             }).range(node.from, node.to),
           );
         }
-        return false; // 子(行/セル)は処理しない
+        return false; // do not process children (rows/cells)
       }
 
-      // ブロック行デコレーション
+      // Block line decorations
       const lineCls = lineClassFor(node.name);
       if (lineCls) {
         const startLine = state.doc.lineAt(node.from).number;
@@ -104,13 +104,13 @@ function buildDecorations(state: EditorState): DecorationSet {
         }
       }
 
-      // インライン装飾
+      // Inline decorations
       const cls = classFor(node.name);
       if (cls && node.to > node.from) {
         decos.push(Decoration.mark({ class: cls }).range(node.from, node.to));
       }
 
-      // 区切り記号を非アクティブ行で隠す
+      // Hide delimiter markers on inactive lines
       const isInlineCodeMark = node.name === 'CodeMark' && node.node.parent?.name === 'InlineCode';
       const hideMark =
         node.name === 'HeaderMark' ||
@@ -120,7 +120,7 @@ function buildDecorations(state: EditorState): DecorationSet {
       if (hideMark && node.to > node.from) {
         const line = state.doc.lineAt(node.from).number;
         if (line !== cursorLine) {
-          // 見出し ## / 引用 > の直後の空白も一緒に隠す(先頭空白が残らないように)
+          // Also hide the space right after heading ## / quote > (so no leading space remains).
           let to = node.to;
           if (
             (node.name === 'HeaderMark' || node.name === 'QuoteMark') &&
@@ -136,7 +136,7 @@ function buildDecorations(state: EditorState): DecorationSet {
   return Decoration.set(decos, true);
 }
 
-// block デコレーション(テーブル)を含むため StateField で提供する。
+// Provided via StateField because it includes block decorations (tables).
 export const richMarkdown = StateField.define<DecorationSet>({
   create(state) {
     return buildDecorations(state);

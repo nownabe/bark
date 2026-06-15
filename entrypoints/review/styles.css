@@ -184,7 +184,7 @@ select.input:focus {
   color: var(--muted);
 }
 
-/* pageless: 枠なし。本文はそのまま広がる */
+/* pageless: no frame. The content expands as-is */
 .doc {
   background: transparent;
 }

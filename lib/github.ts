@@ -1,7 +1,7 @@
 // GitHub API client + shared review types.
-// Scaffold: types only (Design Doc §7.2 のコメントデータ構造)。
-// 実装(getPull / listFiles / listReviews / submitReview / commit ...)は
-// 難所#2/#3 のスライスで追加する。
+// Scaffold: types only (the comment data structures from Design Doc §7.2).
+// Implementations (getPull / listFiles / listReviews / submitReview / commit ...)
+// are added in the challenge#2/#3 slices.
 
 export interface PrRef {
   owner: string;
@@ -9,15 +9,15 @@ export interface PrRef {
   number: number;
 }
 
-/** ソース上の精密アンカー (Design Doc §7.1 / §7.2). */
+/** Precise anchor in the source (Design Doc §7.1 / §7.2). */
 export interface CommentAnchor {
   startLine: number;
   endLine: number;
   startCol: number;
   endCol: number;
-  /** 再アンカリング(§7.8)のためのファジーマッチ用テキスト。 */
+  /** Text for fuzzy matching during re-anchoring (§7.8). */
   quotedText: string;
-  /** どの時点のドキュメントに対する指摘か (§7.9 の履歴追跡の基礎)。 */
+  /** Which document version the comment targets (basis for history tracking, §7.9). */
   createdAtSha: string;
 }
 
@@ -29,41 +29,41 @@ export type CommentStatus =
   | 'resolved'
   | 'outdated';
 
-/** ローカル下書き / 埋め込みメタデータと共通のコメント構造 (Design Doc §7.2). */
+/** Comment structure shared by local drafts and embedded metadata (Design Doc §7.2). */
 export interface ReviewComment {
   id: string;
   path: string;
   anchor: CommentAnchor;
   body: string;
   kind: CommentKind;
-  /** 会話のまとまり (§7.1 の thread)。 */
+  /** Conversation grouping (the thread in §7.1). */
   threadId: string;
   status: CommentStatus;
-  /** 後続コミットで対応されたら記録 (§7.9)。 */
+  /** Recorded when a later commit addresses the comment (§7.9). */
   addressedBySha: string | null;
 }
 
-/** PR の変更ファイル(.md フィルタ前の生に近い形)。 */
+/** A changed file in the PR (near-raw form, before the .md filter). */
 export interface ChangedFile {
   path: string;
   status: string; // added | modified | removed | renamed | ...
-  /** unified-diff(diff 内/外判定 §7.1 用)。大きい/binary だと undefined。 */
+  /** unified-diff (for the in/out-of-diff decision, §7.1). undefined when large/binary. */
   patch?: string;
 }
 
-/** レビューコメント投稿の入力(RIGHT 側, §7.2)。 */
+/** Input for posting a review comment (RIGHT side, §7.2). */
 export interface ReviewCommentInput {
   path: string;
-  /** 複数行の場合は終端行。 */
+  /** The end line when the range spans multiple lines. */
   line: number;
   side: 'RIGHT';
-  /** 複数行選択のときのみ。 */
+  /** Only for multi-line selections. */
   start_line?: number;
   start_side?: 'RIGHT';
   body: string;
 }
 
-/** GitHub レビューコメント API の生レスポンス(必要フィールドのみ)。 */
+/** Raw response from the GitHub review comments API (only the fields we need). */
 export interface RawReviewComment {
   id: number;
   body: string;
@@ -72,14 +72,14 @@ export interface RawReviewComment {
   user: { login: string } | null;
 }
 
-/** GitHub issue コメント API の生レスポンス(必要フィールドのみ)。 */
+/** Raw response from the GitHub issue comments API (only the fields we need). */
 export interface RawIssueComment {
   id: number;
   body: string;
   user: { login: string } | null;
 }
 
-/** PR の head 情報。 */
+/** PR head info. */
 export interface PullInfo {
   headSha: string;
   headRef: string;
@@ -87,7 +87,7 @@ export interface PullInfo {
 
 const API_BASE = 'https://api.github.com';
 
-/** UTF-8 安全な base64(contents API のコミット内容用。日本語も安全)。 */
+/** UTF-8-safe base64 (for the contents API commit body; safe for non-ASCII too). */
 function utf8ToBase64(s: string): string {
   const bytes = new TextEncoder().encode(s);
   let bin = '';
@@ -95,7 +95,7 @@ function utf8ToBase64(s: string): string {
   return btoa(bin);
 }
 
-/** `Link` ヘッダから rel="next" の URL を取り出す(無ければ null)。 */
+/** Extract the rel="next" URL from the `Link` header (null if absent). */
 export function parseNextLink(link: string | null): string | null {
   if (!link) return null;
   for (const part of link.split(',')) {
@@ -105,12 +105,12 @@ export function parseNextLink(link: string | null): string | null {
   return null;
 }
 
-/** GitHub の Suggestion ブロック(§7.3)。diff 内なら「Apply suggestion」が出る。 */
+/** A GitHub suggestion block (§7.3). Shows "Apply suggestion" when in-diff. */
 export function buildSuggestionBlock(replacement: string): string {
   return `\`\`\`suggestion\n${replacement}\n\`\`\``;
 }
 
-/** diff 外コメント用の blob パーマリンク(§7.1, D4)。 */
+/** Blob permalink for out-of-diff comments (§7.1, D4). */
 export function buildBlobPermalink(
   ref: PrRef,
   path: string,
@@ -134,8 +134,8 @@ export class GitHubApiError extends Error {
 }
 
 /**
- * api.github.com を直接叩く REST クライアント(ブラウザ実行 / CORS 対応, §4)。
- * v1 認証は fine-grained PAT (§7.6)。実装範囲は #1 スライス(取得系)に限定。
+ * REST client that calls api.github.com directly (runs in the browser / CORS-friendly, §4).
+ * v1 auth is a fine-grained PAT (§7.6). Scope limited to the #1 slice (read operations).
  */
 export class GitHubClient {
   constructor(private readonly token: string) {}
@@ -149,10 +149,10 @@ export class GitHubClient {
     };
   }
 
-  /** レート制限を区別したエラー生成(§10)。 */
+  /** Build an error that distinguishes rate limiting (§10). */
   private errorFor(res: Response, where: string): GitHubApiError {
     if (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0') {
-      return new GitHubApiError(403, 'GitHub API レート制限に達しました。しばらく待って再試行してください。');
+      return new GitHubApiError(403, 'GitHub API rate limit reached. Please wait a moment and retry.');
     }
     return new GitHubApiError(res.status, `GitHub API ${res.status} for ${where}`);
   }
@@ -163,7 +163,7 @@ export class GitHubClient {
     return res;
   }
 
-  /** Link ヘッダの rel="next" を辿って全ページを連結取得(ページネーション, §10)。 */
+  /** Follow the Link header's rel="next" to fetch and concatenate all pages (pagination, §10). */
   private async getAllPages<T>(path: string): Promise<T[]> {
     let url: string | null = `${API_BASE}${path}`;
     const all: T[] = [];
@@ -187,7 +187,7 @@ export class GitHubClient {
     }
   }
 
-  /** diff 内コメントを 1 レビューとして一括 Submit (§7.2, R4)。event 既定は COMMENT。 */
+  /** Submit all in-diff comments as a single review (§7.2, R4). event defaults to COMMENT. */
   async submitReview(
     ref: PrRef,
     input: { commitId?: string; comments: ReviewCommentInput[] },
@@ -199,12 +199,12 @@ export class GitHubClient {
     });
   }
 
-  /** diff 外コメント = 通常 PR(issue)コメントを投稿 (§D4)。 */
+  /** Out-of-diff comment = post a regular PR (issue) comment (§D4). */
   async createIssueComment(ref: PrRef, body: string): Promise<void> {
     await this.post(`/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`, { body });
   }
 
-  /** PR メタ。head の SHA(基準, §7.9)と ref(コミット先ブランチ, §7.4)。 */
+  /** PR metadata: the head SHA (the baseline, §7.9) and ref (commit target branch, §7.4). */
   async getPull(ref: PrRef): Promise<PullInfo> {
     const res = await this.request(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`);
     const json = (await res.json()) as { head?: { sha?: string; ref?: string } };
@@ -218,7 +218,7 @@ export class GitHubClient {
     return (await this.getPull(ref)).headSha;
   }
 
-  /** 指定ブランチ時点のファイルの blob sha(コミット時の競合検出に必要, §7.4)。 */
+  /** The file's blob sha at the given branch (needed for conflict detection on commit, §7.4). */
   async getFileSha(ref: PrRef, path: string, branch: string): Promise<string> {
     const encoded = path.split('/').map(encodeURIComponent).join('/');
     const res = await this.request(
@@ -229,7 +229,7 @@ export class GitHubClient {
     return json.sha;
   }
 
-  /** 単一ファイルを head ブランチにコミット (§7.4, R5)。Contents: Write が必要。 */
+  /** Commit a single file to the head branch (§7.4, R5). Requires Contents: Write. */
   async putFileContent(
     ref: PrRef,
     input: { path: string; content: string; message: string; sha: string; branch: string },
@@ -251,8 +251,8 @@ export class GitHubClient {
   }
 
   /**
-   * PR の変更済み `.md` ファイル一覧(削除を除く)。
-   * TODO: per_page=100 を超える PR のページネーション(Link ヘッダ)対応。
+   * List the PR's changed `.md` files (excluding deletions).
+   * TODO: handle pagination (Link header) for PRs exceeding per_page=100.
    */
   async listMarkdownFiles(ref: PrRef): Promise<ChangedFile[]> {
     const files = await this.getAllPages<{ filename: string; status: string; patch?: string }>(
@@ -263,21 +263,21 @@ export class GitHubClient {
       .map((f) => ({ path: f.filename, status: f.status, patch: f.patch }));
   }
 
-  /** 既存のレビューコメント(diff 行に紐づく, §R6)。 */
+  /** Existing review comments (tied to diff lines, §R6). */
   async listReviewComments(ref: PrRef): Promise<RawReviewComment[]> {
     return this.getAllPages<RawReviewComment>(
       `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments?per_page=100`,
     );
   }
 
-  /** 既存の通常 PR コメント(issue コメント, diff 外コメントの保存先 §D4)。 */
+  /** Existing regular PR comments (issue comments, where out-of-diff comments live, §D4). */
   async listIssueComments(ref: PrRef): Promise<RawIssueComment[]> {
     return this.getAllPages<RawIssueComment>(
       `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments?per_page=100`,
     );
   }
 
-  /** 指定 SHA 時点のファイル内容(raw テキスト = 正準ソース, §D9)。 */
+  /** File content at the given SHA (raw text = canonical source, §D9). */
   async getFileContent(ref: PrRef, path: string, sha: string): Promise<string> {
     const encoded = path.split('/').map(encodeURIComponent).join('/');
     const res = await this.request(

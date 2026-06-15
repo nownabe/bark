@@ -1,5 +1,5 @@
-// Offline check for 難所#1: confirm source positions survive remark→rehype and
-// that rehypeSourcePos焼き込む data-so/data-eo + wrapper spans are correct,
+// Offline check for hard-problem #1: confirm source positions survive remark→rehype and
+// that the data-so/data-eo baked in by rehypeSourcePos + wrapper spans are correct,
 // including quotedText alignment (source.slice(so,eo) === rendered text).
 // Run: bun scripts/check-sourcepos.ts
 import { unified } from 'unified';
@@ -18,7 +18,7 @@ Hello **world**, \`code\`, and a [link](https://example.com).
 - item two
 `;
 
-// rehypeSourcePos の後に sanitize を通しても data-so/span が残ることを確認(§9)。
+// Confirm data-so/span survive sanitize after rehypeSourcePos (§9).
 const processor = unified()
   .use(remarkParse)
   .use(remarkRehype)
@@ -40,14 +40,14 @@ visit(tree, 'element', (node: Element) => {
     const slice = md.slice(so, eo);
     if (node.properties.dataDrLin === '1') {
       linearSpans++;
-      // 線形: source.slice(so,eo) はレンダリングテキストと完全一致(文字単位解決の前提)
+      // Linear: source.slice(so,eo) exactly matches the rendered text (precondition for char-level resolution)
       if (slice !== text) {
         failures++;
         console.error(`  linear mismatch @${so}-${eo}: source=${JSON.stringify(slice)} text=${JSON.stringify(text)}`);
       }
     } else {
       nonLinearSpans++;
-      // 非線形: テキストは source 範囲に含まれる(境界クランプで安全)
+      // Non-linear: text is contained within the source range (safe due to boundary clamping)
       if (!slice.includes(text)) {
         failures++;
         console.error(`  non-linear token text not within range @${so}-${eo}: source=${JSON.stringify(slice)} text=${JSON.stringify(text)}`);

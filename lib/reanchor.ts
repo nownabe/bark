@@ -1,9 +1,11 @@
-// 再アンカリング — Design Doc §7.8 / R7.
+// Re-anchoring — Design Doc §7.8 / R7.
 //
-// head が新しいコミットに進むと、コメントに保存された line/col(createdAtSha 時点)は
-// 現在のソースとズレうる。createdAtSha が現在の head と一致すれば保存値をそのまま使い、
-// 異なる場合は quotedText で現在ソースを照合して再解決する。見つからなければ outdated。
-// v1 は quotedText の完全部分一致 + 元の位置に最も近い候補を採用(真のファジー/差分照合は後続)。
+// When head advances to a new commit, the line/col stored on a comment (as of createdAtSha)
+// can drift from the current source. If createdAtSha matches the current head, use the stored
+// values as-is; otherwise re-resolve by matching quotedText against the current source. If not
+// found, it's outdated.
+// v1 uses an exact substring match of quotedText + the candidate nearest the original position
+// (true fuzzy/diff-based matching comes later).
 import { lineColToOffset } from './anchor';
 import type { CommentMetadata } from './metadata';
 
@@ -15,7 +17,7 @@ export interface Reanchored {
   status: AnchorStatus;
 }
 
-/** haystack 内の needle 出現のうち hint offset に最も近いものの index(無ければ -1)。 */
+/** Index of the needle occurrence in haystack nearest to the hint offset (-1 if none). */
 function nearestIndexOf(haystack: string, needle: string, hint: number): number {
   let best = -1;
   let bestDist = Infinity;
@@ -34,11 +36,11 @@ function nearestIndexOf(haystack: string, needle: string, hint: number): number 
 }
 
 /**
- * コメントのアンカーを現在のソースに対して解決する。
- * @param source    現在(head)の正準ソース
+ * Resolve a comment's anchor against the current source.
+ * @param source    The current (head) canonical source
  * @param lineStarts buildLineIndex(source)
- * @param meta      コメントの埋め込みメタデータ(quote / range / createdAtSha)
- * @param headSha   現在の head SHA
+ * @param meta      The comment's embedded metadata (quote / range / createdAtSha)
+ * @param headSha   The current head SHA
  */
 export function reanchorComment(
   source: string,
@@ -46,7 +48,7 @@ export function reanchorComment(
   meta: CommentMetadata,
   headSha: string,
 ): Reanchored {
-  // createdAtSha が現在 head と一致 → 保存 line/col が正確
+  // createdAtSha matches the current head → the stored line/col is accurate
   if (meta.sha && meta.sha === headSha) {
     return {
       startOffset: lineColToOffset(meta.range.sl, meta.range.sc, lineStarts),
@@ -57,7 +59,7 @@ export function reanchorComment(
   const quote = meta.quote ?? '';
   if (quote.length === 0) return { startOffset: 0, endOffset: 0, status: 'outdated' };
 
-  // 元の行を手掛かりに、現在ソースで quote を照合
+  // Using the original line as a hint, match the quote against the current source
   const hint = lineColToOffset(meta.range.sl, meta.range.sc, lineStarts);
   const idx = nearestIndexOf(source, quote, hint);
   if (idx < 0) return { startOffset: 0, endOffset: 0, status: 'outdated' };

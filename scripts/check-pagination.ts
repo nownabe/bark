@@ -14,7 +14,7 @@ const withNext =
   '<https://api.github.com/repositories/1/pulls/2/files?per_page=100&page=2>; rel="next", ' +
   '<https://api.github.com/repositories/1/pulls/2/files?per_page=100&page=5>; rel="last"';
 check(
-  'next を抽出',
+  'extracts next',
   parseNextLink(withNext) ===
     'https://api.github.com/repositories/1/pulls/2/files?per_page=100&page=2',
 );
@@ -22,9 +22,9 @@ check(
 const lastPage =
   '<https://api.github.com/repositories/1/pulls/2/files?per_page=100&page=1>; rel="prev", ' +
   '<https://api.github.com/repositories/1/pulls/2/files?per_page=100&page=1>; rel="first"';
-check('next 無し(最終ページ)は null', parseNextLink(lastPage) === null);
-check('ヘッダ無しは null', parseNextLink(null) === null);
-check('空文字は null', parseNextLink('') === null);
+check('no next (last page) is null', parseNextLink(lastPage) === null);
+check('no header is null', parseNextLink(null) === null);
+check('empty string is null', parseNextLink('') === null);
 
 if (failures > 0) {
   console.error(`FAIL: ${failures} check(s) failed`);

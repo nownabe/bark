@@ -1,14 +1,14 @@
-// 埋め込みメタデータのコーデック — Design Doc §7.1 / 決定 D5.
+// Embedded-metadata codec — Design Doc §7.1 / decision D5.
 //
-// レビューコメント本文の末尾に「ツールだけが読む」不可視マーカー(HTML コメント)を
-// 付け、ツールが文字単位アンカー・スレッド・状態を完全再現できるようにする。
-// GitHub 上では HTML コメントなので非表示、ツール未導入でも壊れない。
+// Append an invisible "tool-only" marker (an HTML comment) to the end of a
+// review comment body so the tool can fully restore char-level anchors, threads,
+// and state. On GitHub it is an HTML comment (hidden) and harmless without the tool.
 //
-// 設計からの改良: HTML コメントは仕様上 `--` を含められないため、quotedText に
-// `--`(例: `---`)が入ると生 JSON 埋め込みは壊れる。そこで JSON を UTF-8 安全な
-// base64 にしてから埋め込む(日本語 quote も安全)。
+// Improvement over the design: HTML comments cannot contain `--`, so a raw JSON
+// payload breaks when quotedText contains `--` (e.g. `---`). The JSON is therefore
+// UTF-8-safe base64 encoded (non-ASCII quotes are safe too).
 
-/** ソース上の範囲(start/end の line・col)。§7.1 の range。 */
+/** Range in the source (start/end line・col). The `range` of §7.1. */
 export interface AnchorRange {
   sl: number;
   sc: number;
@@ -16,23 +16,25 @@ export interface AnchorRange {
   ec: number;
 }
 
-/** コメント本文に埋め込む構造化メタデータ(§7.1)。 */
+/** Structured metadata embedded in a comment body (§7.1). */
 export interface CommentMetadata {
-  /** comment id(ローカル uuid)。 */
+  /** comment id (local uuid). */
   cid: string;
   path: string;
   range: AnchorRange;
-  /** 再アンカリング(§7.8)用の引用テキスト。 */
+  /** quoted text used for re-anchoring (§7.8). */
   quote: string;
-  /** どの時点のソースに対する指摘か(createdAtSha, §7.9)。 */
+  /** which source revision the comment was made against (createdAtSha, §7.9). */
   sha: string;
-  /** 会話のまとまり(threadId, §7.1)。 */
+  /** conversation grouping (threadId, §7.1). */
   thread: string;
-  /** comment | suggestion(§7.2)。省略時は comment 扱い。 */
+  /** comment | suggestion (§7.2). Treated as comment when omitted. */
   kind?: 'comment' | 'suggestion';
 }
 
-const MARKER_RE = /\n*<!--\s*docreview:v1\s+([A-Za-z0-9+/=]+)\s*-->\s*$/;
+const MARKER = 'bark:v1';
+// Emit `bark:v1`; also recognize the legacy `docreview:v1` for backward compatibility.
+const MARKER_RE = /\n*<!--\s*(?:bark|docreview):v1\s+([A-Za-z0-9+/=]+)\s*-->\s*$/;
 
 function toBase64(s: string): string {
   const bytes = new TextEncoder().encode(s);
@@ -47,15 +49,15 @@ function fromBase64(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-/** 可視本文の末尾に不可視メタデータマーカーを付けて返す。 */
+/** Append the invisible metadata marker to the end of the visible body. */
 export function embedMetadata(visibleBody: string, meta: CommentMetadata): string {
   const payload = toBase64(JSON.stringify(meta));
-  return `${visibleBody.trimEnd()}\n\n<!-- docreview:v1 ${payload} -->`;
+  return `${visibleBody.trimEnd()}\n\n<!-- ${MARKER} ${payload} -->`;
 }
 
 /**
- * コメント本文からメタデータを抽出し、可視本文と分離する。
- * マーカーが無い/壊れている場合は meta=null(行アンカーへ degrade, §12-8)。
+ * Extract metadata from a comment body and split off the visible text.
+ * If the marker is missing or corrupt, meta is null (degrade to line anchor, §12-8).
  */
 export function extractMetadata(body: string): { body: string; meta: CommentMetadata | null } {
   const m = body.match(MARKER_RE);

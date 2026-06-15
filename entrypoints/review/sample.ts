@@ -1,23 +1,27 @@
-// Local sample document for offline verification of 難所#1.
-// 後続スライスで GitHub から取得した .md ソースに差し替える。
-export const sampleDoc = `# DocReview サンプル
+// Local sample document for offline verification.
+// Replaced by the .md source fetched from GitHub in normal use.
+export const sampleDoc = `# Bark sample
 
-これは **レンダリング → ソース位置マッピング** を検証するためのサンプルです。
-任意のテキストをドラッグ選択すると、右パネルにソース上のアンカー
-(offset / line:col / quotedText)が表示されます。
+This sample exists to verify **rendering and source-position mapping**.
+Drag-select any text and the right panel shows the resolved anchor
+(offset / line:col / quotedText).
 
-## 段落とインライン
+## Paragraphs and inline elements
 
-文中の *強調* や \`inline code\`、[リンク](https://example.com) を
-またいで選択しても、文字単位で範囲が解決できることを確認します。
+This text contains *emphasis*, \`inline code\`, and a
+[link](https://example.com). Selecting across them should still resolve a
+character-precise range.
 
-## リスト
+In particular, inline code (\`const x = 1\`) is a token with delimiters and
+clamps to the token boundary rather than mapping per character.
 
-- 1つ目の項目
-- 2つ目の項目（**太字**を含む）
-- 3つ目の項目
+## Lists
 
-## コードブロック
+- First item
+- Second item (with **bold**)
+- Third item (with \`code\`)
+
+## Code block
 
 \`\`\`ts
 function hello(name: string) {
@@ -25,5 +29,5 @@ function hello(name: string) {
 }
 \`\`\`
 
-最後の段落。ここまでがサンプルドキュメントです。
+The final paragraph. This is the end of the sample document.
 `;

@@ -22,29 +22,29 @@ const meta: CommentMetadata = {
   thread: 't1',
 };
 
-// 1) head == createdAtSha → current(保存 line/col をそのまま使用)
+// 1) head == createdAtSha → current (use saved line/col as-is)
 {
   const ls = buildLineIndex(original);
   const r = reanchorComment(original, ls, meta, 'sha-original');
-  check('同一 SHA は current', r.status === 'current');
-  check('current の offset が "quick" を指す', original.slice(r.startOffset, r.endOffset) === 'quick');
+  check('same SHA is current', r.status === 'current');
+  check('current offset points to "quick"', original.slice(r.startOffset, r.endOffset) === 'quick');
 }
 
-// 2) 行が挿入されてズレた新ソース → quote で再アンカー
+// 2) New source shifted by an inserted line → re-anchor via quote
 {
   const shifted = 'NEW HEADER\n\nline one\nthe quick brown fox\nline three\n';
   const ls = buildLineIndex(shifted);
   const r = reanchorComment(shifted, ls, meta, 'sha-new');
-  check('別 SHA + quote 一致は reanchored', r.status === 'reanchored');
-  check('reanchored が "quick" を正しく指す', shifted.slice(r.startOffset, r.endOffset) === 'quick');
+  check('different SHA + matching quote is reanchored', r.status === 'reanchored');
+  check('reanchored correctly points to "quick"', shifted.slice(r.startOffset, r.endOffset) === 'quick');
 }
 
-// 3) quote が消えた新ソース → outdated
+// 3) New source where the quote is gone → outdated
 {
   const removed = 'line one\nthe slow green turtle\nline three\n';
   const ls = buildLineIndex(removed);
   const r = reanchorComment(removed, ls, meta, 'sha-new');
-  check('quote 消失は outdated', r.status === 'outdated');
+  check('missing quote is outdated', r.status === 'outdated');
 }
 
 if (failures > 0) {

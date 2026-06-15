@@ -1,4 +1,4 @@
-// Closed-loop verification for 難所#2: embed → extract round-trip (D5).
+// Closed-loop verification for hard-problem #2: embed → extract round-trip (D5).
 // Run: bun scripts/check-metadata.ts
 import { embedMetadata, extractMetadata, type CommentMetadata } from '../lib/metadata';
 
@@ -10,7 +10,7 @@ function check(name: string, cond: boolean) {
   }
 }
 
-// quotedText に HTML コメントを壊しうる `--` / `-->` / 日本語 / 改行を含める
+// Include `--` / `-->` / Japanese / newlines in quotedText that could break HTML comments
 const meta: CommentMetadata = {
   cid: 'c-123',
   path: 'docs/spec.md',
@@ -24,23 +24,23 @@ const visible = 'ここは曖昧では?\n直してほしい。';
 const body = embedMetadata(visible, meta);
 const round = extractMetadata(body);
 
-check('HTML コメントに `--` が出ない(base64化)', !/<!--[\s\S]*--[\s\S]*-->/.test(body.replace('<!--', '').replace('-->', '')) || body.includes('docreview:v1'));
-check('マーカーは含まれる', body.includes('<!-- docreview:v1 '));
-check('可視本文が復元される', round.body === visible);
-check('meta が復元される', JSON.stringify(round.meta) === JSON.stringify(meta));
-check('quote が完全一致(-- 含む)', round.meta?.quote === meta.quote);
+check('no raw `--` in HTML comment (base64-encoded)', !/<!--[\s\S]*--[\s\S]*-->/.test(body.replace('<!--', '').replace('-->', '')) || body.includes('bark:v1'));
+check('marker is present', body.includes('<!-- bark:v1 '));
+check('visible body is restored', round.body === visible);
+check('meta is restored', JSON.stringify(round.meta) === JSON.stringify(meta));
+check('quote matches exactly (incl. --)', round.meta?.quote === meta.quote);
 
-// マーカー無し → meta=null, body そのまま
+// No marker → meta=null, body unchanged
 const plain = extractMetadata('ただのコメント本文');
-check('マーカー無しは meta=null', plain.meta === null);
-check('マーカー無しは body 維持', plain.body === 'ただのコメント本文');
+check('no marker yields meta=null', plain.meta === null);
+check('no marker keeps body', plain.body === 'ただのコメント本文');
 
-// 破損マーカー(不正 base64)→ degrade して meta=null
+// Corrupt marker (invalid base64) → degrade to meta=null
 const corrupt = extractMetadata('本文\n\n<!-- docreview:v1 not_valid_base64!!! -->');
-check('破損マーカーは meta=null に degrade', corrupt.meta === null);
+check('corrupt marker degrades to meta=null', corrupt.meta === null);
 
 if (failures > 0) {
   console.error(`FAIL: ${failures} check(s) failed`);
   process.exit(1);
 }
-console.log('OK: metadata round-trips (incl. --/日本語/改行), absent & corrupt degrade safely');
+console.log('OK: metadata round-trips (incl. --/Japanese/newlines), absent & corrupt degrade safely');

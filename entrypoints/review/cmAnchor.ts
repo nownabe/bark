@@ -1,6 +1,7 @@
-// CodeMirror 選択 → SourceAnchor 変換(§7.1 のアンカリング, CM 版)。
-// CM のドキュメントは常に Markdown ソースそのものなので、選択 from/to が直接
-// ソース offset になる。react-markdown DOM 逆引き(旧 rehypeSourcePos/anchor.ts)は不要。
+// CodeMirror selection -> SourceAnchor conversion (anchoring from §7.1, CM version).
+// The CM document is always the Markdown source itself, so the selection from/to
+// map directly to source offsets. react-markdown DOM reverse-lookup (the old
+// rehypeSourcePos/anchor.ts) is not needed.
 import type { EditorState } from '@codemirror/state';
 import type { SourceAnchor } from '../../lib/anchor';
 

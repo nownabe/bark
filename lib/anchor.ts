@@ -1,8 +1,8 @@
 // Selection → source anchor resolution — Design Doc §7.1.
 //
-// DOM の選択(Range)を、rehypeSourcePos が焼き込んだ data-so/data-eo を頼りに
-// ソース上の `{startOffset, endOffset, line/col, quotedText}` へ解決する。
-// quotedText は正準ソース(§D9)から切り出す(再アンカリング §7.8 のファジーマッチ用)。
+// Resolve a DOM selection (Range) to `{startOffset, endOffset, line/col, quotedText}`
+// in the source, using the data-so/data-eo that rehypeSourcePos baked in.
+// quotedText is sliced from the canonical source (§D9) (for fuzzy matching in re-anchoring §7.8).
 
 export interface SourceAnchor {
   startOffset: number;
@@ -14,7 +14,7 @@ export interface SourceAnchor {
   quotedText: string;
 }
 
-/** 各行の開始 offset 配列(0-based offset, 1-based line を返す変換に使う)。 */
+/** Array of each line's start offset (0-based offset; used to convert to 1-based line). */
 export function buildLineIndex(source: string): number[] {
   const starts = [0];
   for (let i = 0; i < source.length; i++) {
@@ -23,7 +23,7 @@ export function buildLineIndex(source: string): number[] {
   return starts;
 }
 
-/** offset → 1-based の {line, col}。lineStarts は buildLineIndex の戻り値。 */
+/** offset → 1-based {line, col}. lineStarts is the return value of buildLineIndex. */
 export function offsetToLineCol(
   offset: number,
   lineStarts: number[],
@@ -43,13 +43,13 @@ export function offsetToLineCol(
   return { line: ans + 1, col: offset - lineStarts[ans] + 1 };
 }
 
-/** line/col(1-based)→ source offset。lineStarts は buildLineIndex の戻り値。 */
+/** line/col (1-based) → source offset. lineStarts is the return value of buildLineIndex. */
 export function lineColToOffset(line: number, col: number, lineStarts: number[]): number {
   const base = lineStarts[Math.min(line - 1, lineStarts.length - 1)] ?? 0;
   return base + (col - 1);
 }
 
-/** source offset → DOM 上の {node, offset}(アンカー復元・ハイライト用, §R6)。 */
+/** source offset → DOM {node, offset} (for anchor restore / highlighting, §R6). */
 export function domPointForOffset(
   root: HTMLElement,
   offset: number,
@@ -65,14 +65,14 @@ export function domPointForOffset(
           const len = textNode.textContent?.length ?? 0;
           return { node: textNode, offset: Math.min(offset - so, len) };
         }
-        return { node: textNode, offset: 0 }; // 非線形トークンは先頭にクランプ
+        return { node: textNode, offset: 0 }; // Clamp non-linear tokens to the start
       }
     }
   }
   return null;
 }
 
-/** [start, end] の source offset から DOM Range を生成(見つからなければ null)。 */
+/** Build a DOM Range from the [start, end] source offsets (null if not found). */
 export function rangeForOffsets(root: HTMLElement, start: number, end: number): Range | null {
   const s = domPointForOffset(root, start);
   const e = domPointForOffset(root, end);
@@ -87,7 +87,7 @@ export function rangeForOffsets(root: HTMLElement, start: number, end: number): 
   return range;
 }
 
-/** 直近の data-so 持ち祖先要素の offset(ブロック単位フォールバック)。 */
+/** Offset of the nearest ancestor element that has data-so (block-level fallback). */
 function ancestorOffset(start: Element | null, root: HTMLElement): number | null {
   let el: Element | null = start;
   while (el && el !== root.parentElement) {
@@ -98,8 +98,8 @@ function ancestorOffset(start: Element | null, root: HTMLElement): number | null
 }
 
 /**
- * Range の端点(container, offset)をソース offset に変換。
- * @param isEnd この端点が選択範囲の終端側か(非線形トークンのクランプ方向に使う)
+ * Convert a Range endpoint (container, offset) to a source offset.
+ * @param isEnd Whether this endpoint is the end side of the selection (used for the clamp direction of non-linear tokens)
  */
 function endpointToOffset(
   container: Node,
@@ -107,19 +107,19 @@ function endpointToOffset(
   root: HTMLElement,
   isEnd: boolean,
 ): number | null {
-  // テキストノード: ラップ span の data-so + テキスト内 offset で文字単位解決
+  // Text node: char-level resolution via the wrapping span's data-so + in-text offset
   if (container.nodeType === Node.TEXT_NODE) {
     const parent = container.parentElement;
     const so = parent?.getAttribute('data-so');
     if (so != null) {
-      // 線形トークンのみ文字単位。非線形(inline code 等)は境界にクランプ。
+      // Char-level only for linear tokens. Non-linear (inline code, etc.) clamps to a boundary.
       if (parent?.getAttribute('data-dr-lin') === '1') return Number(so) + offset;
       const eo = parent?.getAttribute('data-eo');
       return isEnd && eo != null ? Number(eo) : Number(so);
     }
     return ancestorOffset(parent, root);
   }
-  // 要素ノード: offset は子ノードのインデックス。境界の子に data-so があれば使う
+  // Element node: offset is the child node index. Use the boundary child's data-so if present
   const el = container as HTMLElement;
   const child = el.childNodes[Math.min(offset, el.childNodes.length - 1)];
   if (child instanceof HTMLElement && child.dataset.so != null) return Number(child.dataset.so);
@@ -127,9 +127,9 @@ function endpointToOffset(
 }
 
 /**
- * 現在の選択範囲を SourceAnchor に解決。選択が無い/範囲外/解決不能なら null。
- * @param root レンダリング本文のルート要素
- * @param source 正準ソース Markdown
+ * Resolve the current selection to a SourceAnchor. Returns null if there is no selection / it's out of range / it can't be resolved.
+ * @param root Root element of the rendered body
+ * @param source Canonical source Markdown
  * @param lineStarts buildLineIndex(source)
  */
 export function resolveSelection(

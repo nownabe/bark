@@ -1,6 +1,7 @@
 // SPA shell — Design Doc §6.
-// ドキュメント面は CodeMirror 6(常時編集可、ソース正準 §13)。Obsidian 風 Raw/Preview。
-// 固定ヘッダに操作集約、コメントは位置順 + スレッド化、デバッグ情報は折りたたみ。
+// The document surface is CodeMirror 6 (always editable, source canonical §13),
+// Obsidian-style Raw/Preview. Controls live in a sticky header; comments are
+// position-sorted and threaded; debug info is collapsible.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
@@ -45,18 +46,18 @@ interface Thread {
 function errMessage(e: unknown): string {
   if (e instanceof GitHubApiError) {
     if (e.status === 401 || e.status === 403) {
-      return `認証エラー (${e.status})。トークンの権限/有効期限を確認してください。`;
+      return `Authentication error (${e.status}). Check the token's permissions/expiry.`;
     }
-    if (e.status === 404) return 'Not Found (404)。リポジトリ/PR/トークン権限を確認してください。';
+    if (e.status === 404) return 'Not Found (404). Check the repository / PR / token permissions.';
     return e.message;
   }
   return e instanceof Error ? e.message : String(e);
 }
 
-// ユーザー向けに意味のある状態のみ表示(current=正常は出さない)。
+// Show only states that are meaningful to the user (current = normal is hidden).
 const STATUS_LABEL: Partial<Record<AnchorStatus, string>> = {
-  reanchored: '位置がずれています',
-  outdated: '位置が見つかりません',
+  reanchored: 'position shifted',
+  outdated: 'position not found',
 };
 
 export function App() {
@@ -118,7 +119,7 @@ export function App() {
     return ext;
   }, [viewMode, role]);
 
-  // コメントを位置順に整列し thread でグループ化
+  // Sort comments by position and group them into threads.
   const threads = useMemo<Thread[]>(() => {
     const map = new Map<string, ExistingComment[]>();
     for (const c of comments) {
@@ -225,13 +226,13 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref?.owner, ref?.repo, ref?.number]);
 
-  // tracked-changes 用に base テキストを CM へ反映(reviewer サジェスト)
+  // Push the base text into CM for tracked changes (reviewer suggest).
   useEffect(() => {
     cmRef.current?.view?.dispatch({ effects: setBaseText.of(baseSource) });
   }, [baseSource]);
 
-  // コメント/下書きアンカーを CM 本文にハイライト(R6)。pending は青で区別。
-  // 位置は必ず現在の CM ドキュメント長でクリップする(範囲外を設定すると map 時に落ちる)。
+  // Highlight comment/draft anchors over the CM body (R6); pending uses a distinct color.
+  // Always clip ranges to the current CM document length (out-of-range ranges crash on map).
   useEffect(() => {
     const view = cmRef.current?.view;
     if (!view) return;
@@ -256,7 +257,7 @@ export function App() {
     view.dispatch({ effects: setCommentHighlights.of([...existing, ...pending]) });
   }, [comments, drafts, source, lineStarts, headSha, selectedPath]);
 
-  // 送信済み Suggestion を本文に tracked-changes 表示(旧=取り消し線 / 新=緑ブロック)
+  // Render submitted suggestions in the body as tracked changes (old = strikethrough / new = green block).
   useEffect(() => {
     const view = cmRef.current?.view;
     if (!view) return;
@@ -297,7 +298,7 @@ export function App() {
         kind: 'comment',
       }
     : null;
-  const previewBody = meta ? embedMetadata(commentBody || '(コメント本文)', meta) : '';
+  const previewBody = meta ? embedMetadata(commentBody || '(comment body)', meta) : '';
   const restored = previewBody ? extractMetadata(previewBody) : null;
 
   const routing = anchor
@@ -333,7 +334,7 @@ export function App() {
     setAnchor(null);
   };
 
-  // スレッド返信: root の anchor を引き継ぎ、同じ thread id で draft 追加
+  // Thread reply: inherit the root's anchor and add a draft with the same thread id.
   const addReply = async (root: ExistingComment) => {
     if (!ref || !root.meta || !replyText.trim()) return;
     const m = root.meta;
@@ -401,7 +402,10 @@ export function App() {
             .split('\n')
             .map((l) => `> ${l}`)
             .join('\n');
-          const note = d.kind === 'suggestion' ? '\n\n(diff 外のため提案は適用ボタンになりません)' : '';
+          const note =
+            d.kind === 'suggestion'
+              ? '\n\n(Out of diff: this suggestion will not show an Apply button.)'
+              : '';
           const visible = `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ''}`.trimEnd();
           issueBodies.push(embedMetadata(visible, dmeta));
         }
@@ -435,7 +439,7 @@ export function App() {
       await client.putFileContent(ref, {
         path: selectedPath,
         content: source,
-        message: `docs: edit ${selectedPath} via DocReview`,
+        message: `docs: edit ${selectedPath} via Bark`,
         sha: blobSha,
         branch: headRef,
       });
@@ -475,12 +479,13 @@ export function App() {
     setAnchor(null);
   };
 
-  // 編集 → 提案(reviewer)。base との行差分を Suggestion ドラフト化(任意でコメント付き)。
-  // 追加後はエディタを base に戻し、tracked changes を解消(提案は pending に保持)。
+  // Edit → suggestion (reviewer). Turn the line diff against base into suggestion
+  // drafts (with an optional comment). After adding, reset the editor to base to
+  // clear tracked changes (the suggestion is kept in pending).
   const addSuggestion = async () => {
     if (!ref || suggestionHunks.length === 0) return;
     const path = selectedPath ?? 'sample';
-    const body = suggestComment.trim() || '(編集の提案)';
+    const body = suggestComment.trim() || '(suggested edit)';
     const newDrafts: PendingDraft[] = suggestionHunks.map((h) => {
       const inDiff = isRangeInDiff(diffRanges, h.sl, h.el);
       const id = crypto.randomUUID();
@@ -503,10 +508,10 @@ export function App() {
     setDrafts(next);
     await saveDrafts(ref, next);
     setSuggestComment('');
-    setSource(baseSource); // tracked changes を解消(提案として確定)
+    setSource(baseSource); // clear tracked changes (finalized as a suggestion)
   };
 
-  // サイド項目クリック → 本文の該当位置へスクロール&選択ハイライト
+  // Side item click → scroll to the target in the body and highlight the selection.
   const jumpToOffsets = (from: number, to: number) => {
     const view = cmRef.current?.view;
     if (!view) return;
@@ -532,14 +537,14 @@ export function App() {
   if (ref && !token) {
     return (
       <div className="gate">
-        <h1>DocReview</h1>
+        <h1>Bark</h1>
         <p>
-          {owner}/{repo} #{prNum} を開くには GitHub の fine-grained PAT が必要です。
+          Opening {owner}/{repo} #{prNum} requires a GitHub fine-grained PAT.
         </p>
         <p className="notice--muted" style={{ fontSize: 13 }}>
-          対象リポジトリに <code>Contents: Read and Write</code> /{' '}
-          <code>Pull requests: Read and Write</code> を付与したトークンを発行してください(§7.6)。
-          トークンは <code>chrome.storage.local</code> にのみ保存され、外部には送信されません(§9)。
+          Issue a token with <code>Contents: Read and Write</code> /{' '}
+          <code>Pull requests: Read and Write</code> for the target repository (§7.6). The token is
+          stored only in <code>chrome.storage.local</code> and is never sent anywhere else (§9).
         </p>
         <input
           className="field"
@@ -550,7 +555,7 @@ export function App() {
           style={{ marginBottom: 12 }}
         />
         <button type="button" className="btn btn--primary" onClick={saveToken}>
-          保存して開く
+          Save and open
         </button>
       </div>
     );
@@ -564,7 +569,7 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <span className="topbar__brand">DocReview</span>
+        <span className="topbar__brand">Bark</span>
         {ref ? (
           <>
             <span className="topbar__meta">
@@ -614,26 +619,26 @@ export function App() {
             <button
               type="button"
               className="help-btn"
-              title="使い方"
-              aria-label="使い方"
+              title="Help"
+              aria-label="Help"
               onClick={() => setShowHelp((v) => !v)}
             >
               ?
             </button>
           </>
         ) : (
-          <span className="topbar__meta">sample document (PR 指定なし)</span>
+          <span className="topbar__meta">sample document (no PR specified)</span>
         )}
         {showHelp ? (
           <div className="popover" role="dialog">
-            <h3>使い方</h3>
+            <h3>How to use</h3>
             <ul>
-              <li>本文は常に編集可能(Markdown ソースが正準)。</li>
-              <li><strong>Preview / Raw</strong>: 表示を切替(どちらも編集可)。</li>
-              <li><strong>author</strong>: 本文を編集して <strong>Commit</strong>。テキスト選択でコメント。</li>
-              <li><strong>reviewer</strong>: テキスト選択でコメント。本文を編集すると変更が記録され、右の <strong>Suggestion</strong> から提案として追加(任意でコメント付き)。</li>
-              <li>コメントも提案も同じ <strong>Pending</strong> に溜め、<strong>Submit review</strong> で一括送信。</li>
-              <li>サイドの項目をクリックすると本文の該当位置へ移動・ハイライト。スレッドで返信できます。</li>
+              <li>The body is always editable (the Markdown source is canonical).</li>
+              <li><strong>Preview / Raw</strong>: switch the view (both editable).</li>
+              <li><strong>author</strong>: edit the body and <strong>Commit</strong>. Select text to comment.</li>
+              <li><strong>reviewer</strong>: select text to comment. Editing the body records changes; add them as a suggestion from <strong>Suggestion</strong> on the right (optionally with a comment).</li>
+              <li>Comments and suggestions queue in the same <strong>Pending</strong>; send them all with <strong>Submit review</strong>.</li>
+              <li>Click a side item to jump to and highlight its place in the body. You can reply within a thread.</li>
             </ul>
             <div className="popover__footer">
               {token ? (
@@ -645,23 +650,23 @@ export function App() {
                     setShowHelp(false);
                   }}
                 >
-                  トークンを削除
+                  Delete token
                 </button>
               ) : (
                 <span />
               )}
               <button type="button" className="btn btn--sm" onClick={() => setShowHelp(false)}>
-                閉じる
+                Close
               </button>
             </div>
           </div>
         ) : null}
       </header>
 
-      {loading ? <p className="notice notice--muted">読み込み中…</p> : null}
+      {loading ? <p className="notice notice--muted">Loading…</p> : null}
       {error ? <p className="notice notice--error">{error}</p> : null}
       {ref && !loading && !error && files.length === 0 ? (
-        <p className="notice notice--muted">この PR に変更された .md ファイルがありません。</p>
+        <p className="notice notice--muted">This PR has no changed .md files.</p>
       ) : null}
 
       <div className="layout">
@@ -710,14 +715,14 @@ export function App() {
                 value={commentBody}
                 onChange={(e) => setCommentBody(e.target.value)}
                 rows={3}
-                placeholder="この選択範囲へのコメント"
+                placeholder="Comment on the selected range"
               />
               <div className="composer__row">
                 <button type="button" className="btn btn--primary btn--sm" onClick={addDraft}>
-                  追加
+                  Add
                 </button>
                 <button type="button" className="btn btn--sm" onClick={() => setAnchor(null)}>
-                  キャンセル
+                  Cancel
                 </button>
               </div>
             </section>
@@ -728,18 +733,18 @@ export function App() {
             <section className="panel">
               <h2 className="panel__title">Suggestion ({suggestionHunks.length})</h2>
               <p className="empty" style={{ marginBottom: 8 }}>
-                本文の編集が提案になります。任意でコメントを添えられます。
+                Your edits become a suggestion. You can optionally add a comment.
               </p>
               <textarea
                 className="field"
                 value={suggestComment}
                 onChange={(e) => setSuggestComment(e.target.value)}
                 rows={2}
-                placeholder="コメント(任意)"
+                placeholder="Comment (optional)"
               />
               <div className="composer__row">
                 <button type="button" className="btn btn--primary btn--sm" onClick={addSuggestion}>
-                  追加
+                  Add
                 </button>
                 <button
                   type="button"
@@ -749,7 +754,7 @@ export function App() {
                     setSuggestComment('');
                   }}
                 >
-                  編集を破棄
+                  Discard edits
                 </button>
               </div>
             </section>
@@ -760,7 +765,7 @@ export function App() {
             <section className="panel">
               <h2 className="panel__title">Pending ({drafts.length})</h2>
               {drafts.length === 0 ? (
-                <p className="empty">下書きはありません。</p>
+                <p className="empty">No drafts.</p>
               ) : (
                 <>
                   {drafts.map((d) => (
@@ -789,7 +794,7 @@ export function App() {
                             removeDraft(d.cid);
                           }}
                         >
-                          削除
+                          Delete
                         </button>
                       </div>
                     </div>
@@ -807,7 +812,7 @@ export function App() {
             <section className="panel">
               <h2 className="panel__title">Comments ({comments.length})</h2>
               {threads.length === 0 ? (
-                <p className="empty">既存コメントはありません。</p>
+                <p className="empty">No existing comments.</p>
               ) : (
                 threads.map((t) => {
                   const st = statusFor(t.root);
@@ -844,10 +849,10 @@ export function App() {
                                 <div className="comment__body">{stripSuggestionBlock(c.body)}</div>
                               ) : null}
                               <div className="sugg-old">{c.meta.quote}</div>
-                              <div className="sugg-new">{extractSuggestionBlock(c.body) || '(削除)'}</div>
+                              <div className="sugg-new">{extractSuggestionBlock(c.body) || '(delete)'}</div>
                             </>
                           ) : (
-                            <div className="comment__body">{c.body || '(本文なし)'}</div>
+                            <div className="comment__body">{c.body || '(no body)'}</div>
                           )}
                         </div>
                       ))}
@@ -862,7 +867,7 @@ export function App() {
                               setReplyText('');
                             }}
                           >
-                            返信
+                            Reply
                           </button>
                         </div>
                       ) : null}
@@ -873,11 +878,11 @@ export function App() {
                             value={replyText}
                             onChange={(e) => setReplyText(e.target.value)}
                             rows={2}
-                            placeholder="返信(同じスレッドに追加)"
+                            placeholder="Reply (added to the same thread)"
                           />
                           <div className="composer__row">
                             <button type="button" className="btn btn--primary btn--sm" onClick={() => addReply(t.root)}>
-                              追加
+                              Add
                             </button>
                             <button
                               type="button"
@@ -887,7 +892,7 @@ export function App() {
                                 setReplyText('');
                               }}
                             >
-                              キャンセル
+                              Cancel
                             </button>
                           </div>
                         </div>
@@ -898,7 +903,6 @@ export function App() {
               )}
             </section>
           ) : null}
-
         </aside>
       </div>
 
@@ -906,8 +910,8 @@ export function App() {
       <button
         type="button"
         className="debug-fab"
-        title="デバッグ情報"
-        aria-label="デバッグ情報"
+        title="Debug info"
+        aria-label="Debug info"
         onClick={() => setShowDebug((v) => !v)}
       >
         🐛
@@ -917,7 +921,7 @@ export function App() {
           <div className="composer__row" style={{ justifyContent: 'space-between', marginTop: 0 }}>
             <strong>Debug</strong>
             <button type="button" className="btn btn--sm" onClick={() => setShowDebug(false)}>
-              閉じる
+              Close
             </button>
           </div>
           <dl>
@@ -946,17 +950,17 @@ export function App() {
               </dl>
               <div style={{ marginTop: 8 }}>quoted:</div>
               <pre>{anchor.quotedText}</pre>
-              <div style={{ marginTop: 8 }}>投稿予定の GitHub 本文:</div>
+              <div style={{ marginTop: 8 }}>GitHub body to be posted:</div>
               <pre>{previewBody}</pre>
               {restored?.meta ? (
                 <p style={{ color: 'var(--green)' }}>
-                  ✓ ライブ往復 OK: L{restored.meta.range.sl}:{restored.meta.range.sc}–L
+                  ✓ live round-trip OK: L{restored.meta.range.sl}:{restored.meta.range.sc}–L
                   {restored.meta.range.el}:{restored.meta.range.ec}
                 </p>
               ) : null}
             </>
           ) : (
-            <p className="empty">本文を選択するとアンカー情報を表示します。</p>
+            <p className="empty">Select text in the body to see anchor info.</p>
           )}
         </div>
       ) : null}
