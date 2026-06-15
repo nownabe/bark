@@ -1,0 +1,5 @@
+# Treat `ubuntu-slim` as a known (self-hosted/custom) runner label so actionlint
+# does not flag it as an unknown runner.
+self-hosted-runner:
+  labels:
+    - ubuntu-slim

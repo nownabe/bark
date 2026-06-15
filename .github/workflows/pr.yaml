@@ -79,6 +79,7 @@ jobs:
       - shellcheck
     runs-on: ubuntu-slim
     timeout-minutes: 5
+    permissions: {}
     steps:
       - name: Check job results
         env:
