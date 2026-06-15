@@ -5,7 +5,6 @@ node_modules
 .output
 .wxt
 .cache
-.devbox
 
 # Historical planning docs (kept as originally authored)
 docreview-design-doc.md
@@ -18,5 +17,5 @@ env-suggestion.md
 
 # Tooling / editor / environment config
 .claude/
-devbox.json
-devbox.lock
+mise.toml
+mise.lock

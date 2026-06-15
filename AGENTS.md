@@ -14,17 +14,17 @@ documentation (READMEs, design docs, etc.). Chat with the user may be in their
 language, but anything committed or published to the repository or GitHub must be
 in English.
 
-## Toolchain: devbox
+## Toolchain: mise
 
-- The project toolchain (e.g. `bun`, `jq`) is declared in `devbox.json`. Binaries resolve to `/nix/store` (outside `$HOME`, world-readable), linked from the project-local `.devbox` profile.
-- **Launch agents from `devbox shell --pure`**, then run `claude`. `--pure` avoids loading shell rc files, so the sandbox does not need read access to them.
-- Add `.devbox/` and `.cache/` to `.gitignore`. Point tool caches inside the project (e.g. `BUN_INSTALL_CACHE_DIR=$PWD/.cache/bun`) since `$HOME` is neither readable nor writable from the sandbox.
+- The project toolchain (`bun`, `oxlint`, `oxfmt`, `actionlint`, `ghalint`, `zizmor`, `direnv`) is declared in `mise.toml` with pinned versions; `mise.lock` records the resolved versions (`[settings] lockfile = true`). Run `mise install` to materialize them. Unlike devbox, mise installs tools under `~/.local/share/mise` instead of into the project tree, so there is nothing toolchain-related to add to `.gitignore`.
+- **Launch agents with the mise toolchain active** — e.g. `mise exec -- claude`, or let `direnv` activate mise through the project `.envrc` (see `.envrc.example`) — then run `claude`.
+- mise replaced devbox because devbox's Nix-profile directory symlinks (`.devbox/nix/profile/...`) made the Claude Code sandbox's bwrap initialization fail, taking down every sandboxed command. See `env-suggestion.md` for the full diagnosis.
 
 ## Sandbox (the autonomy engine)
 
 Configured in `.claude/settings.json`. Sandboxed bash is auto-approved (`autoAllowBashIfSandboxed`) because the boundary makes it safe:
 
-- **Read**: `denyRead: ["~/"]` + `allowRead: ["."]`. Only the project dir and `/nix/store` are visible — no credentials, shell history, or other repos.
+- **Read**: `denyRead: ["~/"]` + `allowRead: ["."]`. Only the project dir is visible — no credentials, shell history, or other repos.
 - **Write**: project dir + temp dirs only (sandbox default), plus `.git` is fully denied (see below).
 - **Network**: egress restricted to `network.allowedDomains`. This is the primary exfiltration control — even a malicious command can only reach allowlisted hosts. Keep the list minimal (e.g. GitHub, `registry.npmjs.org`) and add domains only when a real need appears.
 
@@ -49,13 +49,13 @@ A sandboxed, auto-approved write primitive (`sed -i`, `python`, the Edit tool) c
 
 git hooks run as children of the unsandboxed git process, so they execute **outside the sandbox** with full privileges.
 
-- The toolchain is on `PATH` (inherited from `devbox shell --pure`), so hooks can call project tools directly. Wrap them in `devbox run -- <cmd>` if the hook must also work when git is invoked outside the devbox shell (IDE, plain terminal, CI).
+- The toolchain is on `PATH` (inherited from the mise-activated shell), so hooks can call project tools directly. Wrap them in `mise exec -- <cmd>` if the hook must also work when git is invoked outside a mise-activated shell (IDE, plain terminal, CI).
 - Hooks are trusted; the safety net against planted/modified hooks is the `.git` denyWrite above.
 - Do not confuse these with Claude Code's own `settings.json` hooks — those are a separate host-side mechanism.
 
 ## When a sandboxed command fails
 
-When work fails because of a sandbox or devbox configuration restriction (not a real bug), **do not silently fall back to `dangerouslyDisableSandbox`**. Diagnose the cause and **record the proposed fix in `env-suggestion.md`** (at the repo root) instead of changing the config yourself. Append one entry per failure: the symptom, the diagnosed cause, and the narrowest config change that would fix it, following the most-secure-first principle. The user reviews `env-suggestion.md` and applies the changes; this keeps every environment-loosening decision human-gated. Use this table to map the failure to the right setting to write down:
+When work fails because of a sandbox or toolchain configuration restriction (not a real bug), **do not silently fall back to `dangerouslyDisableSandbox`**. Diagnose the cause and **record the proposed fix in `env-suggestion.md`** (at the repo root) instead of changing the config yourself. Append one entry per failure: the symptom, the diagnosed cause, and the narrowest config change that would fix it, following the most-secure-first principle. The user reviews `env-suggestion.md` and applies the changes; this keeps every environment-loosening decision human-gated. Use this table to map the failure to the right setting to write down:
 
 | Failure symptom | Likely cause | Proposed setting (narrowest first) |
 |---|---|---|
@@ -66,7 +66,7 @@ When work fails because of a sandbox or devbox configuration restriction (not a 
 | `Read-only file system` on `.git` | Intended: git writes must run outside the sandbox | Do **not** relax `.git` denyWrite. Ensure the command runs via `excludedCommands` (`git`/`gh`); a one-off may use `dangerouslyDisableSandbox` with user confirmation |
 
 Rules of thumb:
-- Write every proposal to `env-suggestion.md` — do not edit `.claude/settings.json`, `devbox.json`, or other config yourself. The file is the single place where all environment-improvement suggestions accumulate for the user to review.
+- Write every proposal to `env-suggestion.md` — do not edit `.claude/settings.json`, `mise.toml`, or other config yourself. The file is the single place where all environment-improvement suggestions accumulate for the user to review.
 - Each entry must propose the **most specific** change that unblocks the task (one host, one path, one subcommand) — never widen with `~/`, `/`, or `*` — and explain why it is safe. Prefer changing the tool's behavior (caches/output into the project) over loosening the sandbox.
 - `dangerouslyDisableSandbox` is a last resort for genuine one-offs, always with user confirmation — not a substitute for fixing the config.
 - Remember settings changes apply on the **next** session, so a settings fix needs a restart to take effect (a `dangerouslyDisableSandbox` retry can unblock the current session in the meantime).

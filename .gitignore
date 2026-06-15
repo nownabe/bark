@@ -1,7 +1,3 @@
-# devbox / toolchain
-.devbox/
-.cache/
-
 # node / wxt
 node_modules/
 .output/
