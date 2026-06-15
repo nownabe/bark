@@ -58,6 +58,15 @@ body {
 .topbar__meta strong {
   color: var(--fg);
 }
+.topbar__pr {
+  color: var(--fg);
+  font-weight: 700;
+  text-decoration: none;
+}
+.topbar__pr:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
 .topbar__spacer {
   flex: 1;
 }

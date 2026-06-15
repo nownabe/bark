@@ -585,9 +585,15 @@ export function App() {
         {ref ? (
           <>
             <span className="topbar__meta">
-              <strong>
-                {owner}/{repo} #{prNum}
-              </strong>
+              <a
+                className="topbar__pr"
+                href={`https://github.com/${owner}/${repo}/pull/${prNum}`}
+                target="_blank"
+                rel="noreferrer"
+                title="Open this pull request on GitHub"
+              >
+                {owner}/{repo} #{prNum} ↗
+              </a>
               {headSha ? <span>@ {headSha.slice(0, 7)}</span> : null}
             </span>
             {files.length > 0 ? (
