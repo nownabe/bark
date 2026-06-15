@@ -3,7 +3,7 @@
 // current doc is shown as:
 //   insertion = underline/green (.dr-ins), deletion = strikethrough widget (.dr-del)
 // The source stays canonical and remains editable.
-import { StateEffect, StateField } from '@codemirror/state';
+import { StateEffect, StateField } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -11,14 +11,14 @@ import {
   ViewPlugin,
   type ViewUpdate,
   WidgetType,
-} from '@codemirror/view';
-import { charDiffs } from '../../lib/suggest';
+} from "@codemirror/view";
+import { charDiffs } from "../../lib/suggest";
 
 export const setBaseText = StateEffect.define<string>();
 
 export const baseTextField = StateField.define<string>({
   create() {
-    return '';
+    return "";
   },
   update(value, tr) {
     for (const e of tr.effects) if (e.is(setBaseText)) return e.value;
@@ -34,8 +34,8 @@ class DeletedWidget extends WidgetType {
     return other.text === this.text;
   }
   toDOM() {
-    const span = document.createElement('span');
-    span.className = 'dr-del';
+    const span = document.createElement("span");
+    span.className = "dr-del";
     span.textContent = this.text;
     return span;
   }
@@ -55,7 +55,8 @@ function build(view: EditorView): DecorationSet {
     if (op === 0) {
       pos += text.length;
     } else if (op === 1) {
-      if (text.length > 0) decos.push(Decoration.mark({ class: 'dr-ins' }).range(pos, pos + text.length));
+      if (text.length > 0)
+        decos.push(Decoration.mark({ class: "dr-ins" }).range(pos, pos + text.length));
       pos += text.length;
     } else {
       // The deleted text is not in the doc, so show it as a strikethrough widget at the current position.
@@ -81,14 +82,14 @@ export const suggestDecorations = ViewPlugin.fromClass(
 );
 
 export const suggestTheme = EditorView.baseTheme({
-  '.dr-ins': {
-    backgroundColor: 'rgba(31,136,61,0.15)',
-    textDecoration: 'underline',
-    textDecorationColor: 'rgba(31,136,61,0.6)',
+  ".dr-ins": {
+    backgroundColor: "rgba(31,136,61,0.15)",
+    textDecoration: "underline",
+    textDecorationColor: "rgba(31,136,61,0.6)",
   },
-  '.dr-del': {
-    color: 'var(--red, #cf222e)',
-    textDecoration: 'line-through',
-    opacity: '0.8',
+  ".dr-del": {
+    color: "var(--red, #cf222e)",
+    textDecoration: "line-through",
+    opacity: "0.8",
   },
 });

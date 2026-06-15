@@ -2,10 +2,10 @@
 // Accumulate comments locally as "pending" and flush them to GitHub in bulk on Submit.
 // v1 holds lightweight data in chrome.storage.local (IndexedDB is introduced in a later
 // slice that handles large data such as snapshots). Key: pr:{owner}/{repo}#{n}:drafts.
-import { browser } from 'wxt/browser';
-import { storageKeys } from './storage';
-import type { AnchorRange } from './metadata';
-import type { PrRef } from './github';
+import { browser } from "wxt/browser";
+import { storageKeys } from "./storage";
+import type { AnchorRange } from "./metadata";
+import type { PrRef } from "./github";
 
 export interface PendingDraft {
   cid: string;
@@ -20,7 +20,7 @@ export interface PendingDraft {
   /** Visible body. */
   body: string;
   /** comment | suggestion (§7.3). */
-  kind: 'comment' | 'suggestion';
+  kind: "comment" | "suggestion";
   /** Replacement source lines for a suggestion (when kind==='suggestion'). */
   suggestion?: string;
   /** Blob permalink for out-of-diff comments. */

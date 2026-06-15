@@ -2,12 +2,12 @@
 // Convert the raw responses for review / issue comments into the tool's unified shape.
 // For tool-authored comments, restore the char-level anchor from embedded metadata;
 // "foreign" comments without metadata degrade to GitHub's line info (§12-8).
-import { extractMetadata, type CommentMetadata } from './metadata';
-import type { RawIssueComment, RawReviewComment } from './github';
+import { extractMetadata, type CommentMetadata } from "./metadata";
+import type { RawIssueComment, RawReviewComment } from "./github";
 
 export interface ExistingComment {
   id: number;
-  source: 'review' | 'issue';
+  source: "review" | "issue";
   author: string;
   /** Visible body with metadata stripped. */
   body: string;
@@ -26,8 +26,8 @@ export function normalizeComments(
     const { body, meta } = extractMetadata(c.body);
     return {
       id: c.id,
-      source: 'review',
-      author: c.user?.login ?? 'unknown',
+      source: "review",
+      author: c.user?.login ?? "unknown",
       body,
       meta,
       path: c.path,
@@ -38,8 +38,8 @@ export function normalizeComments(
     const { body, meta } = extractMetadata(c.body);
     return {
       id: c.id,
-      source: 'issue',
-      author: c.user?.login ?? 'unknown',
+      source: "issue",
+      author: c.user?.login ?? "unknown",
       body,
       meta,
     };

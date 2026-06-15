@@ -2,8 +2,8 @@
 // The target old text is shown with strikethrough, and the replacement text is shown
 // in a green block right after it.
 // Provided via StateField because it uses block decorations.
-import { StateEffect, StateField } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
+import { StateEffect, StateField } from "@codemirror/state";
+import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 
 export interface SuggestionMark {
   from: number;
@@ -21,9 +21,9 @@ class InsertWidget extends WidgetType {
     return other.text === this.text;
   }
   toDOM() {
-    const div = document.createElement('div');
-    div.className = 'dr-sugg-new';
-    div.textContent = this.text.length > 0 ? this.text : '(delete this range)';
+    const div = document.createElement("div");
+    div.className = "dr-sugg-new";
+    div.textContent = this.text.length > 0 ? this.text : "(delete this range)";
     return div;
   }
   ignoreEvent() {
@@ -43,12 +43,14 @@ export const suggestionMarksField = StateField.define<DecorationSet>({
         const decos = [];
         for (const m of e.value) {
           if (m.from < 0 || m.to > docLen || m.from >= m.to) continue;
-          decos.push(Decoration.mark({ class: 'dr-sugg-old' }).range(m.from, m.to));
+          decos.push(Decoration.mark({ class: "dr-sugg-old" }).range(m.from, m.to));
           const lineEnd = tr.state.doc.lineAt(m.to).to;
           decos.push(
-            Decoration.widget({ widget: new InsertWidget(m.replacement), block: true, side: 1 }).range(
-              lineEnd,
-            ),
+            Decoration.widget({
+              widget: new InsertWidget(m.replacement),
+              block: true,
+              side: 1,
+            }).range(lineEnd),
           );
         }
         next = Decoration.set(decos, true);
@@ -60,17 +62,17 @@ export const suggestionMarksField = StateField.define<DecorationSet>({
 });
 
 export const suggestionViewTheme = EditorView.baseTheme({
-  '.dr-sugg-old': {
-    textDecoration: 'line-through',
-    textDecorationColor: 'rgba(207,34,46,0.8)',
-    color: '#86181d',
+  ".dr-sugg-old": {
+    textDecoration: "line-through",
+    textDecorationColor: "rgba(207,34,46,0.8)",
+    color: "#86181d",
   },
-  '.dr-sugg-new': {
-    background: 'rgba(31,136,61,0.12)',
-    borderLeft: '3px solid rgba(31,136,61,0.7)',
-    padding: '2px 10px',
-    margin: '2px 0',
-    whiteSpace: 'pre-wrap',
-    color: '#1a7f37',
+  ".dr-sugg-new": {
+    background: "rgba(31,136,61,0.12)",
+    borderLeft: "3px solid rgba(31,136,61,0.7)",
+    padding: "2px 10px",
+    margin: "2px 0",
+    whiteSpace: "pre-wrap",
+    color: "#1a7f37",
   },
 });

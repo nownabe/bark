@@ -21,13 +21,8 @@ export interface CommentAnchor {
   createdAtSha: string;
 }
 
-export type CommentKind = 'comment' | 'suggestion';
-export type CommentStatus =
-  | 'pending'
-  | 'open'
-  | 'addressed'
-  | 'resolved'
-  | 'outdated';
+export type CommentKind = "comment" | "suggestion";
+export type CommentStatus = "pending" | "open" | "addressed" | "resolved" | "outdated";
 
 /** Comment structure shared by local drafts and embedded metadata (Design Doc §7.2). */
 export interface ReviewComment {
@@ -56,10 +51,10 @@ export interface ReviewCommentInput {
   path: string;
   /** The end line when the range spans multiple lines. */
   line: number;
-  side: 'RIGHT';
+  side: "RIGHT";
   /** Only for multi-line selections. */
   start_line?: number;
-  start_side?: 'RIGHT';
+  start_side?: "RIGHT";
   body: string;
 }
 
@@ -85,12 +80,12 @@ export interface PullInfo {
   headRef: string;
 }
 
-const API_BASE = 'https://api.github.com';
+const API_BASE = "https://api.github.com";
 
 /** UTF-8-safe base64 (for the contents API commit body; safe for non-ASCII too). */
 function utf8ToBase64(s: string): string {
   const bytes = new TextEncoder().encode(s);
-  let bin = '';
+  let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin);
 }
@@ -98,7 +93,7 @@ function utf8ToBase64(s: string): string {
 /** Extract the rel="next" URL from the `Link` header (null if absent). */
 export function parseNextLink(link: string | null): string | null {
   if (!link) return null;
-  for (const part of link.split(',')) {
+  for (const part of link.split(",")) {
     const m = part.match(/<([^>]+)>\s*;\s*rel="next"/);
     if (m) return m[1];
   }
@@ -118,7 +113,7 @@ export function buildBlobPermalink(
   startLine: number,
   endLine: number,
 ): string {
-  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
   const lines = startLine === endLine ? `L${startLine}` : `L${startLine}-L${endLine}`;
   return `https://github.com/${ref.owner}/${ref.repo}/blob/${sha}/${encoded}#${lines}`;
 }
@@ -129,7 +124,7 @@ export class GitHubApiError extends Error {
     message: string,
   ) {
     super(message);
-    this.name = 'GitHubApiError';
+    this.name = "GitHubApiError";
   }
 }
 
@@ -143,21 +138,24 @@ export class GitHubClient {
   private headers(extra?: Record<string, string>): Record<string, string> {
     return {
       Authorization: `Bearer ${this.token}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
       ...extra,
     };
   }
 
   /** Build an error that distinguishes rate limiting (§10). */
   private errorFor(res: Response, where: string): GitHubApiError {
-    if (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0') {
-      return new GitHubApiError(403, 'GitHub API rate limit reached. Please wait a moment and retry.');
+    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") {
+      return new GitHubApiError(
+        403,
+        "GitHub API rate limit reached. Please wait a moment and retry.",
+      );
     }
     return new GitHubApiError(res.status, `GitHub API ${res.status} for ${where}`);
   }
 
-  private async request(path: string, accept = 'application/vnd.github+json'): Promise<Response> {
+  private async request(path: string, accept = "application/vnd.github+json"): Promise<Response> {
     const res = await fetch(`${API_BASE}${path}`, { headers: this.headers({ Accept: accept }) });
     if (!res.ok) throw this.errorFor(res, path);
     return res;
@@ -171,19 +169,22 @@ export class GitHubClient {
       const res: Response = await fetch(url, { headers: this.headers() });
       if (!res.ok) throw this.errorFor(res, url);
       all.push(...((await res.json()) as T[]));
-      url = parseNextLink(res.headers.get('Link'));
+      url = parseNextLink(res.headers.get("Link"));
     }
     return all;
   }
 
   private async post(path: string, payload: unknown): Promise<void> {
     const res = await fetch(`${API_BASE}${path}`, {
-      method: 'POST',
-      headers: this.headers({ 'Content-Type': 'application/json' }),
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
-      throw new GitHubApiError(res.status, `GitHub API ${res.status} for ${path}: ${await res.text()}`);
+      throw new GitHubApiError(
+        res.status,
+        `GitHub API ${res.status} for ${path}: ${await res.text()}`,
+      );
     }
   }
 
@@ -194,7 +195,7 @@ export class GitHubClient {
   ): Promise<void> {
     await this.post(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews`, {
       commit_id: input.commitId,
-      event: 'COMMENT',
+      event: "COMMENT",
       comments: input.comments,
     });
   }
@@ -209,7 +210,7 @@ export class GitHubClient {
     const res = await this.request(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`);
     const json = (await res.json()) as { head?: { sha?: string; ref?: string } };
     if (!json.head?.sha || !json.head?.ref) {
-      throw new GitHubApiError(res.status, 'PR head not found');
+      throw new GitHubApiError(res.status, "PR head not found");
     }
     return { headSha: json.head.sha, headRef: json.head.ref };
   }
@@ -220,12 +221,12 @@ export class GitHubClient {
 
   /** The file's blob sha at the given branch (needed for conflict detection on commit, §7.4). */
   async getFileSha(ref: PrRef, path: string, branch: string): Promise<string> {
-    const encoded = path.split('/').map(encodeURIComponent).join('/');
+    const encoded = path.split("/").map(encodeURIComponent).join("/");
     const res = await this.request(
       `/repos/${ref.owner}/${ref.repo}/contents/${encoded}?ref=${encodeURIComponent(branch)}`,
     );
     const json = (await res.json()) as { sha?: string };
-    if (!json.sha) throw new GitHubApiError(res.status, 'file blob sha not found');
+    if (!json.sha) throw new GitHubApiError(res.status, "file blob sha not found");
     return json.sha;
   }
 
@@ -234,10 +235,10 @@ export class GitHubClient {
     ref: PrRef,
     input: { path: string; content: string; message: string; sha: string; branch: string },
   ): Promise<void> {
-    const encoded = input.path.split('/').map(encodeURIComponent).join('/');
+    const encoded = input.path.split("/").map(encodeURIComponent).join("/");
     const res = await fetch(`${API_BASE}/repos/${ref.owner}/${ref.repo}/contents/${encoded}`, {
-      method: 'PUT',
-      headers: this.headers({ 'Content-Type': 'application/json' }),
+      method: "PUT",
+      headers: this.headers({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         message: input.message,
         content: utf8ToBase64(input.content),
@@ -246,7 +247,10 @@ export class GitHubClient {
       }),
     });
     if (!res.ok) {
-      throw new GitHubApiError(res.status, `GitHub API ${res.status} for PUT contents: ${await res.text()}`);
+      throw new GitHubApiError(
+        res.status,
+        `GitHub API ${res.status} for PUT contents: ${await res.text()}`,
+      );
     }
   }
 
@@ -259,7 +263,7 @@ export class GitHubClient {
       `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/files?per_page=100`,
     );
     return files
-      .filter((f) => f.filename.toLowerCase().endsWith('.md') && f.status !== 'removed')
+      .filter((f) => f.filename.toLowerCase().endsWith(".md") && f.status !== "removed")
       .map((f) => ({ path: f.filename, status: f.status, patch: f.patch }));
   }
 
@@ -279,10 +283,10 @@ export class GitHubClient {
 
   /** File content at the given SHA (raw text = canonical source, §D9). */
   async getFileContent(ref: PrRef, path: string, sha: string): Promise<string> {
-    const encoded = path.split('/').map(encodeURIComponent).join('/');
+    const encoded = path.split("/").map(encodeURIComponent).join("/");
     const res = await this.request(
       `/repos/${ref.owner}/${ref.repo}/contents/${encoded}?ref=${encodeURIComponent(sha)}`,
-      'application/vnd.github.raw',
+      "application/vnd.github.raw",
     );
     return res.text();
   }
