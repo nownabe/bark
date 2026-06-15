@@ -6,6 +6,14 @@ Guidance for AI agents working in this repository. This file describes the **loc
 
 **Start from the most restrictive configuration; loosen the narrowest possible exception only when something actually breaks.** Autonomy comes from the sandbox boundary (filesystem + network), not from broad permission allowlists. Never pre-open paths, commands, or domains "just in case".
 
+## Language
+
+**Write everything others may read in English.** This includes issues, pull
+requests (titles and descriptions), commit messages, code comments, and
+documentation (READMEs, design docs, etc.). Chat with the user may be in their
+language, but anything committed or published to the repository or GitHub must be
+in English.
+
 ## Toolchain: devbox
 
 - The project toolchain (e.g. `bun`, `jq`) is declared in `devbox.json`. Binaries resolve to `/nix/store` (outside `$HOME`, world-readable), linked from the project-local `.devbox` profile.
