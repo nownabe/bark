@@ -6,10 +6,10 @@
 // found, it's outdated.
 // v1 uses an exact substring match of quotedText + the candidate nearest the original position
 // (true fuzzy/diff-based matching comes later).
-import { lineColToOffset } from './anchor';
-import type { CommentMetadata } from './metadata';
+import { lineColToOffset } from "./anchor";
+import type { CommentMetadata } from "./metadata";
 
-export type AnchorStatus = 'current' | 'reanchored' | 'outdated';
+export type AnchorStatus = "current" | "reanchored" | "outdated";
 
 export interface Reanchored {
   startOffset: number;
@@ -53,15 +53,15 @@ export function reanchorComment(
     return {
       startOffset: lineColToOffset(meta.range.sl, meta.range.sc, lineStarts),
       endOffset: lineColToOffset(meta.range.el, meta.range.ec, lineStarts),
-      status: 'current',
+      status: "current",
     };
   }
-  const quote = meta.quote ?? '';
-  if (quote.length === 0) return { startOffset: 0, endOffset: 0, status: 'outdated' };
+  const quote = meta.quote ?? "";
+  if (quote.length === 0) return { startOffset: 0, endOffset: 0, status: "outdated" };
 
   // Using the original line as a hint, match the quote against the current source
   const hint = lineColToOffset(meta.range.sl, meta.range.sc, lineStarts);
   const idx = nearestIndexOf(source, quote, hint);
-  if (idx < 0) return { startOffset: 0, endOffset: 0, status: 'outdated' };
-  return { startOffset: idx, endOffset: idx + quote.length, status: 'reanchored' };
+  if (idx < 0) return { startOffset: 0, endOffset: 0, status: "outdated" };
+  return { startOffset: idx, endOffset: idx + quote.length, status: "reanchored" };
 }

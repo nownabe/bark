@@ -18,7 +18,7 @@ export interface SourceAnchor {
 export function buildLineIndex(source: string): number[] {
   const starts = [0];
   for (let i = 0; i < source.length; i++) {
-    if (source[i] === '\n') starts.push(i + 1);
+    if (source[i] === "\n") starts.push(i + 1);
   }
   return starts;
 }
@@ -54,14 +54,14 @@ export function domPointForOffset(
   root: HTMLElement,
   offset: number,
 ): { node: Node; offset: number } | null {
-  const spans = root.querySelectorAll<HTMLElement>('span[data-so]');
+  const spans = root.querySelectorAll<HTMLElement>("span[data-so]");
   for (const span of spans) {
     const so = Number(span.dataset.so);
     const eo = Number(span.dataset.eo);
     if (offset >= so && offset <= eo) {
       const textNode = span.firstChild;
       if (textNode && textNode.nodeType === Node.TEXT_NODE) {
-        if (span.dataset.drLin === '1') {
+        if (span.dataset.drLin === "1") {
           const len = textNode.textContent?.length ?? 0;
           return { node: textNode, offset: Math.min(offset - so, len) };
         }
@@ -110,11 +110,11 @@ function endpointToOffset(
   // Text node: char-level resolution via the wrapping span's data-so + in-text offset
   if (container.nodeType === Node.TEXT_NODE) {
     const parent = container.parentElement;
-    const so = parent?.getAttribute('data-so');
+    const so = parent?.getAttribute("data-so");
     if (so != null) {
       // Char-level only for linear tokens. Non-linear (inline code, etc.) clamps to a boundary.
-      if (parent?.getAttribute('data-dr-lin') === '1') return Number(so) + offset;
-      const eo = parent?.getAttribute('data-eo');
+      if (parent?.getAttribute("data-dr-lin") === "1") return Number(so) + offset;
+      const eo = parent?.getAttribute("data-eo");
       return isEnd && eo != null ? Number(eo) : Number(so);
     }
     return ancestorOffset(parent, root);

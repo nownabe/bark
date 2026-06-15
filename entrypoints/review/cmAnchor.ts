@@ -2,8 +2,8 @@
 // The CM document is always the Markdown source itself, so the selection from/to
 // map directly to source offsets. react-markdown DOM reverse-lookup (the old
 // rehypeSourcePos/anchor.ts) is not needed.
-import type { EditorState } from '@codemirror/state';
-import type { SourceAnchor } from '../../lib/anchor';
+import type { EditorState } from "@codemirror/state";
+import type { SourceAnchor } from "../../lib/anchor";
 
 export function cmSelectionToAnchor(state: EditorState): SourceAnchor | null {
   const sel = state.selection.main;

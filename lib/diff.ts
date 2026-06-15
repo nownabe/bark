@@ -30,18 +30,18 @@ export function parseRightRanges(patch: string | undefined): RightRange[] {
     }
   };
 
-  for (const line of patch.split('\n')) {
-    if (line.startsWith('@@')) {
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@")) {
       flush();
       const m = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
       newLine = m ? Number(m[1]) : 0;
-    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+    } else if (line.startsWith("+") && !line.startsWith("+++")) {
       if (start === -1) start = newLine;
       end = newLine;
       newLine++;
-    } else if (line.startsWith('-') && !line.startsWith('---')) {
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
       // Deleted line: LEFT only. Don't advance newLine, and keep RIGHT-side continuity (no flush).
-    } else if (line.startsWith(' ')) {
+    } else if (line.startsWith(" ")) {
       if (start === -1) start = newLine;
       end = newLine;
       newLine++;

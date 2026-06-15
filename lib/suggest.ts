@@ -1,17 +1,17 @@
 // Reviewer edit → suggestion conversion + diff for tracked changes (R3/§7.3, equivalent to Google Docs suggestions).
 //  - charDiffs: char-level diff (for inline decoration: insert=underline / delete=strikethrough widget)
 //  - diffToSuggestions: split into hunks via line-level LCS and convert to GitHub suggestions (line replacement)
-import { diff_match_patch } from 'diff-match-patch';
+import { diff_match_patch } from "diff-match-patch";
 
 /** Extract the replacement text of a ```suggestion block from a comment body (null if absent). */
 export function extractSuggestionBlock(body: string): string | null {
   const m = body.match(/```suggestion\n?([\s\S]*?)```/);
-  return m ? m[1].replace(/\n$/, '') : null;
+  return m ? m[1].replace(/\n$/, "") : null;
 }
 
 /** The visible text of a comment body with the suggestion block removed. */
 export function stripSuggestionBlock(body: string): string {
-  return body.replace(/```suggestion\n?[\s\S]*?```/g, '').trim();
+  return body.replace(/```suggestion\n?[\s\S]*?```/g, "").trim();
 }
 
 /** Char-level diff [op(-1 del / 0 eq / 1 ins), text]. For inline tracked-changes decoration. */
@@ -33,7 +33,7 @@ export interface SuggestionHunk {
 }
 
 function splitLines(s: string): string[] {
-  return s.endsWith('\n') ? s.slice(0, -1).split('\n') : s.split('\n');
+  return s.endsWith("\n") ? s.slice(0, -1).split("\n") : s.split("\n");
 }
 
 type LineOp = { op: -1 | 0 | 1; text: string };
@@ -41,7 +41,7 @@ type LineOp = { op: -1 | 0 | 1; text: string };
 function lcsDiff(a: string[], b: string[]): LineOp[] {
   const n = a.length;
   const m = b.length;
-  const dp = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  const dp = Array.from({ length: n + 1 }, () => Array.from({ length: m + 1 }, () => 0));
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
       dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
@@ -99,8 +99,8 @@ export function diffToSuggestions(base: string, edited: string): SuggestionHunk[
       hunks.push({
         sl: startLine,
         el: startLine + del.length - 1,
-        replacement: ins.join('\n'),
-        quote: del.join('\n'),
+        replacement: ins.join("\n"),
+        quote: del.join("\n"),
       });
     }
     // Pure insertion (del.length===0) is unsupported in v1 since there's no target line

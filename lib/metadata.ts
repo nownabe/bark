@@ -29,16 +29,16 @@ export interface CommentMetadata {
   /** conversation grouping (threadId, §7.1). */
   thread: string;
   /** comment | suggestion (§7.2). Treated as comment when omitted. */
-  kind?: 'comment' | 'suggestion';
+  kind?: "comment" | "suggestion";
 }
 
-const MARKER = 'bark:v1';
+const MARKER = "bark:v1";
 // Emit `bark:v1`; also recognize the legacy `docreview:v1` for backward compatibility.
 const MARKER_RE = /\n*<!--\s*(?:bark|docreview):v1\s+([A-Za-z0-9+/=]+)\s*-->\s*$/;
 
 function toBase64(s: string): string {
   const bytes = new TextEncoder().encode(s);
-  let bin = '';
+  let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin);
 }

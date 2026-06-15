@@ -5,24 +5,24 @@
 //
 // Note: because tables use block decorations, they must be provided via a **StateField** rather than a ViewPlugin
 //     (CM6: "Block decorations may not be specified via plugins").
-import { syntaxTree } from '@codemirror/language';
-import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
-import { type EditorState, type Range, StateField } from '@codemirror/state';
+import { syntaxTree } from "@codemirror/language";
+import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
+import { type EditorState, type Range, StateField } from "@codemirror/state";
 
 function classFor(name: string): string | null {
-  if (name.startsWith('ATXHeading') || name.startsWith('SetextHeading')) {
+  if (name.startsWith("ATXHeading") || name.startsWith("SetextHeading")) {
     return `dr-h${Math.min(Number(name.slice(-1)) || 1, 6)}`;
   }
-  if (name === 'StrongEmphasis') return 'dr-strong';
-  if (name === 'Emphasis') return 'dr-em';
-  if (name === 'InlineCode') return 'dr-code';
+  if (name === "StrongEmphasis") return "dr-strong";
+  if (name === "Emphasis") return "dr-em";
+  if (name === "InlineCode") return "dr-code";
   return null;
 }
 
 function lineClassFor(name: string): string | null {
-  if (name === 'FencedCode' || name === 'CodeBlock') return 'dr-codeblock';
-  if (name === 'Blockquote') return 'dr-quote';
-  if (name === 'ListItem') return 'dr-list';
+  if (name === "FencedCode" || name === "CodeBlock") return "dr-codeblock";
+  if (name === "Blockquote") return "dr-quote";
+  if (name === "ListItem") return "dr-list";
   return null;
 }
 
@@ -37,15 +37,19 @@ class TableWidget extends WidgetType {
     return other.raw === this.raw && other.from === this.from;
   }
   toDOM(view: EditorView) {
-    const lines = this.raw.split('\n').filter((l) => l.trim().length > 0);
+    const lines = this.raw.split("\n").filter((l) => l.trim().length > 0);
     const parseRow = (line: string) =>
-      line.replace(/^\s*\|?/, '').replace(/\|?\s*$/, '').split('|').map((c) => c.trim());
-    const table = document.createElement('table');
-    table.className = 'dr-table';
+      line
+        .replace(/^\s*\|?/, "")
+        .replace(/\|?\s*$/, "")
+        .split("|")
+        .map((c) => c.trim());
+    const table = document.createElement("table");
+    table.className = "dr-table";
     if (lines.length > 0) {
       const hr = table.createTHead().insertRow();
       for (const cell of parseRow(lines[0])) {
-        const th = document.createElement('th');
+        const th = document.createElement("th");
         th.textContent = cell;
         hr.appendChild(th);
       }
@@ -58,7 +62,7 @@ class TableWidget extends WidgetType {
       }
     }
     // On click, place the cursor inside the table and switch to source editing.
-    table.addEventListener('mousedown', (e) => {
+    table.addEventListener("mousedown", (e) => {
       e.preventDefault();
       view.dispatch({ selection: { anchor: this.from + 1 } });
       view.focus();
@@ -79,7 +83,7 @@ function buildDecorations(state: EditorState): DecorationSet {
   syntaxTree(state).iterate({
     enter: (node) => {
       // Table: replace with an HTML widget when the cursor is outside, show source when inside.
-      if (node.name === 'Table') {
+      if (node.name === "Table") {
         const inside = cursor >= node.from && cursor <= node.to;
         if (!inside) {
           decos.push(
@@ -111,11 +115,11 @@ function buildDecorations(state: EditorState): DecorationSet {
       }
 
       // Hide delimiter markers on inactive lines
-      const isInlineCodeMark = node.name === 'CodeMark' && node.node.parent?.name === 'InlineCode';
+      const isInlineCodeMark = node.name === "CodeMark" && node.node.parent?.name === "InlineCode";
       const hideMark =
-        node.name === 'HeaderMark' ||
-        node.name === 'EmphasisMark' ||
-        node.name === 'QuoteMark' ||
+        node.name === "HeaderMark" ||
+        node.name === "EmphasisMark" ||
+        node.name === "QuoteMark" ||
         isInlineCodeMark;
       if (hideMark && node.to > node.from) {
         const line = state.doc.lineAt(node.from).number;
@@ -123,8 +127,8 @@ function buildDecorations(state: EditorState): DecorationSet {
           // Also hide the space right after heading ## / quote > (so no leading space remains).
           let to = node.to;
           if (
-            (node.name === 'HeaderMark' || node.name === 'QuoteMark') &&
-            state.doc.sliceString(to, to + 1) === ' '
+            (node.name === "HeaderMark" || node.name === "QuoteMark") &&
+            state.doc.sliceString(to, to + 1) === " "
           ) {
             to++;
           }
@@ -151,37 +155,37 @@ export const richMarkdown = StateField.define<DecorationSet>({
 });
 
 export const richMarkdownTheme = EditorView.baseTheme({
-  '.dr-h1': { fontSize: '1.6em', fontWeight: 'bold' },
-  '.dr-h2': { fontSize: '1.4em', fontWeight: 'bold' },
-  '.dr-h3': { fontSize: '1.2em', fontWeight: 'bold' },
-  '.dr-h4, .dr-h5, .dr-h6': { fontWeight: 'bold' },
-  '.dr-strong': { fontWeight: 'bold' },
-  '.dr-em': { fontStyle: 'italic' },
-  '.dr-code': {
-    fontFamily: 'monospace',
-    backgroundColor: 'rgba(175,184,193,0.2)',
-    borderRadius: '4px',
-    padding: '0 3px',
+  ".dr-h1": { fontSize: "1.6em", fontWeight: "bold" },
+  ".dr-h2": { fontSize: "1.4em", fontWeight: "bold" },
+  ".dr-h3": { fontSize: "1.2em", fontWeight: "bold" },
+  ".dr-h4, .dr-h5, .dr-h6": { fontWeight: "bold" },
+  ".dr-strong": { fontWeight: "bold" },
+  ".dr-em": { fontStyle: "italic" },
+  ".dr-code": {
+    fontFamily: "monospace",
+    backgroundColor: "rgba(175,184,193,0.2)",
+    borderRadius: "4px",
+    padding: "0 3px",
   },
-  '.dr-codeblock': {
-    fontFamily: 'monospace',
-    backgroundColor: 'rgba(175,184,193,0.15)',
+  ".dr-codeblock": {
+    fontFamily: "monospace",
+    backgroundColor: "rgba(175,184,193,0.15)",
   },
-  '.dr-quote': {
-    borderLeft: '3px solid #d0d7de',
-    paddingLeft: '12px',
-    color: '#57606a',
+  ".dr-quote": {
+    borderLeft: "3px solid #d0d7de",
+    paddingLeft: "12px",
+    color: "#57606a",
   },
-  '.dr-list': { paddingLeft: '8px' },
-  '.dr-table': {
-    borderCollapse: 'collapse',
-    margin: '8px 0',
-    fontSize: '0.95em',
+  ".dr-list": { paddingLeft: "8px" },
+  ".dr-table": {
+    borderCollapse: "collapse",
+    margin: "8px 0",
+    fontSize: "0.95em",
   },
-  '.dr-table th, .dr-table td': {
-    border: '1px solid #d0d7de',
-    padding: '4px 10px',
-    textAlign: 'left',
+  ".dr-table th, .dr-table td": {
+    border: "1px solid #d0d7de",
+    padding: "4px 10px",
+    textAlign: "left",
   },
-  '.dr-table th': { backgroundColor: '#f6f8fa', fontWeight: 'bold' },
+  ".dr-table th": { backgroundColor: "#f6f8fa", fontWeight: "bold" },
 });

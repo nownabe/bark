@@ -1,7 +1,7 @@
 // Highlight the anchor ranges of existing comments over the CM document (§R6, Google Docs style).
 // A StateField + theme whose ranges are swapped via the setCommentHighlights effect.
-import { StateEffect, StateField } from '@codemirror/state';
-import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
+import { StateEffect, StateField } from "@codemirror/state";
+import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 
 export interface HighlightRange {
   from: number;
@@ -12,8 +12,8 @@ export interface HighlightRange {
 
 export const setCommentHighlights = StateEffect.define<HighlightRange[]>();
 
-const commentMark = Decoration.mark({ class: 'dr-comment-hl' });
-const pendingMark = Decoration.mark({ class: 'dr-pending-hl' });
+const commentMark = Decoration.mark({ class: "dr-comment-hl" });
+const pendingMark = Decoration.mark({ class: "dr-pending-hl" });
 
 export const commentHighlightField = StateField.define<DecorationSet>({
   create() {
@@ -37,6 +37,6 @@ export const commentHighlightField = StateField.define<DecorationSet>({
 });
 
 export const commentHighlightTheme = EditorView.baseTheme({
-  '.dr-comment-hl': { backgroundColor: 'rgba(255, 212, 0, 0.35)' },
-  '.dr-pending-hl': { backgroundColor: 'rgba(9, 105, 218, 0.22)' },
+  ".dr-comment-hl": { backgroundColor: "rgba(255, 212, 0, 0.35)" },
+  ".dr-pending-hl": { backgroundColor: "rgba(9, 105, 218, 0.22)" },
 });

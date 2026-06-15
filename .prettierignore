@@ -1,0 +1,22 @@
+# Used by oxfmt (and Prettier) to skip files that should not be auto-formatted.
+
+# Build output / dependencies / caches
+node_modules
+.output
+.wxt
+.cache
+.devbox
+
+# Historical planning docs (kept as originally authored)
+docreview-design-doc.md
+docreview-handoff.md
+
+# Project docs / notes (not subject to code formatting)
+AGENTS.md
+CLAUDE.md
+env-suggestion.md
+
+# Tooling / editor / environment config
+.claude/
+devbox.json
+devbox.lock

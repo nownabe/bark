@@ -2,21 +2,21 @@
 // The document surface is CodeMirror 6 (always editable, source canonical §13),
 // Obsidian-style Raw/Preview. Controls live in a sticky header; comments are
 // position-sorted and threaded; debug info is collapsible.
-import { useEffect, useMemo, useRef, useState } from 'react';
-import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
-import { markdown } from '@codemirror/lang-markdown';
-import { languages } from '@codemirror/language-data';
-import { GFM } from '@lezer/markdown';
-import { EditorView } from '@codemirror/view';
-import { cmSelectionToAnchor } from './cmAnchor';
-import { commentHighlightField, commentHighlightTheme, setCommentHighlights } from './highlight';
-import { richMarkdown, richMarkdownTheme } from './richMarkdown';
-import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from './suggestMode';
-import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from './suggestionView';
-import { diffToSuggestions, extractSuggestionBlock, stripSuggestionBlock } from '../../lib/suggest';
-import { buildLineIndex, lineColToOffset, type SourceAnchor } from '../../lib/anchor';
-import { normalizeComments, type ExistingComment } from '../../lib/comments';
-import { reanchorComment, type AnchorStatus } from '../../lib/reanchor';
+import { useEffect, useMemo, useRef, useState } from "react";
+import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import { markdown } from "@codemirror/lang-markdown";
+import { languages } from "@codemirror/language-data";
+import { GFM } from "@lezer/markdown";
+import { EditorView } from "@codemirror/view";
+import { cmSelectionToAnchor } from "./cmAnchor";
+import { commentHighlightField, commentHighlightTheme, setCommentHighlights } from "./highlight";
+import { richMarkdown, richMarkdownTheme } from "./richMarkdown";
+import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from "./suggestMode";
+import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from "./suggestionView";
+import { diffToSuggestions, extractSuggestionBlock, stripSuggestionBlock } from "../../lib/suggest";
+import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
+import { normalizeComments, type ExistingComment } from "../../lib/comments";
+import { reanchorComment, type AnchorStatus } from "../../lib/reanchor";
 import {
   buildBlobPermalink,
   buildSuggestionBlock,
@@ -25,15 +25,15 @@ import {
   type ChangedFile,
   type PrRef,
   type ReviewCommentInput,
-} from '../../lib/github';
-import { isRangeInDiff, parseRightRanges } from '../../lib/diff';
-import { listDrafts, saveDrafts, type PendingDraft } from '../../lib/drafts';
-import { clearToken, getToken, setToken as persistToken } from '../../lib/storage';
-import { embedMetadata, extractMetadata, type CommentMetadata } from '../../lib/metadata';
-import { sampleDoc } from './sample';
+} from "../../lib/github";
+import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
+import { listDrafts, saveDrafts, type PendingDraft } from "../../lib/drafts";
+import { clearToken, getToken, setToken as persistToken } from "../../lib/storage";
+import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/metadata";
+import { sampleDoc } from "./sample";
 
-type Role = 'author' | 'reviewer';
-type ViewMode = 'raw' | 'preview';
+type Role = "author" | "reviewer";
+type ViewMode = "raw" | "preview";
 
 interface Thread {
   id: string;
@@ -48,7 +48,7 @@ function errMessage(e: unknown): string {
     if (e.status === 401 || e.status === 403) {
       return `Authentication error (${e.status}). Check the token's permissions/expiry.`;
     }
-    if (e.status === 404) return 'Not Found (404). Check the repository / PR / token permissions.';
+    if (e.status === 404) return "Not Found (404). Check the repository / PR / token permissions.";
     return e.message;
   }
   return e instanceof Error ? e.message : String(e);
@@ -56,40 +56,39 @@ function errMessage(e: unknown): string {
 
 // Show only states that are meaningful to the user (current = normal is hidden).
 const STATUS_LABEL: Partial<Record<AnchorStatus, string>> = {
-  reanchored: 'position shifted',
-  outdated: 'position not found',
+  reanchored: "position shifted",
+  outdated: "position not found",
 };
 
 export function App() {
   const params = new URLSearchParams(window.location.search);
-  const owner = params.get('owner');
-  const repo = params.get('repo');
-  const prNum = params.get('pr');
-  const ref: PrRef | null =
-    owner && repo && prNum ? { owner, repo, number: Number(prNum) } : null;
+  const owner = params.get("owner");
+  const repo = params.get("repo");
+  const prNum = params.get("pr");
+  const ref: PrRef | null = owner && repo && prNum ? { owner, repo, number: Number(prNum) } : null;
 
   const [token, setToken] = useState<string | null>(null);
   const [tokenLoaded, setTokenLoaded] = useState(false);
-  const [tokenInput, setTokenInput] = useState('');
+  const [tokenInput, setTokenInput] = useState("");
 
   const [files, setFiles] = useState<ChangedFile[]>([]);
   const [headSha, setHeadSha] = useState<string | null>(null);
   const [headRef, setHeadRef] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [source, setSource] = useState<string>(ref ? '' : sampleDoc);
-  const [baseSource, setBaseSource] = useState<string>(ref ? '' : sampleDoc);
+  const [source, setSource] = useState<string>(ref ? "" : sampleDoc);
+  const [baseSource, setBaseSource] = useState<string>(ref ? "" : sampleDoc);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [role, setRole] = useState<Role>('reviewer');
-  const [viewMode, setViewMode] = useState<ViewMode>('preview');
+  const [role, setRole] = useState<Role>("reviewer");
+  const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const [anchor, setAnchor] = useState<SourceAnchor | null>(null);
-  const [commentBody, setCommentBody] = useState('');
+  const [commentBody, setCommentBody] = useState("");
   const [comments, setComments] = useState<ExistingComment[]>([]);
   const [drafts, setDrafts] = useState<PendingDraft[]>([]);
   const [replyTo, setReplyTo] = useState<string | null>(null);
-  const [replyText, setReplyText] = useState('');
-  const [suggestComment, setSuggestComment] = useState('');
+  const [replyText, setReplyText] = useState("");
+  const [suggestComment, setSuggestComment] = useState("");
   const [showHelp, setShowHelp] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const cmRef = useRef<ReactCodeMirrorRef>(null);
@@ -101,7 +100,8 @@ export function App() {
     [files, selectedPath],
   );
   const suggestionHunks = useMemo(
-    () => (role === 'reviewer' && source !== baseSource ? diffToSuggestions(baseSource, source) : []),
+    () =>
+      role === "reviewer" && source !== baseSource ? diffToSuggestions(baseSource, source) : [],
     [role, source, baseSource],
   );
   const cmExtensions = useMemo(() => {
@@ -114,8 +114,8 @@ export function App() {
       suggestionViewTheme,
       baseTextField,
     ];
-    if (viewMode === 'preview') ext.push(richMarkdown, richMarkdownTheme);
-    if (role === 'reviewer') ext.push(suggestDecorations, suggestTheme);
+    if (viewMode === "preview") ext.push(richMarkdown, richMarkdownTheme);
+    if (role === "reviewer") ext.push(suggestDecorations, suggestTheme);
     return ext;
   }, [viewMode, role]);
 
@@ -135,7 +135,7 @@ export function App() {
         : (root.line ?? 1e9) * 100000;
       return { id, comments: cs, root, path: root.meta?.path ?? root.path, pos };
     });
-    const curPath = selectedPath ?? 'sample';
+    const curPath = selectedPath ?? "sample";
     list.sort((a, b) => {
       const af = a.path === curPath ? 0 : 1;
       const bf = b.path === curPath ? 0 : 1;
@@ -239,11 +239,11 @@ export function App() {
     const docLen = view.state.doc.length;
     const clip = (r: { from: number; to: number; pending?: boolean }) =>
       r.from >= 0 && r.to <= docLen && r.from < r.to;
-    const curPath = selectedPath ?? 'sample';
+    const curPath = selectedPath ?? "sample";
     const existing = comments
       .filter((c) => c.meta && c.meta.path === curPath)
-      .map((c) => reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? ''))
-      .filter((r) => r.status !== 'outdated')
+      .map((c) => reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? ""))
+      .filter((r) => r.status !== "outdated")
       .map((r) => ({ from: r.startOffset, to: r.endOffset }))
       .filter(clip);
     const pending = drafts
@@ -262,14 +262,19 @@ export function App() {
     const view = cmRef.current?.view;
     if (!view) return;
     const docLen = view.state.doc.length;
-    const curPath = selectedPath ?? 'sample';
+    const curPath = selectedPath ?? "sample";
     const marks = comments
-      .filter((c) => c.meta?.kind === 'suggestion' && c.meta.path === curPath)
+      .filter((c) => c.meta?.kind === "suggestion" && c.meta.path === curPath)
       .map((c) => {
-        const r = reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? '');
-        return { from: r.startOffset, to: r.endOffset, status: r.status, replacement: extractSuggestionBlock(c.body) ?? '' };
+        const r = reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? "");
+        return {
+          from: r.startOffset,
+          to: r.endOffset,
+          status: r.status,
+          replacement: extractSuggestionBlock(c.body) ?? "",
+        };
       })
-      .filter((m) => m.status !== 'outdated' && m.from >= 0 && m.to <= docLen && m.from < m.to)
+      .filter((m) => m.status !== "outdated" && m.from >= 0 && m.to <= docLen && m.from < m.to)
       .map(({ from, to, replacement }) => ({ from, to, replacement }));
     view.dispatch({ effects: setSuggestionMarks.of(marks) });
   }, [comments, source, lineStarts, headSha, selectedPath]);
@@ -277,40 +282,43 @@ export function App() {
   const jumpTo = (c: ExistingComment) => {
     const view = cmRef.current?.view;
     if (!view || !c.meta) return;
-    if (c.meta.path !== (selectedPath ?? 'sample')) {
+    if (c.meta.path !== (selectedPath ?? "sample")) {
       setSelectedPath(c.meta.path);
       return;
     }
-    const r = reanchorComment(source, lineStarts, c.meta, headSha ?? '');
-    if (r.status === 'outdated') return;
-    view.dispatch({ selection: { anchor: r.startOffset, head: r.endOffset }, scrollIntoView: true });
+    const r = reanchorComment(source, lineStarts, c.meta, headSha ?? "");
+    if (r.status === "outdated") return;
+    view.dispatch({
+      selection: { anchor: r.startOffset, head: r.endOffset },
+      scrollIntoView: true,
+    });
     view.focus();
   };
 
   const meta: CommentMetadata | null = anchor
     ? {
-        cid: 'preview',
-        path: selectedPath ?? 'sample',
+        cid: "preview",
+        path: selectedPath ?? "sample",
         range: { sl: anchor.startLine, sc: anchor.startCol, el: anchor.endLine, ec: anchor.endCol },
         quote: anchor.quotedText,
-        sha: headSha ?? '',
-        thread: 'preview',
-        kind: 'comment',
+        sha: headSha ?? "",
+        thread: "preview",
+        kind: "comment",
       }
     : null;
-  const previewBody = meta ? embedMetadata(commentBody || '(comment body)', meta) : '';
+  const previewBody = meta ? embedMetadata(commentBody || "(comment body)", meta) : "";
   const restored = previewBody ? extractMetadata(previewBody) : null;
 
   const routing = anchor
     ? isRangeInDiff(diffRanges, anchor.startLine, anchor.endLine)
-      ? ({ kind: 'review' } as const)
-      : ({ kind: 'issue' } as const)
+      ? ({ kind: "review" } as const)
+      : ({ kind: "issue" } as const)
     : null;
 
   const addDraft = async () => {
     if (!anchor || !ref) return;
     const inDiff = isRangeInDiff(diffRanges, anchor.startLine, anchor.endLine);
-    const path = selectedPath ?? 'sample';
+    const path = selectedPath ?? "sample";
     const id = crypto.randomUUID();
     const draft: PendingDraft = {
       cid: id,
@@ -318,10 +326,10 @@ export function App() {
       inDiff,
       range: { sl: anchor.startLine, sc: anchor.startCol, el: anchor.endLine, ec: anchor.endCol },
       quote: anchor.quotedText,
-      sha: headSha ?? '',
+      sha: headSha ?? "",
       thread: id,
-      body: commentBody.trim() || '(no comment)',
-      kind: 'comment',
+      body: commentBody.trim() || "(no comment)",
+      kind: "comment",
       permalink:
         !inDiff && headSha
           ? buildBlobPermalink(ref, path, headSha, anchor.startLine, anchor.endLine)
@@ -330,7 +338,7 @@ export function App() {
     const next = [...drafts, draft];
     setDrafts(next);
     await saveDrafts(ref, next);
-    setCommentBody('');
+    setCommentBody("");
     setAnchor(null);
   };
 
@@ -349,7 +357,7 @@ export function App() {
       sha: headSha ?? m.sha,
       thread: m.thread,
       body: replyText.trim(),
-      kind: 'comment',
+      kind: "comment",
       permalink:
         !inDiff && headSha
           ? buildBlobPermalink(ref, m.path, headSha, m.range.sl, m.range.el)
@@ -358,7 +366,7 @@ export function App() {
     const next = [...drafts, draft];
     setDrafts(next);
     await saveDrafts(ref, next);
-    setReplyText('');
+    setReplyText("");
     setReplyTo(null);
   };
 
@@ -386,32 +394,36 @@ export function App() {
           kind: d.kind,
         };
         const suggestion =
-          d.kind === 'suggestion' ? `\n\n${buildSuggestionBlock(d.suggestion ?? '')}` : '';
+          d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
         if (d.inDiff) {
           reviewComments.push({
             path: d.path,
-            side: 'RIGHT',
+            side: "RIGHT",
             line: d.range.el,
             ...(d.range.el !== d.range.sl
-              ? { start_line: d.range.sl, start_side: 'RIGHT' as const }
+              ? { start_line: d.range.sl, start_side: "RIGHT" as const }
               : {}),
             body: embedMetadata(`${d.body}${suggestion}`, dmeta),
           });
         } else {
           const quoted = d.quote
-            .split('\n')
+            .split("\n")
             .map((l) => `> ${l}`)
-            .join('\n');
+            .join("\n");
           const note =
-            d.kind === 'suggestion'
-              ? '\n\n(Out of diff: this suggestion will not show an Apply button.)'
-              : '';
-          const visible = `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ''}`.trimEnd();
+            d.kind === "suggestion"
+              ? "\n\n(Out of diff: this suggestion will not show an Apply button.)"
+              : "";
+          const visible =
+            `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
           issueBodies.push(embedMetadata(visible, dmeta));
         }
       }
       if (reviewComments.length > 0) {
-        await client.submitReview(ref, { commitId: headSha ?? undefined, comments: reviewComments });
+        await client.submitReview(ref, {
+          commitId: headSha ?? undefined,
+          comments: reviewComments,
+        });
       }
       for (const body of issueBodies) {
         await client.createIssueComment(ref, body);
@@ -465,7 +477,7 @@ export function App() {
     if (!t) return;
     await persistToken(t);
     setToken(t);
-    setTokenInput('');
+    setTokenInput("");
   };
 
   const handleClearToken = async () => {
@@ -474,8 +486,8 @@ export function App() {
     setFiles([]);
     setHeadSha(null);
     setSelectedPath(null);
-    setSource(ref ? '' : sampleDoc);
-    setBaseSource(ref ? '' : sampleDoc);
+    setSource(ref ? "" : sampleDoc);
+    setBaseSource(ref ? "" : sampleDoc);
     setAnchor(null);
   };
 
@@ -484,8 +496,8 @@ export function App() {
   // clear tracked changes (the suggestion is kept in pending).
   const addSuggestion = async () => {
     if (!ref || suggestionHunks.length === 0) return;
-    const path = selectedPath ?? 'sample';
-    const body = suggestComment.trim() || '(suggested edit)';
+    const path = selectedPath ?? "sample";
+    const body = suggestComment.trim() || "(suggested edit)";
     const newDrafts: PendingDraft[] = suggestionHunks.map((h) => {
       const inDiff = isRangeInDiff(diffRanges, h.sl, h.el);
       const id = crypto.randomUUID();
@@ -495,10 +507,10 @@ export function App() {
         inDiff,
         range: { sl: h.sl, sc: 1, el: h.el, ec: 1 },
         quote: h.quote,
-        sha: headSha ?? '',
+        sha: headSha ?? "",
         thread: id,
         body,
-        kind: 'suggestion',
+        kind: "suggestion",
         suggestion: h.replacement,
         permalink:
           !inDiff && headSha ? buildBlobPermalink(ref, path, headSha, h.sl, h.el) : undefined,
@@ -507,7 +519,7 @@ export function App() {
     const next = [...drafts, ...newDrafts];
     setDrafts(next);
     await saveDrafts(ref, next);
-    setSuggestComment('');
+    setSuggestComment("");
     setSource(baseSource); // clear tracked changes (finalized as a suggestion)
   };
 
@@ -522,7 +534,7 @@ export function App() {
   };
 
   const jumpToDraft = (d: PendingDraft) => {
-    if (d.path !== (selectedPath ?? 'sample')) {
+    if (d.path !== (selectedPath ?? "sample")) {
       setSelectedPath(d.path);
       return;
     }
@@ -542,7 +554,7 @@ export function App() {
           Opening {owner}/{repo} #{prNum} requires a GitHub fine-grained PAT.
         </p>
         <p className="notice--muted" style={{ fontSize: 13 }}>
-          Issue a token with <code>Contents: Read and Write</code> /{' '}
+          Issue a token with <code>Contents: Read and Write</code> /{" "}
           <code>Pull requests: Read and Write</code> for the target repository (§7.6). The token is
           stored only in <code>chrome.storage.local</code> and is never sent anywhere else (§9).
         </p>
@@ -562,8 +574,8 @@ export function App() {
   }
 
   const statusFor = (c: ExistingComment): AnchorStatus | null => {
-    if (!c.meta || c.meta.path !== (selectedPath ?? 'sample')) return null;
-    return reanchorComment(source, lineStarts, c.meta, headSha ?? '').status;
+    if (!c.meta || c.meta.path !== (selectedPath ?? "sample")) return null;
+    return reanchorComment(source, lineStarts, c.meta, headSha ?? "").status;
   };
 
   return (
@@ -581,7 +593,7 @@ export function App() {
             {files.length > 0 ? (
               <select
                 className="input"
-                value={selectedPath ?? ''}
+                value={selectedPath ?? ""}
                 onChange={(e) => {
                   setSelectedPath(e.target.value);
                   setAnchor(null);
@@ -596,23 +608,46 @@ export function App() {
             ) : null}
             <span className="topbar__spacer" />
             <div className="seg">
-              <button type="button" aria-pressed={viewMode === 'preview'} className="seg--dark" onClick={() => setViewMode('preview')}>
+              <button
+                type="button"
+                aria-pressed={viewMode === "preview"}
+                className="seg--dark"
+                onClick={() => setViewMode("preview")}
+              >
                 Preview
               </button>
-              <button type="button" aria-pressed={viewMode === 'raw'} className="seg--dark" onClick={() => setViewMode('raw')}>
+              <button
+                type="button"
+                aria-pressed={viewMode === "raw"}
+                className="seg--dark"
+                onClick={() => setViewMode("raw")}
+              >
                 Raw
               </button>
             </div>
             <div className="seg">
-              <button type="button" aria-pressed={role === 'author'} onClick={() => setRole('author')}>
+              <button
+                type="button"
+                aria-pressed={role === "author"}
+                onClick={() => setRole("author")}
+              >
                 author
               </button>
-              <button type="button" aria-pressed={role === 'reviewer'} onClick={() => setRole('reviewer')}>
+              <button
+                type="button"
+                aria-pressed={role === "reviewer"}
+                onClick={() => setRole("reviewer")}
+              >
                 reviewer
               </button>
             </div>
-            {role === 'author' && selectedPath ? (
-              <button type="button" className="btn btn--primary" onClick={commitEdit} disabled={loading}>
+            {role === "author" && selectedPath ? (
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={commitEdit}
+                disabled={loading}
+              >
                 Commit
               </button>
             ) : null}
@@ -634,11 +669,26 @@ export function App() {
             <h3>How to use</h3>
             <ul>
               <li>The body is always editable (the Markdown source is canonical).</li>
-              <li><strong>Preview / Raw</strong>: switch the view (both editable).</li>
-              <li><strong>author</strong>: edit the body and <strong>Commit</strong>. Select text to comment.</li>
-              <li><strong>reviewer</strong>: select text to comment. Editing the body records changes; add them as a suggestion from <strong>Suggestion</strong> on the right (optionally with a comment).</li>
-              <li>Comments and suggestions queue in the same <strong>Pending</strong>; send them all with <strong>Submit review</strong>.</li>
-              <li>Click a side item to jump to and highlight its place in the body. You can reply within a thread.</li>
+              <li>
+                <strong>Preview / Raw</strong>: switch the view (both editable).
+              </li>
+              <li>
+                <strong>author</strong>: edit the body and <strong>Commit</strong>. Select text to
+                comment.
+              </li>
+              <li>
+                <strong>reviewer</strong>: select text to comment. Editing the body records changes;
+                add them as a suggestion from <strong>Suggestion</strong> on the right (optionally
+                with a comment).
+              </li>
+              <li>
+                Comments and suggestions queue in the same <strong>Pending</strong>; send them all
+                with <strong>Submit review</strong>.
+              </li>
+              <li>
+                Click a side item to jump to and highlight its place in the body. You can reply
+                within a thread.
+              </li>
             </ul>
             <div className="popover__footer">
               {token ? (
@@ -677,8 +727,8 @@ export function App() {
               value={source}
               extensions={cmExtensions}
               basicSetup={{
-                lineNumbers: viewMode === 'raw',
-                foldGutter: viewMode === 'raw',
+                lineNumbers: viewMode === "raw",
+                foldGutter: viewMode === "raw",
                 highlightSelectionMatches: false,
               }}
               onChange={(v) => setSource(v)}
@@ -699,14 +749,14 @@ export function App() {
               <h2 className="panel__title">Comment</h2>
               {routing ? (
                 <p className="composer__routing">
-                  {routing.kind === 'review' ? (
+                  {routing.kind === "review" ? (
                     <span className="badge badge--review">review</span>
                   ) : (
                     <span className="badge badge--issue">issue + permalink</span>
-                  )}{' '}
+                  )}{" "}
                   <span className="notice--muted">
                     L{anchor.startLine}
-                    {anchor.endLine !== anchor.startLine ? `–L${anchor.endLine}` : ''}
+                    {anchor.endLine !== anchor.startLine ? `–L${anchor.endLine}` : ""}
                   </span>
                 </p>
               ) : null}
@@ -729,7 +779,7 @@ export function App() {
           ) : null}
 
           {/* suggestion (reviewer edits) */}
-          {role === 'reviewer' && suggestionHunks.length > 0 ? (
+          {role === "reviewer" && suggestionHunks.length > 0 ? (
             <section className="panel">
               <h2 className="panel__title">Suggestion ({suggestionHunks.length})</h2>
               <p className="empty" style={{ marginBottom: 8 }}>
@@ -751,7 +801,7 @@ export function App() {
                   className="btn btn--sm"
                   onClick={() => {
                     setSource(baseSource);
-                    setSuggestComment('');
+                    setSuggestComment("");
                   }}
                 >
                   Discard edits
@@ -775,13 +825,15 @@ export function App() {
                       onClick={() => jumpToDraft(d)}
                     >
                       <div className="comment__meta">
-                        <span className={`badge badge--${d.inDiff ? 'review' : 'issue'}`}>
-                          {d.inDiff ? 'review' : 'issue'}
+                        <span className={`badge badge--${d.inDiff ? "review" : "issue"}`}>
+                          {d.inDiff ? "review" : "issue"}
                         </span>
-                        {d.kind === 'suggestion' ? <span className="badge badge--suggestion">suggestion</span> : null}
+                        {d.kind === "suggestion" ? (
+                          <span className="badge badge--suggestion">suggestion</span>
+                        ) : null}
                         <span>
                           {d.path} L{d.range.sl}
-                          {d.range.el !== d.range.sl ? `–L${d.range.el}` : ''}
+                          {d.range.el !== d.range.sl ? `–L${d.range.el}` : ""}
                         </span>
                       </div>
                       <div className="comment__body">{d.body}</div>
@@ -799,7 +851,13 @@ export function App() {
                       </div>
                     </div>
                   ))}
-                  <button type="button" className="btn btn--primary" onClick={submitReview} disabled={loading} style={{ marginTop: 4 }}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={submitReview}
+                    disabled={loading}
+                    style={{ marginTop: 4 }}
+                  >
                     Submit review ({drafts.length})
                   </button>
                 </>
@@ -820,7 +878,7 @@ export function App() {
                   return (
                     <div
                       key={t.id}
-                      className={clickable ? 'thread thread--clickable' : 'thread'}
+                      className={clickable ? "thread thread--clickable" : "thread"}
                       onClick={clickable ? () => jumpTo(t.root) : undefined}
                     >
                       {t.root.meta ? (
@@ -831,7 +889,7 @@ export function App() {
                           <div className="comment__meta">
                             <span className="comment__author">@{c.author}</span>
                             <span>{c.source}</span>
-                            {i === 0 && c.meta?.kind === 'suggestion' ? (
+                            {i === 0 && c.meta?.kind === "suggestion" ? (
                               <span className="badge badge--suggestion">suggestion</span>
                             ) : null}
                             {i === 0 && st && STATUS_LABEL[st] ? (
@@ -839,20 +897,22 @@ export function App() {
                             ) : null}
                             {i === 0 && !c.meta ? (
                               <span className="badge badge--issue">
-                                {c.path ? `${c.path}:L${c.line ?? '?'}` : 'no anchor'}
+                                {c.path ? `${c.path}:L${c.line ?? "?"}` : "no anchor"}
                               </span>
                             ) : null}
                           </div>
-                          {c.meta?.kind === 'suggestion' ? (
+                          {c.meta?.kind === "suggestion" ? (
                             <>
                               {stripSuggestionBlock(c.body) ? (
                                 <div className="comment__body">{stripSuggestionBlock(c.body)}</div>
                               ) : null}
                               <div className="sugg-old">{c.meta.quote}</div>
-                              <div className="sugg-new">{extractSuggestionBlock(c.body) || '(delete)'}</div>
+                              <div className="sugg-new">
+                                {extractSuggestionBlock(c.body) || "(delete)"}
+                              </div>
                             </>
                           ) : (
-                            <div className="comment__body">{c.body || '(no body)'}</div>
+                            <div className="comment__body">{c.body || "(no body)"}</div>
                           )}
                         </div>
                       ))}
@@ -864,7 +924,7 @@ export function App() {
                             onClick={(e) => {
                               e.stopPropagation();
                               setReplyTo(replyTo === t.id ? null : t.id);
-                              setReplyText('');
+                              setReplyText("");
                             }}
                           >
                             Reply
@@ -881,7 +941,11 @@ export function App() {
                             placeholder="Reply (added to the same thread)"
                           />
                           <div className="composer__row">
-                            <button type="button" className="btn btn--primary btn--sm" onClick={() => addReply(t.root)}>
+                            <button
+                              type="button"
+                              className="btn btn--primary btn--sm"
+                              onClick={() => addReply(t.root)}
+                            >
                               Add
                             </button>
                             <button
@@ -889,7 +953,7 @@ export function App() {
                               className="btn btn--sm"
                               onClick={() => {
                                 setReplyTo(null);
-                                setReplyText('');
+                                setReplyText("");
                               }}
                             >
                               Cancel
@@ -918,7 +982,7 @@ export function App() {
       </button>
       {showDebug ? (
         <div className="debug-popover debug" role="dialog">
-          <div className="composer__row" style={{ justifyContent: 'space-between', marginTop: 0 }}>
+          <div className="composer__row" style={{ justifyContent: "space-between", marginTop: 0 }}>
             <strong>Debug</strong>
             <button type="button" className="btn btn--sm" onClick={() => setShowDebug(false)}>
               Close
@@ -930,9 +994,9 @@ export function App() {
               {role} / {viewMode}
             </dd>
             <dt>head</dt>
-            <dd>{headSha ? headSha.slice(0, 7) : '-'}</dd>
+            <dd>{headSha ? headSha.slice(0, 7) : "-"}</dd>
             <dt>edited</dt>
-            <dd>{source !== baseSource ? 'yes' : 'no'}</dd>
+            <dd>{source !== baseSource ? "yes" : "no"}</dd>
             <dt>drafts</dt>
             <dd>{drafts.length}</dd>
           </dl>
@@ -953,7 +1017,7 @@ export function App() {
               <div style={{ marginTop: 8 }}>GitHub body to be posted:</div>
               <pre>{previewBody}</pre>
               {restored?.meta ? (
-                <p style={{ color: 'var(--green)' }}>
+                <p style={{ color: "var(--green)" }}>
                   ✓ live round-trip OK: L{restored.meta.range.sl}:{restored.meta.range.sc}–L
                   {restored.meta.range.el}:{restored.meta.range.ec}
                 </p>
