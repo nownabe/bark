@@ -223,15 +223,20 @@ export function App() {
   }, [baseSource]);
 
   // コメント/下書きアンカーを CM 本文にハイライト(R6)。pending は青で区別。
+  // 位置は必ず現在の CM ドキュメント長でクリップする(範囲外を設定すると map 時に落ちる)。
   useEffect(() => {
     const view = cmRef.current?.view;
     if (!view) return;
+    const docLen = view.state.doc.length;
+    const clip = (r: { from: number; to: number; pending?: boolean }) =>
+      r.from >= 0 && r.to <= docLen && r.from < r.to;
     const curPath = selectedPath ?? 'sample';
     const existing = comments
       .filter((c) => c.meta && c.meta.path === curPath)
       .map((c) => reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? ''))
-      .filter((r) => r.status !== 'outdated' && r.endOffset > r.startOffset)
-      .map((r) => ({ from: r.startOffset, to: r.endOffset }));
+      .filter((r) => r.status !== 'outdated')
+      .map((r) => ({ from: r.startOffset, to: r.endOffset }))
+      .filter(clip);
     const pending = drafts
       .filter((d) => d.path === curPath)
       .map((d) => ({
@@ -239,7 +244,7 @@ export function App() {
         to: lineColToOffset(d.range.el, d.range.ec, lineStarts),
         pending: true,
       }))
-      .filter((r) => r.to > r.from);
+      .filter(clip);
     view.dispatch({ effects: setCommentHighlights.of([...existing, ...pending]) });
   }, [comments, drafts, source, lineStarts, headSha, selectedPath]);
 
