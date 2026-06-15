@@ -24,6 +24,7 @@ Google Docs の「選択してコメント」「提案モード」のような�
 ## 3. ゴール / 非ゴール (Goals / Non-Goals)
 
 ### ゴール
+
 - PR に含まれる変更済み `.md` ファイルを、レンダリング済みの形で全文レビューできる
 - 任意のテキスト範囲をドラッグ選択してコメントを付けられる（行ではなく範囲指定）
 - レビュワーが Suggestion（置換提案）を作成でき、GitHub の Suggestion として反映される
@@ -34,6 +35,7 @@ Google Docs の「選択してコメント」「提案モード」のような�
 - サーバーレス（拡張機能と GitHub API だけで完結）
 
 ### 非ゴール
+
 - リアルタイム共同編集（CRDT / WebSocket 等）。今回は非同期で十分
 - GitHub Enterprise / GHES 対応（v1 では github.com のみ）
 - Markdown 以外のファイル形式のレビュー
@@ -42,6 +44,7 @@ Google Docs の「選択してコメント」「提案モード」のような�
 ## 4. ペルソナと主要フロー
 
 ### 4.1 レビュワー
+
 1. PR ページの "Files changed" 付近に挿入された「Open in DocReview」ボタンを押す
 2. 拡張機能の SPA が開き、変更された `.md` がレンダリング表示される
 3. 気になる箇所をドラッグ選択 → サイドにコメント or Suggestion を入力
@@ -49,6 +52,7 @@ Google Docs の「選択してコメント」「提案モード」のような�
 5. 「Submit review」で、まとめて 1 件の PR レビューとして GitHub に反映
 
 ### 4.2 Author
+
 1. 同じ DocReview ビューを開く
 2. レビュワーの Suggestion を確認し、編集モードで本文を直接編集
 3. 「Commit」を押した時点で、変更が PR の head ブランチにコミットされる
@@ -56,18 +60,18 @@ Google Docs の「選択してコメント」「提案モード」のような�
 
 ## 5. 要件 (Requirements)
 
-| ID | 要件 | 優先度 |
-|----|------|--------|
-| R1 | 変更済み `.md` をレンダリング表示し全文レビュー可能 | Must |
-| R2 | 任意範囲選択へのコメント | Must |
-| R3 | Suggestion（範囲置換提案）の作成 → GitHub Suggestion 化 | Must |
-| R4 | コメント/Suggestion のローカル下書き → GitHub 一括反映 | Must |
-| R5 | author による本文編集 → 明示コミット | Must |
-| R6 | 既存の GitHub レビューコメントの取り込み・表示 | Should |
-| R7 | コミット更新時のコメント再アンカリング | Should |
-| R8 | 複数 `.md` ファイル間の横断ナビゲーション | Could |
-| R9 | レビュー↔修正の反復履歴の追跡（レビュー・コミット・対応状況の時系列） | Must |
-| R10 | 前回（基準コミット）からの変更点を本文上で視覚表示 | Must |
+| ID  | 要件                                                                  | 優先度 |
+| --- | --------------------------------------------------------------------- | ------ |
+| R1  | 変更済み `.md` をレンダリング表示し全文レビュー可能                   | Must   |
+| R2  | 任意範囲選択へのコメント                                              | Must   |
+| R3  | Suggestion（範囲置換提案）の作成 → GitHub Suggestion 化               | Must   |
+| R4  | コメント/Suggestion のローカル下書き → GitHub 一括反映                | Must   |
+| R5  | author による本文編集 → 明示コミット                                  | Must   |
+| R6  | 既存の GitHub レビューコメントの取り込み・表示                        | Should |
+| R7  | コミット更新時のコメント再アンカリング                                | Should |
+| R8  | 複数 `.md` ファイル間の横断ナビゲーション                             | Could  |
+| R9  | レビュー↔修正の反復履歴の追跡（レビュー・コミット・対応状況の時系列） | Must   |
+| R10 | 前回（基準コミット）からの変更点を本文上で視覚表示                    | Must   |
 
 ## 6. アーキテクチャ (Architecture)
 
@@ -140,12 +144,19 @@ GitHub は「保存・同期のトランスポート」、ツールは「体験�
   {
     "id": "local-uuid",
     "path": "docs/spec.md",
-    "anchor": { "startLine": 12, "endLine": 12, "startCol": 4, "endCol": 20, "quotedText": "...", "createdAtSha": "abc123" },
+    "anchor": {
+      "startLine": 12,
+      "endLine": 12,
+      "startCol": 4,
+      "endCol": 20,
+      "quotedText": "...",
+      "createdAtSha": "abc123",
+    },
     "body": "ここは曖昧では?",
-    "kind": "comment",       // comment | suggestion
-    "threadId": "t1",         // 会話のまとまり
-    "status": "open",         // pending | open | addressed | resolved | outdated
-    "addressedBySha": null    // 後続コミットで対応されたら記録
+    "kind": "comment", // comment | suggestion
+    "threadId": "t1", // 会話のまとまり
+    "status": "open", // pending | open | addressed | resolved | outdated
+    "addressedBySha": null, // 後続コミットで対応されたら記録
   }
   ```
 - `createdAtSha` で「どの時点のドキュメントに対する指摘か」を固定し、履歴追跡（7.9）の基礎にする
