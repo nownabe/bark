@@ -87,6 +87,7 @@ export function App() {
   const [drafts, setDrafts] = useState<PendingDraft[]>([]);
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [suggestComment, setSuggestComment] = useState('');
   const [showHelp, setShowHelp] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const cmRef = useRef<ReactCodeMirrorRef>(null);
@@ -96,6 +97,10 @@ export function App() {
   const diffRanges = useMemo(
     () => parseRightRanges(files.find((f) => f.path === selectedPath)?.patch),
     [files, selectedPath],
+  );
+  const suggestionHunks = useMemo(
+    () => (role === 'reviewer' && source !== baseSource ? diffToSuggestions(baseSource, source) : []),
+    [role, source, baseSource],
   );
   const cmExtensions = useMemo(() => {
     const ext = [
@@ -450,13 +455,13 @@ export function App() {
     setAnchor(null);
   };
 
-  // 編集 → 提案変換(reviewer)。base との行差分を Suggestion ドラフト化。
-  const convertEditsToSuggestions = async () => {
-    if (!ref || source === baseSource) return;
-    const hunks = diffToSuggestions(baseSource, source);
-    if (hunks.length === 0) return;
+  // 編集 → 提案(reviewer)。base との行差分を Suggestion ドラフト化(任意でコメント付き)。
+  // 追加後はエディタを base に戻し、tracked changes を解消(提案は pending に保持)。
+  const addSuggestion = async () => {
+    if (!ref || suggestionHunks.length === 0) return;
     const path = selectedPath ?? 'sample';
-    const newDrafts: PendingDraft[] = hunks.map((h) => {
+    const body = suggestComment.trim() || '(編集の提案)';
+    const newDrafts: PendingDraft[] = suggestionHunks.map((h) => {
       const inDiff = isRangeInDiff(diffRanges, h.sl, h.el);
       const id = crypto.randomUUID();
       return {
@@ -467,7 +472,7 @@ export function App() {
         quote: h.quote,
         sha: headSha ?? '',
         thread: id,
-        body: '(編集の提案)',
+        body,
         kind: 'suggestion',
         suggestion: h.replacement,
         permalink:
@@ -477,6 +482,29 @@ export function App() {
     const next = [...drafts, ...newDrafts];
     setDrafts(next);
     await saveDrafts(ref, next);
+    setSuggestComment('');
+    setSource(baseSource); // tracked changes を解消(提案として確定)
+  };
+
+  // サイド項目クリック → 本文の該当位置へスクロール&選択ハイライト
+  const jumpToOffsets = (from: number, to: number) => {
+    const view = cmRef.current?.view;
+    if (!view) return;
+    const len = view.state.doc.length;
+    if (from < 0 || to > len || from >= to) return;
+    view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
+    view.focus();
+  };
+
+  const jumpToDraft = (d: PendingDraft) => {
+    if (d.path !== (selectedPath ?? 'sample')) {
+      setSelectedPath(d.path);
+      return;
+    }
+    jumpToOffsets(
+      lineColToOffset(d.range.sl, d.range.sc, lineStarts),
+      lineColToOffset(d.range.el, d.range.ec, lineStarts),
+    );
   };
 
   if (!tokenLoaded) return <p className="notice notice--muted">Loading…</p>;
@@ -563,11 +591,6 @@ export function App() {
                 Commit
               </button>
             ) : null}
-            {role === 'reviewer' && source !== baseSource ? (
-              <button type="button" className="btn btn--primary" onClick={convertEditsToSuggestions}>
-                編集を提案に変換
-              </button>
-            ) : null}
             {token ? (
               <button type="button" className="btn" onClick={handleClearToken}>
                 トークン削除
@@ -593,9 +616,9 @@ export function App() {
               <li>本文は常に編集可能(Markdown ソースが正準)。</li>
               <li><strong>Preview / Raw</strong>: 表示を切替(どちらも編集可)。</li>
               <li><strong>author</strong>: 本文を編集して <strong>Commit</strong>。テキスト選択でコメント。</li>
-              <li><strong>reviewer</strong>: テキスト選択でコメント。本文を編集すると変更が記録され、「編集を提案に変換」で Suggestion 化。</li>
-              <li>右の <strong>Pending</strong> に溜めて <strong>Submit review</strong> で GitHub に一括反映。</li>
-              <li>コメントは付けた位置がハイライトされ、スレッドで返信できます。</li>
+              <li><strong>reviewer</strong>: テキスト選択でコメント。本文を編集すると変更が記録され、右の <strong>Suggestion</strong> から提案として追加(任意でコメント付き)。</li>
+              <li>コメントも提案も同じ <strong>Pending</strong> に溜め、<strong>Submit review</strong> で一括送信。</li>
+              <li>サイドの項目をクリックすると本文の該当位置へ移動・ハイライト。スレッドで返信できます。</li>
             </ul>
             <div className="composer__row">
               <button type="button" className="btn btn--sm" onClick={() => setShowHelp(false)}>
@@ -662,10 +685,42 @@ export function App() {
               />
               <div className="composer__row">
                 <button type="button" className="btn btn--primary btn--sm" onClick={addDraft}>
-                  下書きに追加
+                  追加
                 </button>
                 <button type="button" className="btn btn--sm" onClick={() => setAnchor(null)}>
                   キャンセル
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {/* suggestion (reviewer edits) */}
+          {role === 'reviewer' && suggestionHunks.length > 0 ? (
+            <section className="panel">
+              <h2 className="panel__title">Suggestion ({suggestionHunks.length})</h2>
+              <p className="empty" style={{ marginBottom: 8 }}>
+                本文の編集が提案になります。任意でコメントを添えられます。
+              </p>
+              <textarea
+                className="field"
+                value={suggestComment}
+                onChange={(e) => setSuggestComment(e.target.value)}
+                rows={2}
+                placeholder="コメント(任意)"
+              />
+              <div className="composer__row">
+                <button type="button" className="btn btn--primary btn--sm" onClick={addSuggestion}>
+                  追加
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  onClick={() => {
+                    setSource(baseSource);
+                    setSuggestComment('');
+                  }}
+                >
+                  編集を破棄
                 </button>
               </div>
             </section>
@@ -680,7 +735,11 @@ export function App() {
               ) : (
                 <>
                   {drafts.map((d) => (
-                    <div key={d.cid} className="thread">
+                    <div
+                      key={d.cid}
+                      className="thread thread--clickable"
+                      onClick={() => jumpToDraft(d)}
+                    >
                       <div className="comment__meta">
                         <span className={`badge badge--${d.inDiff ? 'review' : 'issue'}`}>
                           {d.inDiff ? 'review' : 'issue'}
@@ -693,7 +752,14 @@ export function App() {
                       </div>
                       <div className="comment__body">{d.body}</div>
                       <div className="comment__actions">
-                        <button type="button" className="btn btn--sm" onClick={() => removeDraft(d.cid)}>
+                        <button
+                          type="button"
+                          className="btn btn--sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeDraft(d.cid);
+                          }}
+                        >
                           削除
                         </button>
                       </div>
@@ -716,8 +782,13 @@ export function App() {
               ) : (
                 threads.map((t) => {
                   const st = statusFor(t.root);
+                  const clickable = !!t.root.meta;
                   return (
-                    <div key={t.id} className="thread">
+                    <div
+                      key={t.id}
+                      className={clickable ? 'thread thread--clickable' : 'thread'}
+                      onClick={clickable ? () => jumpTo(t.root) : undefined}
+                    >
                       {t.root.meta ? (
                         <div className="thread__quote">{t.root.meta.quote}</div>
                       ) : null}
@@ -736,27 +807,23 @@ export function App() {
                           <div className="comment__body">{c.body || '(本文なし)'}</div>
                         </div>
                       ))}
-                      <div className="comment__actions">
-                        {t.root.meta ? (
-                          <button type="button" className="btn btn--sm" onClick={() => jumpTo(t.root)}>
-                            {t.path === (selectedPath ?? 'sample') ? '本文へ' : `${t.path} を開く`}
-                          </button>
-                        ) : null}
-                        {t.root.meta ? (
+                      {t.root.meta ? (
+                        <div className="comment__actions">
                           <button
                             type="button"
                             className="btn btn--sm"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setReplyTo(replyTo === t.id ? null : t.id);
                               setReplyText('');
                             }}
                           >
                             返信
                           </button>
-                        ) : null}
-                      </div>
+                        </div>
+                      ) : null}
                       {replyTo === t.id ? (
-                        <div style={{ marginTop: 8 }}>
+                        <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
                           <textarea
                             className="field"
                             value={replyText}
@@ -766,7 +833,17 @@ export function App() {
                           />
                           <div className="composer__row">
                             <button type="button" className="btn btn--primary btn--sm" onClick={() => addReply(t.root)}>
-                              下書きに追加
+                              追加
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--sm"
+                              onClick={() => {
+                                setReplyTo(null);
+                                setReplyText('');
+                              }}
+                            >
+                              キャンセル
                             </button>
                           </div>
                         </div>

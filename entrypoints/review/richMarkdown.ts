@@ -119,7 +119,17 @@ function buildDecorations(state: EditorState): DecorationSet {
         isInlineCodeMark;
       if (hideMark && node.to > node.from) {
         const line = state.doc.lineAt(node.from).number;
-        if (line !== cursorLine) decos.push(Decoration.replace({}).range(node.from, node.to));
+        if (line !== cursorLine) {
+          // 見出し ## / 引用 > の直後の空白も一緒に隠す(先頭空白が残らないように)
+          let to = node.to;
+          if (
+            (node.name === 'HeaderMark' || node.name === 'QuoteMark') &&
+            state.doc.sliceString(to, to + 1) === ' '
+          ) {
+            to++;
+          }
+          decos.push(Decoration.replace({}).range(node.from, to));
+        }
       }
     },
   });
