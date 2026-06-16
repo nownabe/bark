@@ -9,4 +9,4 @@ node_modules/
 .local
 
 # credentials
-.envrc
+.envrc.local
