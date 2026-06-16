@@ -774,6 +774,8 @@ export function App() {
                 lineNumbers: viewMode === "raw",
                 foldGutter: viewMode === "raw",
                 highlightSelectionMatches: false,
+                highlightActiveLine: false,
+                highlightActiveLineGutter: false,
               }}
               onChange={(v) => setSource(v)}
               onUpdate={(vu) => {
