@@ -39,8 +39,7 @@ Configured in `.claude/settings.json`. Sandboxed bash is auto-approved (`autoAll
 `git` and `gh` are in `excludedCommands` — they run unsandboxed because they need `~/.ssh` (SSH remote) and `~/.config/gh` (token). Their guardrail is the permission layer, not the sandbox:
 
 - Local-only git subcommands (`add`, `commit`, `checkout`, `switch`, `branch`, `restore`, `stash`, `rebase`) → `allow`.
-- `git push` → `ask`. This is the one human-gated point: read the full command (especially the URL) before approving.
-- `git fetch` / `git pull` → pin to the remote name (`git fetch origin`, `git pull origin`); arbitrary-URL fetches must not be auto-approved.
+- `git push`, `git fetch`, `git pull` → `allow`. These are auto-approved: the remote-swap exfiltration risk that a push could carry is closed by the `.git` denyWrite (see below), not by a per-command prompt, so gating every push/fetch added friction without adding protection.
 - `git remote set-url` / `git remote add` → `deny`; `git config` → `ask`.
 
 ### Invoking git / gh in practice
@@ -52,7 +51,7 @@ Configured in `.claude/settings.json`. Sandboxed bash is auto-approved (`autoAll
 
 ## Protecting `.git` (remote-swap exfiltration)
 
-A sandboxed, auto-approved write primitive (`sed -i`, `python`, the Edit tool) could rewrite `.git/config` to swap the `origin` URL, after which an approved `git push` exfiltrates to an attacker. Command-name denies do **not** close this — any write primitive works.
+A sandboxed, auto-approved write primitive (`sed -i`, `python`, the Edit tool) could rewrite `.git/config` to swap the `origin` URL, after which a `git push` exfiltrates to an attacker. Now that `git push` is auto-approved (see above), this `.git` denyWrite is the **sole** barrier against that swap — there is no per-push prompt to catch a tampered URL. Command-name denies do **not** close this — any write primitive works.
 
 - **`sandbox.filesystem.denyWrite: [".git"]`** is the primary control. Deny the whole `.git`, not just `config`/`hooks` — `refs/`, `config.worktree`, `modules/`, `info/attributes`, and `index` are all dangerous if writable.
 - **`permissions.deny: ["Edit(.git/**)"]`** blocks the Edit/Write tools (which bypass the bash sandbox and are auto-approved under `acceptEdits`).
