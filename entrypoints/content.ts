@@ -25,12 +25,16 @@ function injectEntryButton() {
   const btn = document.createElement("button");
   btn.id = "bark-entry";
   btn.type = "button";
-  btn.textContent = "Open in Bark";
+  btn.title = "Open in Bark";
+  btn.setAttribute("aria-label", "Open in Bark");
   Object.assign(btn.style, {
     position: "fixed",
     bottom: "20px",
     right: "20px",
     zIndex: "9999",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
     padding: "8px 14px",
     background: "#1f883d",
     color: "#fff",
@@ -41,6 +45,20 @@ function injectEntryButton() {
     cursor: "pointer",
     boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
   } satisfies Partial<CSSStyleDeclaration>);
+
+  const icon = document.createElement("img");
+  icon.src = browser.runtime.getURL("/icon/128.png");
+  icon.alt = "";
+  Object.assign(icon.style, {
+    width: "18px",
+    height: "18px",
+    display: "block",
+  } satisfies Partial<CSSStyleDeclaration>);
+
+  const label = document.createElement("span");
+  label.textContent = "Open in Bark";
+
+  btn.append(icon, label);
 
   btn.addEventListener("click", () => {
     // Ask the background worker to open the page via chrome.tabs.create;
