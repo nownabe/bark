@@ -6,6 +6,7 @@ node_modules/
 # misc
 *.log
 .DS_Store
+.local
 
 # credentials
-.envrc
+.envrc.local

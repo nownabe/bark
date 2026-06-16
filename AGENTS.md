@@ -16,8 +16,9 @@ in English.
 
 ## Toolchain: mise
 
-- The project toolchain (`bun`, `oxlint`, `oxfmt`, `actionlint`, `ghalint`, `zizmor`, `direnv`) is declared in `mise.toml` with pinned versions; `mise.lock` records the resolved versions (`[settings] lockfile = true`). Run `mise install` to materialize them. mise installs tools outside the project tree, so there is nothing toolchain-related to add to `.gitignore`.
-- **Launch agents with the mise toolchain active** — e.g. `mise exec -- claude`, or let `direnv` activate mise through the project `.envrc` (see `.envrc.example`) — then run `claude`.
+- The project toolchain (`bun`, `oxlint`, `oxfmt`, `actionlint`, `ghalint`, `zizmor`, `direnv`) is declared in `mise.toml` with pinned versions; `mise.lock` records the resolved versions (`[settings] lockfile = true`). Run `mise install` to materialize them.
+- **mise installs into the project tree** (`MISE_DATA_DIR=$PWD/.local/share/mise`, set in `.envrc`), not the default `~/.local/share/mise`. This is deliberate: the sandbox only exposes the project dir (`allowRead: ["."]`), so a toolchain under `~/` would be invisible and `bun`/`oxlint`/etc. would fail with `command not found` even though they are on `PATH`. Keeping the installs in-tree puts them inside the readable boundary. Consequently `.local/` **must** be in `.gitignore` (the binaries are large and platform-specific — never commit them).
+- **Launch agents with the mise toolchain active** — e.g. `mise exec -- claude`, or let `direnv` activate mise through the project `.envrc` — then run `claude`. `.envrc` is committed and must contain no secrets: it sets `MISE_DATA_DIR` and `source`s the git-ignored `.envrc.local`. Put credentials like `GH_PAT` in `.envrc.local` (copy `.envrc.local.example`).
 
 ## Sandbox (the autonomy engine)
 
