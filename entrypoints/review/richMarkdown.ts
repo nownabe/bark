@@ -9,7 +9,9 @@ import { syntaxTree } from "@codemirror/language";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 import { type EditorState, type Range, StateField } from "@codemirror/state";
 
-function classFor(name: string): string | null {
+// Map a syntax-node name to its inline decoration class (heading/bold/italic/code).
+// Exported so suggest mode can style deleted-text widgets with the same context.
+export function classFor(name: string): string | null {
   if (name.startsWith("ATXHeading") || name.startsWith("SetextHeading")) {
     return `dr-h${Math.min(Number(name.slice(-1)) || 1, 6)}`;
   }
