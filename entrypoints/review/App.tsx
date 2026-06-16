@@ -627,7 +627,7 @@ export function App() {
                 rel="noreferrer"
                 title="Open this pull request on GitHub"
               >
-                {owner}/{repo} #{prNum} ↗
+                {owner}/{repo} #{prNum}
               </a>
               {headSha ? <span>@ {headSha.slice(0, 7)}</span> : null}
             </span>
