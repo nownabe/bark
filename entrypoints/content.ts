@@ -22,25 +22,49 @@ function injectEntryButton() {
   if (!ref) return;
   if (document.getElementById("bark-entry")) return;
 
+  // The icon IS the button: a round, transparent floating action button that
+  // shows the Bark mascot. The label lives in the tooltip/aria-label so the
+  // green checkmark mascot can stand on its own without a boxy text chrome.
   const btn = document.createElement("button");
   btn.id = "bark-entry";
   btn.type = "button";
-  btn.textContent = "Open in Bark";
+  btn.title = "Open in Bark";
+  btn.setAttribute("aria-label", "Open in Bark");
   Object.assign(btn.style, {
     position: "fixed",
     bottom: "20px",
     right: "20px",
     zIndex: "9999",
-    padding: "8px 14px",
-    background: "#1f883d",
-    color: "#fff",
-    border: "0",
-    borderRadius: "6px",
-    fontSize: "13px",
-    fontWeight: "600",
+    width: "56px",
+    height: "56px",
+    padding: "6px",
+    background: "#fff",
+    border: "1px solid rgba(27,31,36,0.15)",
+    borderRadius: "50%",
     cursor: "pointer",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+    transition: "transform 0.12s ease, box-shadow 0.12s ease",
   } satisfies Partial<CSSStyleDeclaration>);
+
+  const icon = document.createElement("img");
+  icon.src = browser.runtime.getURL("/icon/128.png");
+  icon.alt = "";
+  Object.assign(icon.style, {
+    width: "100%",
+    height: "100%",
+    display: "block",
+    objectFit: "contain",
+  } satisfies Partial<CSSStyleDeclaration>);
+  btn.appendChild(icon);
+
+  btn.addEventListener("mouseenter", () => {
+    btn.style.transform = "scale(1.08)";
+    btn.style.boxShadow = "0 4px 14px rgba(0,0,0,0.25)";
+  });
+  btn.addEventListener("mouseleave", () => {
+    btn.style.transform = "scale(1)";
+    btn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)";
+  });
 
   btn.addEventListener("click", () => {
     // Ask the background worker to open the page via chrome.tabs.create;
