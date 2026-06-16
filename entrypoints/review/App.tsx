@@ -616,7 +616,10 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <span className="topbar__brand">Bark</span>
+        <span className="topbar__brand">
+          <img className="topbar__logo" src="/icon/128.png" alt="" />
+          Bark
+        </span>
         {ref ? (
           <>
             <span className="topbar__meta">

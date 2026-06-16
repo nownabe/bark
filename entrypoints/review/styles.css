@@ -44,8 +44,17 @@ body {
   box-shadow: var(--shadow);
 }
 .topbar__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
   letter-spacing: -0.01em;
+}
+.topbar__logo {
+  width: 24px;
+  height: 24px;
+  display: block;
+  object-fit: contain;
 }
 .topbar__meta {
   color: var(--muted);
