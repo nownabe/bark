@@ -37,6 +37,13 @@ Configured in `.claude/settings.json`. Sandboxed bash is auto-approved (`autoAll
 - `git fetch` / `git pull` → pin to the remote name (`git fetch origin`, `git pull origin`); arbitrary-URL fetches must not be auto-approved.
 - `git remote set-url` / `git remote add` → `deny`; `git config` → `ask`.
 
+### Invoking git / gh in practice
+
+- **Run each `git`/`gh` as a single standalone command.** Only a command that _is_ `git`/`gh` is excluded from the sandbox; chaining it with non-git commands (`&&`, `;`, pipes, or mixing in `echo`/`touch`) makes the whole compound run sandboxed, where `.git` is read-only — git writes then fail with `fatal: Unable to create '.../.git/index.lock': Read-only file system`. One command per invocation; don't add separator/marker `echo`s.
+- **If a git write hits `Read-only file system` on `.git`, it ran sandboxed**, not unsandboxed. Re-run it as a clean standalone command (a one-off `dangerouslyDisableSandbox`, with user confirmation, is the documented escape). Don't assume one approval covers the next call — retry if a call unexpectedly lands in the sandbox.
+- **The unsandboxed `git status` is ground truth.** A sandboxed git view reports phantom modifications for sandbox-masked files (`.envrc`, `.claude/settings*.json`, masked workflow files) and bogus untracked `$HOME` dotfiles (`.bashrc`, `.zshrc`, `.gitconfig`, …) — none are real working-tree changes. Stage explicit paths; never `git add -A`/`git add .`.
+- **To read a masked or credential-adjacent file**, use `git show HEAD:<path>` (e.g. `.envrc.local.example`) — a plain read of the working-tree file may be blocked.
+
 ## Protecting `.git` (remote-swap exfiltration)
 
 A sandboxed, auto-approved write primitive (`sed -i`, `python`, the Edit tool) could rewrite `.git/config` to swap the `origin` URL, after which an approved `git push` exfiltrates to an attacker. Command-name denies do **not** close this — any write primitive works.
