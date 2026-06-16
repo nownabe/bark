@@ -27,7 +27,14 @@ import {
   type ReviewCommentInput,
 } from "../../lib/github";
 import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
-import { listDrafts, saveDrafts, type PendingDraft } from "../../lib/drafts";
+import {
+  listDismissedSuggestions,
+  listDrafts,
+  saveDismissedSuggestions,
+  saveDrafts,
+  type PendingDraft,
+  type SuggestionDecision,
+} from "../../lib/drafts";
 import { clearToken, getToken, setToken as persistToken } from "../../lib/storage";
 import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/metadata";
 import { sampleDoc } from "./sample";
@@ -86,6 +93,7 @@ export function App() {
   const [commentBody, setCommentBody] = useState("");
   const [comments, setComments] = useState<ExistingComment[]>([]);
   const [drafts, setDrafts] = useState<PendingDraft[]>([]);
+  const [dismissed, setDismissed] = useState<Record<string, SuggestionDecision>>({});
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [suggestComment, setSuggestComment] = useState("");
@@ -226,6 +234,12 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref?.owner, ref?.repo, ref?.number]);
 
+  // author's accept/reject decisions on submitted suggestions (R3).
+  useEffect(() => {
+    if (ref) listDismissedSuggestions(ref).then(setDismissed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref?.owner, ref?.repo, ref?.number]);
+
   // Push the base text into CM for tracked changes (reviewer suggest).
   useEffect(() => {
     cmRef.current?.view?.dispatch({ effects: setBaseText.of(baseSource) });
@@ -264,7 +278,7 @@ export function App() {
     const docLen = view.state.doc.length;
     const curPath = selectedPath ?? "sample";
     const marks = comments
-      .filter((c) => c.meta?.kind === "suggestion" && c.meta.path === curPath)
+      .filter((c) => c.meta?.kind === "suggestion" && c.meta.path === curPath && !dismissed[c.id])
       .map((c) => {
         const r = reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? "");
         return {
@@ -277,7 +291,7 @@ export function App() {
       .filter((m) => m.status !== "outdated" && m.from >= 0 && m.to <= docLen && m.from < m.to)
       .map(({ from, to, replacement }) => ({ from, to, replacement }));
     view.dispatch({ effects: setSuggestionMarks.of(marks) });
-  }, [comments, source, lineStarts, headSha, selectedPath]);
+  }, [comments, source, lineStarts, headSha, selectedPath, dismissed]);
 
   const jumpTo = (c: ExistingComment) => {
     const view = cmRef.current?.view;
@@ -368,6 +382,27 @@ export function App() {
     await saveDrafts(ref, next);
     setReplyText("");
     setReplyTo(null);
+  };
+
+  // author: record an accept/reject decision on a submitted suggestion.
+  const setDecision = async (id: number, decision: SuggestionDecision) => {
+    const next = { ...dismissed, [id]: decision };
+    setDismissed(next);
+    if (ref) await saveDismissedSuggestions(ref, next);
+  };
+
+  // author: accept a suggestion by applying its replacement to the source (then Commit).
+  const acceptSuggestion = async (c: ExistingComment) => {
+    if (!c.meta) return;
+    const replacement = extractSuggestionBlock(c.body) ?? "";
+    const r = reanchorComment(source, lineStarts, c.meta, headSha ?? "");
+    if (r.status === "outdated") return; // can't locate the target text anymore
+    setSource(source.slice(0, r.startOffset) + replacement + source.slice(r.endOffset));
+    await setDecision(c.id, "accepted");
+  };
+
+  const rejectSuggestion = async (c: ExistingComment) => {
+    await setDecision(c.id, "rejected");
   };
 
   const removeDraft = async (cidToRemove: string) => {
@@ -924,6 +959,38 @@ export function App() {
                       ))}
                       {t.root.meta ? (
                         <div className="comment__actions">
+                          {t.root.meta.kind === "suggestion" && role === "author" ? (
+                            dismissed[t.root.id] ? (
+                              <span className="notice--muted" style={{ fontSize: 11 }}>
+                                {dismissed[t.root.id] === "accepted"
+                                  ? "accepted — Commit to apply"
+                                  : "rejected"}
+                              </span>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btn--primary btn--sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    acceptSuggestion(t.root);
+                                  }}
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn--sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    rejectSuggestion(t.root);
+                                  }}
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )
+                          ) : null}
                           <button
                             type="button"
                             className="btn btn--sm"

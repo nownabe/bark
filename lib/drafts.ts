@@ -40,3 +40,25 @@ export async function listDrafts(ref: PrRef): Promise<PendingDraft[]> {
 export async function saveDrafts(ref: PrRef, drafts: PendingDraft[]): Promise<void> {
   await browser.storage.local.set({ [draftsKey(ref)]: drafts });
 }
+
+/** author's accept/reject decision on submitted suggestions, keyed by GitHub comment id. */
+export type SuggestionDecision = "accepted" | "rejected";
+
+function dismissedKey(ref: PrRef): string {
+  return `${storageKeys.pr(ref.owner, ref.repo, ref.number)}:dismissed-suggestions`;
+}
+
+export async function listDismissedSuggestions(
+  ref: PrRef,
+): Promise<Record<string, SuggestionDecision>> {
+  const key = dismissedKey(ref);
+  const result = await browser.storage.local.get(key);
+  return (result[key] as Record<string, SuggestionDecision> | undefined) ?? {};
+}
+
+export async function saveDismissedSuggestions(
+  ref: PrRef,
+  decisions: Record<string, SuggestionDecision>,
+): Promise<void> {
+  await browser.storage.local.set({ [dismissedKey(ref)]: decisions });
+}
