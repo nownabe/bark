@@ -3,7 +3,8 @@
 // current doc is shown as:
 //   insertion = underline/green (.dr-ins), deletion = strikethrough widget (.dr-del)
 // The source stays canonical and remains editable.
-import { StateEffect, StateField } from "@codemirror/state";
+import { syntaxTree } from "@codemirror/language";
+import { type EditorState, StateEffect, StateField } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -12,7 +13,9 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
+import type { SyntaxNode } from "@lezer/common";
 import { charDiffs } from "../../lib/suggest";
+import { classFor } from "./richMarkdown";
 
 export const setBaseText = StateEffect.define<string>();
 
@@ -27,21 +30,41 @@ export const baseTextField = StateField.define<string>({
 });
 
 class DeletedWidget extends WidgetType {
-  constructor(readonly text: string) {
+  constructor(
+    readonly text: string,
+    // Extra classes for the inline context the text was deleted from (heading/
+    // bold/italic/code), so the strikethrough keeps that styling instead of
+    // collapsing to the default body size.
+    readonly contextClass: string,
+  ) {
     super();
   }
   eq(other: DeletedWidget) {
-    return other.text === this.text;
+    return other.text === this.text && other.contextClass === this.contextClass;
   }
   toDOM() {
     const span = document.createElement("span");
-    span.className = "dr-del";
+    span.className = this.contextClass ? `dr-del ${this.contextClass}` : "dr-del";
     span.textContent = this.text;
     return span;
   }
   ignoreEvent() {
     return false;
   }
+}
+
+// Inline decoration classes (heading/bold/italic/code) that apply at `pos` in the
+// current doc — the context the deleted text sat in. The deletion is gone from the
+// doc, so look just to the left (side -1) of the position.
+function contextClassesAt(state: EditorState, pos: number): string {
+  const classes: string[] = [];
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, -1);
+  while (node) {
+    const cls = classFor(node.name);
+    if (cls && !classes.includes(cls)) classes.push(cls);
+    node = node.parent;
+  }
+  return classes.join(" ");
 }
 
 function build(view: EditorView): DecorationSet {
@@ -60,7 +83,10 @@ function build(view: EditorView): DecorationSet {
       pos += text.length;
     } else {
       // The deleted text is not in the doc, so show it as a strikethrough widget at the current position.
-      decos.push(Decoration.widget({ widget: new DeletedWidget(text), side: -1 }).range(pos));
+      const contextClass = contextClassesAt(view.state, pos);
+      decos.push(
+        Decoration.widget({ widget: new DeletedWidget(text, contextClass), side: -1 }).range(pos),
+      );
     }
   }
   return Decoration.set(decos, true);
