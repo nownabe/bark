@@ -20,6 +20,12 @@ in English.
 - **mise installs into the project tree** (`MISE_DATA_DIR=$PWD/.local/share/mise`, set in `.envrc`), not the default `~/.local/share/mise`. This is deliberate: the sandbox only exposes the project dir (`allowRead: ["."]`), so a toolchain under `~/` would be invisible and `bun`/`oxlint`/etc. would fail with `command not found` even though they are on `PATH`. Keeping the installs in-tree puts them inside the readable boundary. Consequently `.local/` **must** be in `.gitignore` (the binaries are large and platform-specific — never commit them).
 - **Launch agents with the mise toolchain active** — e.g. `mise exec -- claude`, or let `direnv` activate mise through the project `.envrc` — then run `claude`. `.envrc` is committed and must contain no secrets: it sets `MISE_DATA_DIR` and `source`s the git-ignored `.envrc.local`. Put credentials like `GH_PAT` in `.envrc.local` (copy `.envrc.local.example`).
 
+## Development workflow
+
+- **When a change needs the user to verify it, build first, then tell the user exactly what to check.** Don't ask the user to confirm against stale output. Produce the artifact (e.g. `bun node_modules/wxt/bin/wxt.mjs build` — `bun run build` fails because `wxt` needs `node`, which the sandbox lacks), then give concrete verification steps (e.g. "reload the extension and confirm the cursor line is no longer highlighted").
+- **Run tests, lint, and format locally before committing.** Use the project scripts: `bun test`, `oxlint` (lint), `oxfmt --check` / `oxfmt --write` (format). Don't commit changes you haven't checked.
+- **Use `.local/tmp` for scratch/temporary files, not `/tmp`.** `.local/` is git-ignored and lives inside the sandbox-readable project tree, so temp files stay within the boundary and never risk being committed. Create the directory if it doesn't exist.
+
 ## Sandbox (the autonomy engine)
 
 Configured in `.claude/settings.json`. Sandboxed bash is auto-approved (`autoAllowBashIfSandboxed`) because the boundary makes it safe:
