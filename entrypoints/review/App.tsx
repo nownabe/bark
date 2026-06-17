@@ -130,6 +130,7 @@ export function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const cmRef = useRef<ReactCodeMirrorRef>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
   // Set before a programmatic "jump to item" selection so the resulting
   // selection update does not pop the new-comment composer (we are highlighting
   // an existing item, not starting a new comment).
@@ -747,6 +748,23 @@ export function App() {
     );
   };
 
+  // Scroll the sidebar so the given thread's card sits at the same viewport
+  // height as the current editor selection — keeps the text and its review item
+  // visible together even when the list is long. Runs after layout settles.
+  const alignItemToText = (threadId: string) => {
+    requestAnimationFrame(() => {
+      const view = cmRef.current?.view;
+      const sidebar = sidebarRef.current;
+      if (!view || !sidebar) return;
+      const coords = view.coordsAtPos(view.state.selection.main.from);
+      if (!coords) return;
+      const item = sidebar.querySelector<HTMLElement>(`[data-thread-id="${CSS.escape(threadId)}"]`);
+      if (!item) return;
+      const delta = item.getBoundingClientRect().top - coords.top;
+      if (Math.abs(delta) > 1) sidebar.scrollBy({ top: delta, behavior: "smooth" });
+    });
+  };
+
   // Click commented (highlighted) text in the body → select that comment's range,
   // emphasize its thread in the sidebar, and open its reply box (so it behaves
   // like clicking the thread itself, not like starting a new comment).
@@ -764,6 +782,7 @@ export function App() {
       setReplyTo(hit.id);
       setReplyText("");
     }
+    alignItemToText(hit.id);
   };
 
   const onEditorClick = (e: ReactMouseEvent) => {
@@ -907,6 +926,7 @@ export function App() {
       setReplyTo(t.id);
       setReplyText("");
     }
+    alignItemToText(t.id);
   };
 
   const renderLiveSuggestion = (s: PendingSuggestion) => (
@@ -1234,7 +1254,7 @@ export function App() {
           </div>
         </main>
 
-        <aside className="sidebar">
+        <aside className="sidebar" ref={sidebarRef}>
           {/* one list: the selection composer, pending items and submitted
               threads all live here — no separate comment / suggestion / review
               blocks. */}

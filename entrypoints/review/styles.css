@@ -330,9 +330,28 @@ select.input:focus {
 .sidebar {
   position: sticky;
   top: 76px;
+  /* Own scroll area so a long review list can scroll independently of the doc,
+     letting an emphasized item line up with its text (see alignItemToText). */
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  /* Scroll without a visible scrollbar — the margin column stays clean. */
+  scrollbar-width: none;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+.sidebar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+/* Keep the Review header + filter reachable while the list scrolls under it. */
+.sidebar .panel__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-canvas);
+  padding-bottom: 10px;
+  margin-bottom: 4px;
 }
 .panel {
   background: var(--bg);
