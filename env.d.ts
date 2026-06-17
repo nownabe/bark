@@ -5,4 +5,6 @@ interface ImportMetaEnv {
   readonly BARK_GITHUB_CLIENT_ID?: string;
   /** Public slug of the GitHub App; builds its install URL for 404/403 (§7.6). */
   readonly BARK_GITHUB_APP_SLUG?: string;
+  /** Dev only: when set, show the floating author/reviewer role switch. */
+  readonly BARK_DEV_ROLE_SWITCH?: string;
 }

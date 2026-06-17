@@ -641,3 +641,26 @@ select.input:focus {
   box-shadow: 0 8px 24px rgba(31, 35, 40, 0.16);
   padding: 14px;
 }
+
+/* ---- dev-only role switch (right-bottom) ---- */
+.role-fab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+.role-fab__label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}

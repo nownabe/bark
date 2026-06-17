@@ -75,6 +75,11 @@ const STATUS_LABEL: Partial<Record<AnchorStatus, string>> = {
   outdated: "position not found",
 };
 
+// The author/reviewer switch is a development aid only. It renders as a floating
+// control bottom-right exclusively in builds where BARK_DEV_ROLE_SWITCH is set;
+// normal builds hide it and keep the default role.
+const DEV_ROLE_SWITCH = Boolean(import.meta.env.BARK_DEV_ROLE_SWITCH);
+
 // Public slug of the Bark GitHub App; used to build its install URL so a 404/403
 // (likely "not installed on this repo") can offer a one-click install (§7.6).
 const APP_SLUG = import.meta.env.BARK_GITHUB_APP_SLUG;
@@ -1106,22 +1111,6 @@ export function App() {
                 Raw
               </button>
             </div>
-            <div className="seg">
-              <button
-                type="button"
-                aria-pressed={role === "author"}
-                onClick={() => setRole("author")}
-              >
-                author
-              </button>
-              <button
-                type="button"
-                aria-pressed={role === "reviewer"}
-                onClick={() => setRole("reviewer")}
-              >
-                reviewer
-              </button>
-            </div>
             {role === "author" && selectedPath ? (
               <button
                 type="button"
@@ -1341,6 +1330,29 @@ export function App() {
           ) : (
             <p className="empty">Select text in the body to see anchor info.</p>
           )}
+        </div>
+      ) : null}
+
+      {/* Development-only role switch (bottom-right); see BARK_DEV_ROLE_SWITCH. */}
+      {DEV_ROLE_SWITCH ? (
+        <div className="role-fab" role="group" aria-label="Role (development)">
+          <span className="role-fab__label">dev</span>
+          <div className="seg seg--sm">
+            <button
+              type="button"
+              aria-pressed={role === "author"}
+              onClick={() => setRole("author")}
+            >
+              author
+            </button>
+            <button
+              type="button"
+              aria-pressed={role === "reviewer"}
+              onClick={() => setRole("reviewer")}
+            >
+              reviewer
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
