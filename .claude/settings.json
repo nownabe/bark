@@ -3,6 +3,7 @@
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [
+      "Bash(bun run build)",
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git fetch *)",
@@ -14,7 +15,7 @@
   "sandbox": {
     "enabled": true,
     "autoAllowBashIfSandboxed": true,
-    "excludedCommands": ["git", "gh"],
+    "excludedCommands": ["git", "gh", "bun run build"],
     "network": {
       "allowedDomains": ["registry.npmjs.org"]
     },

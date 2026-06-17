@@ -22,8 +22,13 @@ in English.
 
 ## Development workflow
 
-- **When a change needs the user to verify it, build first, then tell the user exactly what to check.** Don't ask the user to confirm against stale output. Produce the artifact (e.g. `bun node_modules/wxt/bin/wxt.mjs build` — `bun run build` fails because `wxt` needs `node`, which the sandbox lacks), then give concrete verification steps (e.g. "reload the extension and confirm the cursor line is no longer highlighted").
-- **Run tests, lint, and format locally before committing.** Use the project scripts: `bun test`, `oxlint` (lint), `oxfmt --check` / `oxfmt --write` (format). Don't commit changes you haven't checked.
+- **When a change needs the user to verify it, build first, then tell the user exactly what to check.** Don't ask the user to confirm against stale output. Produce the artifact with `bun run build`, then give concrete verification steps (e.g. "reload the extension and confirm the cursor line is no longer highlighted"). `wxt build` is configured to run outside the sandbox (the sandbox denies read access to some `node_modules` paths like `strip-literal/node_modules/js-tokens`, which breaks module resolution); if it ever lands sandboxed it fails with `Cannot find package 'js-tokens'`, so re-run it as a clean standalone command.
+- **Run tests, lint, and format locally before committing.** Use the `package.json` scripts via `bun run <script>` so everyone runs the same command the CI does — don't invoke the underlying tools by hand. Don't commit changes you haven't checked.
+  - `bun run test` — tests (`bun test`).
+  - `bun run check:lint` — lint (`oxlint --deny-warnings`; warnings fail).
+  - `bun run check:format` — format check (`oxfmt --check`); `bun run fmt` (`oxfmt --write`) to auto-fix.
+  - `bun run typecheck` — type check (`tsc --noEmit`).
+  - `bun run build` — build (`wxt build`); runs outside the sandbox (see the bullet above).
 - **Use `.local/tmp` for scratch/temporary files, not `/tmp`.** `.local/` is git-ignored and lives inside the sandbox-readable project tree, so temp files stay within the boundary and never risk being committed. Create the directory if it doesn't exist.
 
 ## Sandbox (the autonomy engine)
