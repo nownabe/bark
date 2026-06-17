@@ -1238,7 +1238,7 @@ export function App() {
           {/* one list: the selection composer, pending items and submitted
               threads all live here — no separate comment / suggestion / review
               blocks. */}
-          <section className="panel">
+          <section className="panel panel--bare">
             <div className="panel__head">
               <h2 className="panel__title">Review</h2>
               <div className="seg seg--sm">
