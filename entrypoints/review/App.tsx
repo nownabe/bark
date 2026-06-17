@@ -2,7 +2,7 @@
 // The document surface is CodeMirror 6 (always editable, source canonical §13),
 // Obsidian-style Raw/Preview. Controls live in a sticky header; comments are
 // position-sorted and threaded; debug info is collapsible.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
@@ -22,9 +22,11 @@ import {
   buildThreads,
   filterReviewEntries,
   reviewCounts,
+  threadRangeAt,
   type PendingSuggestion,
   type ReviewFilter,
   type ReviewThread,
+  type ThreadRange,
 } from "./reviewItems";
 import { diffToSuggestions, extractSuggestionBlock, stripSuggestionBlock } from "../../lib/suggest";
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
@@ -104,6 +106,7 @@ export function App() {
   // Per-suggestion attached comment, keyed by live suggestion cid (`live:sl:el`).
   const [suggestionComments, setSuggestionComments] = useState<Record<string, string>>({});
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
+  const [emphasizedThreadId, setEmphasizedThreadId] = useState<string | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
@@ -165,6 +168,31 @@ export function App() {
   const counts = reviewCounts({ drafts, pendingSuggestions, comments, threads });
   const pendingItems = buildPendingItems(drafts, pendingSuggestions);
   const visibleEntries = filterReviewEntries(entries, reviewFilter);
+
+  // Highlighted span of each thread on the current file, so clicking commented
+  // text in the body can map back to its thread.
+  const threadRanges = useMemo<ThreadRange[]>(() => {
+    const docLen = source.length;
+    const res: ThreadRange[] = [];
+    for (const t of threads) {
+      if (t.path !== curPath) continue;
+      let from: number;
+      let to: number;
+      if (t.rootComment?.meta) {
+        const r = reanchorComment(source, lineStarts, t.rootComment.meta, headSha ?? "");
+        if (r.status === "outdated") continue;
+        from = r.startOffset;
+        to = r.endOffset;
+      } else if (t.rootDraft) {
+        from = lineColToOffset(t.rootDraft.range.sl, t.rootDraft.range.sc, lineStarts);
+        to = lineColToOffset(t.rootDraft.range.el, t.rootDraft.range.ec, lineStarts);
+      } else {
+        continue;
+      }
+      if (from >= 0 && to <= docLen && from < to) res.push({ id: t.id, from, to });
+    }
+    return res;
+  }, [threads, source, lineStarts, headSha, curPath]);
 
   useEffect(() => {
     getToken().then((t) => {
@@ -304,6 +332,15 @@ export function App() {
       .map(({ from, to, replacement }) => ({ from, to, replacement }));
     view.dispatch({ effects: setSuggestionMarks.of(marks) });
   }, [comments, source, lineStarts, headSha, selectedPath, dismissed]);
+
+  // Scroll the emphasized thread (e.g. after clicking its highlighted text in
+  // the body) into view in the sidebar.
+  useEffect(() => {
+    if (!emphasizedThreadId) return;
+    document
+      .querySelector(`[data-thread-id="${CSS.escape(emphasizedThreadId)}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [emphasizedThreadId, reviewFilter]);
 
   const jumpTo = (c: ExistingComment) => {
     const view = cmRef.current?.view;
@@ -627,6 +664,32 @@ export function App() {
     );
   };
 
+  // Click commented (highlighted) text in the body → select that comment's range
+  // and emphasize its thread in the sidebar (instead of starting a new comment).
+  const emphasizeThread = (hit: ThreadRange) => {
+    const view = cmRef.current?.view;
+    if (!view) return;
+    suppressNextAnchor.current = true;
+    view.dispatch({ selection: { anchor: hit.from, head: hit.to } });
+    suppressNextAnchor.current = false; // update listener already ran synchronously
+    if (!visibleEntries.some((e) => e.kind === "thread" && e.thread.id === hit.id)) {
+      setReviewFilter("all"); // make sure the emphasized thread is visible
+    }
+    setEmphasizedThreadId(hit.id);
+  };
+
+  const onEditorClick = (e: ReactMouseEvent) => {
+    const view = cmRef.current?.view;
+    if (!view) return;
+    // Only a plain click (not a drag-selection) navigates to the comment, so
+    // selecting text that overlaps a comment is not hijacked.
+    if (!view.state.selection.main.empty) return;
+    const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+    if (pos == null) return;
+    const hit = threadRangeAt(threadRanges, pos);
+    if (hit) emphasizeThread(hit);
+  };
+
   if (!tokenLoaded) return <p className="notice notice--muted">Loading…</p>;
 
   if (ref && !token) {
@@ -676,6 +739,7 @@ export function App() {
   // a comment goes into the existing thread instead of starting a new one.
   const openThread = (t: ReviewThread) => {
     jumpToThread(t);
+    setEmphasizedThreadId(t.id);
     if (replyTo !== t.id) {
       setReplyTo(t.id);
       setReplyText("");
@@ -764,7 +828,14 @@ export function App() {
     const st = root ? statusFor(root) : null;
     const showAuthorActions = root?.meta?.kind === "suggestion" && role === "author";
     return (
-      <div key={t.id} className="thread thread--clickable" onClick={() => openThread(t)}>
+      <div
+        key={t.id}
+        data-thread-id={t.id}
+        className={`thread thread--clickable${
+          emphasizedThreadId === t.id ? " thread--emphasized" : ""
+        }`}
+        onClick={() => openThread(t)}
+      >
         {t.quote ? <div className="thread__quote">{t.quote}</div> : null}
         {t.messages.map((m) =>
           m.kind === "submitted"
@@ -995,7 +1066,7 @@ export function App() {
 
       <div className="layout">
         <main>
-          <div className="doc">
+          <div className="doc" onClick={onEditorClick}>
             <CodeMirror
               ref={cmRef}
               value={source}

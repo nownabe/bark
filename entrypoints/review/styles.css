@@ -271,6 +271,11 @@ select.input:focus {
   border-color: var(--accent);
   background: var(--bg-subtle);
 }
+.thread--emphasized {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.3);
+  background: var(--bg-subtle);
+}
 .comment + .comment {
   margin-top: 8px;
   padding-top: 8px;

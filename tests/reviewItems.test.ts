@@ -12,7 +12,9 @@ import {
   buildPendingSuggestions,
   filterReviewEntries,
   reviewCounts,
+  threadRangeAt,
   type PendingSuggestion,
+  type ThreadRange,
 } from "../entrypoints/review/reviewItems";
 import type { ExistingComment } from "../lib/comments";
 import type { PendingDraft } from "../lib/drafts";
@@ -164,6 +166,29 @@ describe("buildPendingItems", () => {
     expect(items).toHaveLength(3);
     expect(items.filter((i) => i.kind === "comment")).toHaveLength(2);
     expect(items.filter((i) => i.kind === "suggestion")).toHaveLength(1);
+  });
+});
+
+describe("threadRangeAt", () => {
+  // Click an offset in the body → which commented thread to emphasize.
+  const ranges: ThreadRange[] = [
+    { id: "outer", from: 0, to: 20 },
+    { id: "inner", from: 5, to: 10 },
+    { id: "other", from: 30, to: 40 },
+  ];
+
+  test("returns the narrowest range containing the offset (nested comments)", () => {
+    expect(threadRangeAt(ranges, 7)?.id).toBe("inner");
+    expect(threadRangeAt(ranges, 2)?.id).toBe("outer");
+  });
+
+  test("range boundaries are inclusive", () => {
+    expect(threadRangeAt(ranges, 0)?.id).toBe("outer");
+    expect(threadRangeAt(ranges, 40)?.id).toBe("other");
+  });
+
+  test("returns null when no range contains the offset", () => {
+    expect(threadRangeAt(ranges, 25)).toBeNull();
   });
 });
 

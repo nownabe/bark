@@ -88,6 +88,28 @@ export type PendingItem =
   | { kind: "comment"; draft: PendingDraft }
   | { kind: "suggestion"; suggestion: PendingSuggestion };
 
+/** A thread's highlighted span in the body, used to map an editor click to a thread. */
+export interface ThreadRange {
+  id: string;
+  from: number;
+  to: number;
+}
+
+/**
+ * Find the thread whose highlighted span contains the given body offset, so
+ * clicking commented (highlighted) text emphasizes that comment. Boundaries are
+ * inclusive; when ranges nest, the narrowest containing span wins.
+ */
+export function threadRangeAt(ranges: ThreadRange[], offset: number): ThreadRange | null {
+  let best: ThreadRange | null = null;
+  for (const r of ranges) {
+    if (offset >= r.from && offset <= r.to && (!best || r.to - r.from < best.to - best.from)) {
+      best = r;
+    }
+  }
+  return best;
+}
+
 // Position key: line dominates, column breaks ties.
 function posOf(range: AnchorRange): number {
   return range.sl * 100000 + range.sc;
