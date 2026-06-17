@@ -1,3 +1,4 @@
 export GH_PAT="Your GitHub personal access token for development"
 export BARK_GITHUB_CLIENT_ID="Your GitHub App client_id"
 export BARK_GITHUB_APP_SLUG="Your GitHub App slug"
+export BARK_DEV_ROLE_SWITCH="true"
