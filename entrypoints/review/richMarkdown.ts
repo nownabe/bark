@@ -28,6 +28,34 @@ function lineClassFor(name: string): string | null {
   return null;
 }
 
+class LinkWidget extends WidgetType {
+  constructor(
+    readonly text: string,
+    readonly href: string,
+  ) {
+    super();
+  }
+  eq(other: LinkWidget) {
+    return other.text === this.text && other.href === this.href;
+  }
+  toDOM() {
+    const a = document.createElement("a");
+    a.className = "dr-link";
+    a.textContent = this.text;
+    a.href = this.href;
+    a.rel = "noopener noreferrer";
+    a.target = "_blank";
+    // A reviewer clicking the link should follow it (open in a new tab), so let
+    // the browser handle the click natively — don't hijack it for editing. To
+    // edit the link's Markdown source, move the cursor into it (e.g. with the
+    // arrow keys), which reveals the canonical `[text](url)` source.
+    return a;
+  }
+  ignoreEvent() {
+    return true; // let the native anchor handle clicks (follow the link)
+  }
+}
+
 class TableWidget extends WidgetType {
   constructor(
     readonly raw: string,
@@ -96,6 +124,34 @@ function buildDecorations(state: EditorState): DecorationSet {
           );
         }
         return false; // do not process children (rows/cells)
+      }
+
+      // Link: render `[text](url)` as a clickable anchor when the cursor is
+      // outside, show the canonical source when inside (for editing).
+      if (node.name === "Link") {
+        const inside = cursor >= node.from && cursor <= node.to;
+        if (!inside) {
+          // Children: LinkMark "[", <text>, LinkMark "]", LinkMark "(", URL, LinkMark ")".
+          // The link text is between the opening "[" and closing "]" marks; the
+          // href is the URL node (fall back to the text if there is no URL).
+          let textTo = node.to;
+          let href: string | null = null;
+          for (let child = node.node.firstChild; child; child = child.nextSibling) {
+            if (child.name === "LinkMark" && state.doc.sliceString(child.from, child.to) === "]") {
+              textTo = child.from;
+            }
+            if (child.name === "URL") {
+              href = state.doc.sliceString(child.from, child.to);
+            }
+          }
+          const text = state.doc.sliceString(node.from + 1, textTo);
+          decos.push(
+            Decoration.replace({
+              widget: new LinkWidget(text, href ?? text),
+            }).range(node.from, node.to),
+          );
+        }
+        return false; // do not process children (marks/URL)
       }
 
       // Block line decorations
@@ -179,6 +235,11 @@ export const richMarkdownTheme = EditorView.baseTheme({
     color: "#57606a",
   },
   ".dr-list": { paddingLeft: "8px" },
+  ".dr-link": {
+    color: "#0969da",
+    textDecoration: "underline",
+    cursor: "pointer",
+  },
   ".dr-table": {
     borderCollapse: "collapse",
     margin: "8px 0",
