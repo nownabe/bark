@@ -31,6 +31,10 @@ in English.
   - `bun run build` — build (`wxt build`); runs outside the sandbox (see the bullet above).
 - **Use `.local/tmp` for scratch/temporary files, not `/tmp`.** `.local/` is git-ignored and lives inside the sandbox-readable project tree, so temp files stay within the boundary and never risk being committed. Create the directory if it doesn't exist.
 
+## UI / design
+
+- **Before changing the review UI's look and feel, read [`design.md`](design.md).** It documents Bark's design principles and token system (color, typography, spacing, radii, shadows, motion) and how to extend them cohesively. Styling is token-driven from the `:root` block in `entrypoints/review/styles.css` (the source of truth for values) — edit tokens rather than literals, preserve class names, keep the light GitHub-adjacent tone, and use no remote fonts (offline/privacy). Keep `design.md` in sync when the system changes.
+
 ## Sandbox (the autonomy engine)
 
 Configured in `.claude/settings.json`. Sandboxed bash is auto-approved (`autoAllowBashIfSandboxed`) because the boundary makes it safe:
