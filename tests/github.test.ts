@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { buildBlobPermalink, buildSuggestionBlock, parseNextLink } from "../lib/github";
+import { avatarUrl, buildBlobPermalink, buildSuggestionBlock, parseNextLink } from "../lib/github";
+
+describe("avatarUrl", () => {
+  test("builds the github.com avatar URL with a size", () => {
+    expect(avatarUrl("nownabe")).toBe("https://github.com/nownabe.png?size=40");
+    expect(avatarUrl("octocat", 20)).toBe("https://github.com/octocat.png?size=20");
+  });
+  test("encodes the login", () => {
+    expect(avatarUrl("a b")).toBe("https://github.com/a%20b.png?size=40");
+  });
+});
 
 describe("parseNextLink", () => {
   test("extracts the rel=next URL", () => {

@@ -105,6 +105,11 @@ export function buildSuggestionBlock(replacement: string): string {
   return `\`\`\`suggestion\n${replacement}\n\`\`\``;
 }
 
+/** Public avatar URL for a GitHub login (github.com/<login>.png redirects to the CDN). */
+export function avatarUrl(login: string, size = 40): string {
+  return `https://github.com/${encodeURIComponent(login)}.png?size=${size}`;
+}
+
 /** Blob permalink for out-of-diff comments (§7.1, D4). */
 export function buildBlobPermalink(
   ref: PrRef,

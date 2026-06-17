@@ -33,6 +33,7 @@ import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/an
 import { normalizeComments, type ExistingComment } from "../../lib/comments";
 import { reanchorComment, type AnchorStatus } from "../../lib/reanchor";
 import {
+  avatarUrl,
   buildBlobPermalink,
   buildSuggestionBlock,
   GitHubApiError,
@@ -955,6 +956,14 @@ export function App() {
   const renderSubmittedMessage = (c: ExistingComment, isRoot: boolean, st: AnchorStatus | null) => (
     <div key={`s-${c.source}-${c.id}`} className="comment">
       <div className="comment__meta">
+        <img
+          className="comment__avatar"
+          src={avatarUrl(c.author, 40)}
+          alt=""
+          width={18}
+          height={18}
+          loading="lazy"
+        />
         <span className="comment__author">@{c.author}</span>
         {isRoot && st && STATUS_LABEL[st] ? (
           <span className={`badge badge--${st}`}>{STATUS_LABEL[st]}</span>
