@@ -199,7 +199,7 @@ Google Docs風の「読みやすいレンダリング＋余白コメント＋提
   - App 設定で「Expire user authorization tokens」を無効化すると、リフレッシュ不要の**非有効期限 user-to-server トークン**が得られる（Device Flow のトークン交換自体も secret 不要）。これにより当初 OAuth App を選んだ理由（GitHub App は refresh に secret が要る）が解消されるため D10 を更新
   - GitHub App ならインストール時に**ユーザーがリポジトリを選択**でき、`Contents` / `Pull requests`（read/write）の細かい権限だけを付与できる（OAuth App の粗い `repo` スコープより最小権限）
   - `client_id` はビルド時の env 変数 `BARK_GITHUB_CLIENT_ID`（公開値・secret ではない）から注入する。`.envrc.local`（direnv）で設定し、`BARK_` prefix のみバンドルに露出させることで `GH_PAT` 等の secret が混入しないようにする
-  - 認可（Device Flow）と**インストール（リポジトリ選択）は別ステップ**。認可だけ済んでも App が対象リポジトリに未インストールだと API は 404 になる。そこで API が 404/403 のとき、レビュー画面に App のインストール導線（`https://github.com/apps/<slug>/installations/new`）を提示する。slug は公開値の env 変数 `BARK_GITHUB_APP_SLUG` から注入する
+  - 認可（Device Flow）と**インストール（リポジトリ選択）は別ステップ**。認可だけ済んでも App が対象リポジトリに未インストールだと初回ロードが 404 になる。そこで初回ロードが 404/403 のときは、レビュー UI にエラー通知を出すのではなく**認証ゲートと同様の専用画面に切り替え**、App のインストール導線（`https://github.com/apps/<slug>/installations/new`）と Retry を提示する。slug は公開値の env 変数 `BARK_GITHUB_APP_SLUG` から注入する
 - api.github.com は CORS を返すため、トークンを `Authorization` ヘッダに載せてブラウザから直接呼べる。一方 github.com の device エンドポイント（`/login/device/code`, `/login/oauth/access_token`）は CORS を返さないため、その fetch は host_permissions で CORS を回避できる background service worker で実行する
 
 ### 7.7 ローカルストレージ設計

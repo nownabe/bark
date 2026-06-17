@@ -93,9 +93,11 @@ export function App() {
   const [deviceAuth, setDeviceAuth] = useState<DeviceAuthorization | null>(null);
   const [authStarting, setAuthStarting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  // Set when a repo/PR read fails with 404/403 — most often the GitHub App is
-  // not installed on this repository, so the UI offers an install link.
+  // Set when the initial repo/PR load fails with 404/403 — most often the GitHub
+  // App is not installed on this repository; we show a dedicated install gate.
   const [needsInstall, setNeedsInstall] = useState(false);
+  // Bumped to re-run the initial load (e.g. after the user installs the App).
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [files, setFiles] = useState<ChangedFile[]>([]);
   const [headSha, setHeadSha] = useState<string | null>(null);
@@ -206,12 +208,13 @@ export function App() {
     return res;
   }, [threads, source, lineStarts, headSha, curPath]);
 
-  // Surface an error and flag the likely "app not installed" case (404/403) so
-  // the UI can offer an install link.
+  // Surface an error from the initial load and flag the likely "app not
+  // installed" case (404/403) so we can route to the dedicated install gate.
   const reportError = (e: unknown) => {
     setError(errMessage(e));
     setNeedsInstall(e instanceof GitHubApiError && (e.status === 404 || e.status === 403));
   };
+  const retryLoad = () => setReloadKey((k) => k + 1);
 
   useEffect(() => {
     getToken().then((t) => {
@@ -288,14 +291,13 @@ export function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, ref?.owner, ref?.repo, ref?.number]);
+  }, [client, ref?.owner, ref?.repo, ref?.number, reloadKey]);
 
   useEffect(() => {
     if (!client || !ref || !headSha || !selectedPath) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setNeedsInstall(false);
     (async () => {
       try {
         const text = await client.getFileContent(ref, selectedPath, headSha);
@@ -304,7 +306,7 @@ export function App() {
           setBaseSource(text);
         }
       } catch (e) {
-        if (!cancelled) reportError(e);
+        if (!cancelled) setError(errMessage(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -830,6 +832,40 @@ export function App() {
     );
   }
 
+  // Authorized, but the initial load failed with 404/403 — almost always the
+  // App isn't installed on this repo. Show a dedicated gate instead of dropping
+  // the user into the review UI with a confusing "Not Found" notice (§7.6).
+  if (ref && needsInstall) {
+    return (
+      <div className="gate">
+        <h1>Bark</h1>
+        <p>
+          Bark can't open {owner}/{repo} #{prNum} yet.
+        </p>
+        <p className="notice--muted" style={{ fontSize: 13 }}>
+          You're authorized, but Bark isn't installed on this repository (or the repository / PR
+          doesn't exist). Install Bark and select this repository, then retry.
+        </p>
+        <div className="gate__actions">
+          {installUrl ? (
+            <a className="btn btn--primary" href={installUrl} target="_blank" rel="noreferrer">
+              Install on this repository
+            </a>
+          ) : null}
+          <button type="button" className="btn" onClick={retryLoad} disabled={loading}>
+            {loading ? "Checking…" : "Retry"}
+          </button>
+        </div>
+        <p className="notice--muted" style={{ fontSize: 12 }}>
+          Authorized as the wrong account?{" "}
+          <button type="button" className="linkish" onClick={handleClearToken}>
+            Use a different account
+          </button>
+        </p>
+      </div>
+    );
+  }
+
   const statusFor = (c: ExistingComment): AnchorStatus | null => {
     if (!c.meta || c.meta.path !== (selectedPath ?? "sample")) return null;
     return reanchorComment(source, lineStarts, c.meta, headSha ?? "").status;
@@ -1171,18 +1207,6 @@ export function App() {
 
       {loading ? <p className="notice notice--muted">Loading…</p> : null}
       {error ? <p className="notice notice--error">{error}</p> : null}
-      {error && needsInstall ? (
-        <p className="notice notice--muted" style={{ fontSize: 13 }}>
-          If the repository and PR exist, Bark may not be installed on this repository yet.{" "}
-          {installUrl ? (
-            <a href={installUrl} target="_blank" rel="noreferrer">
-              Install Bark and select this repository
-            </a>
-          ) : (
-            "Install the Bark GitHub App and grant it access to this repository."
-          )}
-        </p>
-      ) : null}
       {ref && !loading && !error && files.length === 0 ? (
         <p className="notice notice--muted">This PR has no changed .md files.</p>
       ) : null}
