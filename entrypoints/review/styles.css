@@ -388,8 +388,6 @@ select.input:focus {
 .thread--emphasized {
   border-color: var(--accent);
   box-shadow: var(--ring);
-  background: linear-gradient(0deg, var(--accent-tint), var(--accent-tint)), var(--bg);
-  background-blend-mode: multiply;
 }
 .comment + .comment {
   margin-top: 10px;
