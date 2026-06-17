@@ -59,15 +59,7 @@ export function SubmitConfirmModal({ items, onConfirm, onCancel, loading }: Prop
               return (
                 <div key={v.cid} className="thread">
                   <div className="comment__meta">
-                    <span className={`badge badge--${v.inDiff ? "review" : "issue"}`}>
-                      {v.inDiff ? "review" : "issue"}
-                    </span>
-                    {v.isSuggestion ? (
-                      <span className="badge badge--suggestion">suggestion</span>
-                    ) : null}
-                    <span>
-                      {v.path} {lineLabel(v.range)}
-                    </span>
+                    <span>{lineLabel(v.range)}</span>
                   </div>
                   {v.body ? <div className="comment__body">{v.body}</div> : null}
                   {v.isSuggestion ? (

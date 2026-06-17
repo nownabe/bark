@@ -1,35 +1,20 @@
-// Comment composer shown when the reviewer selects text in the body.
-// It surfaces the routing (review / issue), the line range, and — importantly —
-// the *content* of the selected text so the reviewer can see what they are
-// commenting on without looking back at the editor (task 6).
+// New-comment composer, rendered as an item inside the unified review list
+// (no separate block). It shows the *content* of the selected text and a field
+// to attach a comment. Add confirms it as a pending item; Discard throws the
+// input away. No review/issue/suggestion tags, no filename.
 import type { SourceAnchor } from "../../../lib/anchor";
 
 interface Props {
   anchor: SourceAnchor;
-  routing: { kind: "review" | "issue" } | null;
   value: string;
   onChange: (v: string) => void;
   onAdd: () => void;
-  onCancel: () => void;
+  onDiscard: () => void;
 }
 
-export function SelectionComposer({ anchor, routing, value, onChange, onAdd, onCancel }: Props) {
+export function SelectionComposer({ anchor, value, onChange, onAdd, onDiscard }: Props) {
   return (
-    <section className="panel">
-      <h2 className="panel__title">Comment</h2>
-      {routing ? (
-        <p className="composer__routing">
-          {routing.kind === "review" ? (
-            <span className="badge badge--review">review</span>
-          ) : (
-            <span className="badge badge--issue">issue + permalink</span>
-          )}{" "}
-          <span className="notice--muted">
-            L{anchor.startLine}
-            {anchor.endLine !== anchor.startLine ? `–L${anchor.endLine}` : ""}
-          </span>
-        </p>
-      ) : null}
+    <div className="thread review-item--composer">
       <div className="composer__quote">{anchor.quotedText}</div>
       <textarea
         className="field"
@@ -37,15 +22,16 @@ export function SelectionComposer({ anchor, routing, value, onChange, onAdd, onC
         onChange={(e) => onChange(e.target.value)}
         rows={3}
         placeholder="Comment on the selected range"
+        autoFocus
       />
       <div className="composer__row">
         <button type="button" className="btn btn--primary btn--sm" onClick={onAdd}>
           Add
         </button>
-        <button type="button" className="btn btn--sm" onClick={onCancel}>
-          Cancel
+        <button type="button" className="btn btn--sm" onClick={onDiscard}>
+          Discard
         </button>
       </div>
-    </section>
+    </div>
   );
 }

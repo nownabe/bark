@@ -11,6 +11,7 @@
 import type { ExistingComment } from "../../lib/comments";
 import type { PendingDraft } from "../../lib/drafts";
 import type { AnchorRange } from "../../lib/metadata";
+import type { SuggestionHunk } from "../../lib/suggest";
 
 export interface ReviewThread {
   id: string;
@@ -29,6 +30,38 @@ export interface PendingSuggestion {
   quote: string;
   replacement: string;
   body: string;
+}
+
+/** Stable id for a live suggestion derived from a base→edited line hunk. */
+export function liveSuggestionCid(h: { sl: number; el: number }): string {
+  return `live:${h.sl}:${h.el}`;
+}
+
+/**
+ * Turn the reviewer's live edit hunks into pending suggestions, each carrying
+ * its own attached comment (its GitHub "first comment", bundled into the same
+ * comment as the suggestion block on submit).
+ */
+export function buildPendingSuggestions(
+  hunks: SuggestionHunk[],
+  opts: {
+    path: string;
+    isInDiff: (sl: number, el: number) => boolean;
+    commentFor: (cid: string) => string;
+  },
+): PendingSuggestion[] {
+  return hunks.map((h) => {
+    const cid = liveSuggestionCid(h);
+    return {
+      cid,
+      path: opts.path,
+      inDiff: opts.isInDiff(h.sl, h.el),
+      range: { sl: h.sl, sc: 1, el: h.el, ec: 1 },
+      quote: h.quote,
+      replacement: h.replacement,
+      body: opts.commentFor(cid),
+    };
+  });
 }
 
 export type ReviewFilter = "all" | "pending" | "submitted";

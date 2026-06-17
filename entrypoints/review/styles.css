@@ -375,6 +375,10 @@ select.input:focus {
   font-size: 12px;
   margin: 0 0 8px;
 }
+.review-item--composer {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(9, 105, 218, 0.15);
+}
 .composer__quote {
   font-size: 12px;
   color: var(--fg);

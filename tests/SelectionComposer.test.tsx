@@ -1,7 +1,6 @@
-// Selection composer — task 6.
-//
-// When the reviewer selects text, the composer must show the *content* of the
-// selected text (a quote), not just the line label (e.g. "L17").
+// Selection composer — now an inline item in the unified list (no separate
+// block), showing the selected text. Add confirms it as a pending item;
+// Discard throws the input away. No review/issue/suggestion tags.
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
@@ -29,11 +28,10 @@ describe("SelectionComposer", () => {
     const { container } = render(
       <SelectionComposer
         anchor={anchor({ quotedText: "the quick brown fox" })}
-        routing={{ kind: "review" }}
         value=""
         onChange={() => {}}
         onAdd={() => {}}
-        onCancel={() => {}}
+        onDiscard={() => {}}
       />,
     );
     expect(container.textContent).toContain("the quick brown fox");
@@ -43,11 +41,10 @@ describe("SelectionComposer", () => {
     const { container } = render(
       <SelectionComposer
         anchor={anchor({ quotedText: "line one\nline two", endLine: 18 })}
-        routing={{ kind: "issue" }}
         value=""
         onChange={() => {}}
         onAdd={() => {}}
-        onCancel={() => {}}
+        onDiscard={() => {}}
       />,
     );
     const quote = container.querySelector(".composer__quote");
@@ -55,25 +52,37 @@ describe("SelectionComposer", () => {
     expect(quote!.textContent).toBe("line one\nline two");
   });
 
-  test("Add and Cancel buttons fire their callbacks", () => {
-    let added = 0;
-    let cancelled = 0;
+  test("does not render review / issue / suggestion tags", () => {
     const { container } = render(
       <SelectionComposer
         anchor={anchor()}
-        routing={{ kind: "review" }}
+        value=""
+        onChange={() => {}}
+        onAdd={() => {}}
+        onDiscard={() => {}}
+      />,
+    );
+    expect(container.querySelector(".badge")).toBeNull();
+  });
+
+  test("Add and Discard buttons fire their callbacks", () => {
+    let added = 0;
+    let discarded = 0;
+    const { container } = render(
+      <SelectionComposer
+        anchor={anchor()}
         value="hi"
         onChange={() => {}}
         onAdd={() => added++}
-        onCancel={() => cancelled++}
+        onDiscard={() => discarded++}
       />,
     );
     const buttons = [...container.querySelectorAll("button")];
     const add = buttons.find((b) => b.textContent === "Add")!;
-    const cancel = buttons.find((b) => b.textContent === "Cancel")!;
+    const discard = buttons.find((b) => b.textContent === "Discard")!;
     fireEvent.click(add);
-    fireEvent.click(cancel);
+    fireEvent.click(discard);
     expect(added).toBe(1);
-    expect(cancelled).toBe(1);
+    expect(discarded).toBe(1);
   });
 });

@@ -49,11 +49,19 @@ describe("SubmitConfirmModal", () => {
     );
     const text = container.textContent ?? "";
     expect(text).toContain("please fix this typo");
-    expect(text).toContain("docs/a.md");
     // suggestion replacement is visible so the reviewer knows what they send
     expect(text).toContain("the");
     // count of items to submit (1 draft + 1 live suggestion)
     expect(text).toContain("2");
+  });
+
+  test("does not show the filename or review/issue/suggestion tags inside items", () => {
+    const { container } = render(
+      <SubmitConfirmModal items={pendingEntries()} onConfirm={() => {}} onCancel={() => {}} />,
+    );
+    expect(container.querySelector(".modal__list .badge")).toBeNull();
+    const listText = container.querySelector(".modal__list")?.textContent ?? "";
+    expect(listText).not.toContain("docs/a.md");
   });
 
   test("Submit triggers onConfirm, not before", () => {

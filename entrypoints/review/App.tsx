@@ -16,6 +16,7 @@ import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from ".
 import { SelectionComposer } from "./components/SelectionComposer";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import {
+  buildPendingSuggestions,
   buildReviewEntries,
   buildThreads,
   filterReviewEntries,
@@ -99,7 +100,8 @@ export function App() {
   const [dismissed, setDismissed] = useState<Record<string, SuggestionDecision>>({});
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
-  const [suggestComment, setSuggestComment] = useState("");
+  // Per-suggestion attached comment, keyed by live suggestion cid (`live:sl:el`).
+  const [suggestionComments, setSuggestionComments] = useState<Record<string, string>>({});
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -135,20 +137,15 @@ export function App() {
   const curPath = selectedPath ?? "sample";
 
   // The reviewer's live editor edits are surfaced as pending suggestions the
-  // moment they are made (task 4); the optional comment annotates all of them.
+  // moment they are made; each carries its own attached comment.
   const pendingSuggestions = useMemo<PendingSuggestion[]>(() => {
     if (role !== "reviewer") return [];
-    const body = suggestComment.trim() || "(suggested edit)";
-    return suggestionHunks.map((h) => ({
-      cid: `live:${h.sl}:${h.el}`,
+    return buildPendingSuggestions(suggestionHunks, {
       path: curPath,
-      inDiff: isRangeInDiff(diffRanges, h.sl, h.el),
-      range: { sl: h.sl, sc: 1, el: h.el, ec: 1 },
-      quote: h.quote,
-      replacement: h.replacement,
-      body,
-    }));
-  }, [role, suggestionHunks, curPath, suggestComment, diffRanges]);
+      isInDiff: (sl, el) => isRangeInDiff(diffRanges, sl, el),
+      commentFor: (cid) => suggestionComments[cid] ?? "",
+    });
+  }, [role, suggestionHunks, curPath, suggestionComments, diffRanges]);
 
   // Pending drafts + live suggestions + submitted threads in one sorted list.
   const threads = useMemo(() => buildThreads(comments, curPath), [comments, curPath]);
@@ -329,11 +326,13 @@ export function App() {
   const previewBody = meta ? embedMetadata(commentBody || "(comment body)", meta) : "";
   const restored = previewBody ? extractMetadata(previewBody) : null;
 
-  const routing = anchor
-    ? isRangeInDiff(diffRanges, anchor.startLine, anchor.endLine)
-      ? ({ kind: "review" } as const)
-      : ({ kind: "issue" } as const)
-    : null;
+  // Collapse the editor selection (deselect) without removing the comment
+  // highlight, which is driven separately by the draft ranges.
+  const collapseSelection = () => {
+    const view = cmRef.current?.view;
+    if (!view) return;
+    view.dispatch({ selection: { anchor: view.state.selection.main.head } });
+  };
 
   const addDraft = async () => {
     if (!anchor || !ref) return;
@@ -359,6 +358,13 @@ export function App() {
     setDrafts(next);
     await saveDrafts(ref, next);
     setCommentBody("");
+    collapseSelection(); // deselect; the pending highlight stays
+    setAnchor(null);
+  };
+
+  const discardComposer = () => {
+    setCommentBody("");
+    collapseSelection();
     setAnchor(null);
   };
 
@@ -497,7 +503,7 @@ export function App() {
       setDrafts([]);
       await saveDrafts(ref, []);
       setSource(baseSource); // live suggestion edits are now submitted
-      setSuggestComment("");
+      setSuggestionComments({});
       const [reviews, issues] = await Promise.all([
         client.listReviewComments(ref),
         client.listIssueComments(ref),
@@ -562,7 +568,11 @@ export function App() {
 
   const discardEdits = () => {
     setSource(baseSource);
-    setSuggestComment("");
+    setSuggestionComments({});
+  };
+
+  const setSuggestionComment = (cid: string, value: string) => {
+    setSuggestionComments((prev) => ({ ...prev, [cid]: value }));
   };
 
   // Side item click → scroll to the target in the body and highlight the selection.
@@ -621,22 +631,24 @@ export function App() {
   };
 
   // ---- unified review-list item renderers ----
+  // Items never show a review/issue or suggestion tag, nor the filename; a
+  // comment item is a body, a suggestion item is an old→new diff.
+  const lineRange = (r: { sl: number; el: number }) =>
+    `L${r.sl}${r.el !== r.sl ? `–L${r.el}` : ""}`;
+
   const renderDraft = (d: PendingDraft) => (
     <div key={d.cid} className="thread thread--clickable" onClick={() => jumpToDraft(d)}>
       <div className="comment__meta">
-        <span className={`badge badge--${d.inDiff ? "review" : "issue"}`}>
-          {d.inDiff ? "review" : "issue"}
-        </span>
         <span className="badge badge--pending">pending</span>
-        {d.kind === "suggestion" ? (
-          <span className="badge badge--suggestion">suggestion</span>
-        ) : null}
-        <span>
-          {d.path} L{d.range.sl}
-          {d.range.el !== d.range.sl ? `–L${d.range.el}` : ""}
-        </span>
+        <span>{lineRange(d.range)}</span>
       </div>
-      <div className="comment__body">{d.body}</div>
+      {d.kind === "suggestion" ? (
+        <>
+          <div className="sugg-old">{d.quote}</div>
+          <div className="sugg-new">{d.suggestion || "(delete)"}</div>
+        </>
+      ) : null}
+      {d.body ? <div className="comment__body">{d.body}</div> : null}
       <div className="comment__actions">
         <button
           type="button"
@@ -655,19 +667,18 @@ export function App() {
   const renderLiveSuggestion = (s: PendingSuggestion) => (
     <div key={s.cid} className="thread">
       <div className="comment__meta">
-        <span className={`badge badge--${s.inDiff ? "review" : "issue"}`}>
-          {s.inDiff ? "review" : "issue"}
-        </span>
         <span className="badge badge--pending">pending</span>
-        <span className="badge badge--suggestion">suggestion</span>
-        <span>
-          {s.path} L{s.range.sl}
-          {s.range.el !== s.range.sl ? `–L${s.range.el}` : ""}
-        </span>
+        <span>{lineRange(s.range)}</span>
       </div>
-      {s.body ? <div className="comment__body">{s.body}</div> : null}
       <div className="sugg-old">{s.quote}</div>
       <div className="sugg-new">{s.replacement || "(delete)"}</div>
+      <textarea
+        className="field"
+        value={suggestionComments[s.cid] ?? ""}
+        onChange={(e) => setSuggestionComment(s.cid, e.target.value)}
+        rows={2}
+        placeholder="Add a comment (optional)"
+      />
       <div className="comment__actions">
         <button type="button" className="btn btn--sm" onClick={discardEdits}>
           Discard edits
@@ -690,17 +701,11 @@ export function App() {
           <div key={`${c.source}-${c.id}`} className="comment">
             <div className="comment__meta">
               <span className="comment__author">@{c.author}</span>
-              <span>{c.source}</span>
-              {i === 0 && c.meta?.kind === "suggestion" ? (
-                <span className="badge badge--suggestion">suggestion</span>
-              ) : null}
               {i === 0 && st && STATUS_LABEL[st] ? (
                 <span className={`badge badge--${st}`}>{STATUS_LABEL[st]}</span>
               ) : null}
               {i === 0 && !c.meta ? (
-                <span className="badge badge--issue">
-                  {c.path ? `${c.path}:L${c.line ?? "?"}` : "no anchor"}
-                </span>
+                <span className="badge badge--issue">{c.line ? `L${c.line}` : "no anchor"}</span>
               ) : null}
             </div>
             {c.meta?.kind === "suggestion" ? (
@@ -977,71 +982,46 @@ export function App() {
         </main>
 
         <aside className="sidebar">
-          {/* composer (selection) */}
-          {anchor ? (
-            <SelectionComposer
-              anchor={anchor}
-              routing={routing}
-              value={commentBody}
-              onChange={setCommentBody}
-              onAdd={addDraft}
-              onCancel={() => setAnchor(null)}
-            />
-          ) : null}
-
-          {/* suggestion controls (reviewer edits are already pending in the list) */}
-          {role === "reviewer" && pendingSuggestions.length > 0 ? (
-            <section className="panel">
-              <h2 className="panel__title">Suggestion ({pendingSuggestions.length})</h2>
-              <p className="empty" style={{ marginBottom: 8 }}>
-                Your edits are pending as a suggestion. Add an optional comment, or discard them.
-              </p>
-              <textarea
-                className="field"
-                value={suggestComment}
-                onChange={(e) => setSuggestComment(e.target.value)}
-                rows={2}
-                placeholder="Comment (optional)"
+          {/* one list: the selection composer, pending items and submitted
+              threads all live here — no separate comment / suggestion / review
+              blocks. */}
+          <section className="panel">
+            <div className="panel__head">
+              <h2 className="panel__title">Review</h2>
+              <div className="seg seg--sm">
+                {(["all", "pending", "submitted"] as const).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    aria-pressed={reviewFilter === f}
+                    onClick={() => setReviewFilter(f)}
+                  >
+                    {f === "all" ? "All" : f === "pending" ? "Pending" : "Sent"} ({counts[f]})
+                  </button>
+                ))}
+              </div>
+            </div>
+            {anchor ? (
+              <SelectionComposer
+                anchor={anchor}
+                value={commentBody}
+                onChange={setCommentBody}
+                onAdd={addDraft}
+                onDiscard={discardComposer}
               />
-              <div className="composer__row">
-                <button type="button" className="btn btn--sm" onClick={discardEdits}>
-                  Discard edits
-                </button>
-              </div>
-            </section>
-          ) : null}
-
-          {/* unified review list — pending + submitted in one place, filterable */}
-          {ref ? (
-            <section className="panel">
-              <div className="panel__head">
-                <h2 className="panel__title">Review</h2>
-                <div className="seg seg--sm">
-                  {(["all", "pending", "submitted"] as const).map((f) => (
-                    <button
-                      key={f}
-                      type="button"
-                      aria-pressed={reviewFilter === f}
-                      onClick={() => setReviewFilter(f)}
-                    >
-                      {f === "all" ? "All" : f === "pending" ? "Pending" : "Sent"} ({counts[f]})
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {visibleEntries.length === 0 ? (
-                <p className="empty">No items.</p>
-              ) : (
-                visibleEntries.map((e) =>
-                  e.kind === "draft"
-                    ? renderDraft(e.draft)
-                    : e.kind === "liveSuggestion"
-                      ? renderLiveSuggestion(e.suggestion)
-                      : renderThread(e.thread),
-                )
-              )}
-            </section>
-          ) : null}
+            ) : null}
+            {visibleEntries.length === 0 && !anchor ? (
+              <p className="empty">No items.</p>
+            ) : (
+              visibleEntries.map((e) =>
+                e.kind === "draft"
+                  ? renderDraft(e.draft)
+                  : e.kind === "liveSuggestion"
+                    ? renderLiveSuggestion(e.suggestion)
+                    : renderThread(e.thread),
+              )
+            )}
+          </section>
         </aside>
       </div>
 

@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildThreads,
   buildReviewEntries,
+  buildPendingSuggestions,
   filterReviewEntries,
   reviewCounts,
   type PendingSuggestion,
@@ -15,6 +16,7 @@ import {
 } from "../entrypoints/review/reviewItems";
 import type { ExistingComment } from "../lib/comments";
 import type { PendingDraft } from "../lib/drafts";
+import type { SuggestionHunk } from "../lib/suggest";
 
 function comment(over: Partial<ExistingComment> & { id: number }): ExistingComment {
   return {
@@ -68,6 +70,30 @@ describe("buildThreads", () => {
     expect(threads[1].root.id).toBe(2);
     // the thread for ta has both comments 2 and 3
     expect(threads[1].comments.map((c) => c.id)).toEqual([2, 3]);
+  });
+});
+
+describe("buildPendingSuggestions", () => {
+  const hunks: SuggestionHunk[] = [
+    { sl: 3, el: 3, replacement: "new3", quote: "old3" },
+    { sl: 7, el: 8, replacement: "new78", quote: "old7\nold8" },
+  ];
+
+  test("carries a per-hunk comment and a stable live cid, with diff routing", () => {
+    const comments: Record<string, string> = { "live:3:3": "fix this", "live:7:8": "" };
+    const out = buildPendingSuggestions(hunks, {
+      path: "a.md",
+      isInDiff: (sl) => sl < 5,
+      commentFor: (cid) => comments[cid] ?? "",
+    });
+    expect(out.map((s) => s.cid)).toEqual(["live:3:3", "live:7:8"]);
+    // each suggestion keeps its own comment (its GitHub "first comment")
+    expect(out[0].body).toBe("fix this");
+    expect(out[1].body).toBe("");
+    expect(out[0].inDiff).toBe(true);
+    expect(out[1].inDiff).toBe(false);
+    expect(out[0].replacement).toBe("new3");
+    expect(out[1].range).toEqual({ sl: 7, sc: 1, el: 8, ec: 1 });
   });
 });
 
