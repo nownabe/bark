@@ -575,6 +575,10 @@ export function App() {
         client.listIssueComments(ref),
       ]);
       setComments(normalizeComments(reviews, issues));
+      // The pending items just became submitted; if the list was filtered to
+      // "Pending" it would now look empty, so reveal everything.
+      setReviewFilter("all");
+      setEmphasizedThreadId(null);
     } catch (e) {
       setError(errMessage(e));
     } finally {
