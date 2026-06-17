@@ -195,9 +195,11 @@ Google Docs風の「読みやすいレンダリング＋余白コメント＋提
 ### 7.6 認証 (Auth) — サーバーレス制約下
 
 - **v1**: fine-grained PAT をユーザーが発行し、拡張に登録（`contents: read/write`, `pull requests: read/write` を対象リポジトリに付与）。`chrome.storage.local` に保存
-- **v2（UX 改善）**: OAuth App の **Device Flow** を採用。`client_id` のみで完結し client secret 不要、かつ非有効期限トークンが得られるためサーバーレスと相性が良い
-  - 注: GitHub App の Device Flow は有効期限付きトークン + リフレッシュに secret が必要になり得るため、サーバーレスでは OAuth App が無難
-- api.github.com は CORS を返すため、トークンを `Authorization` ヘッダに載せてブラウザから直接呼べる
+- **v2（UX 改善 / #6 実装）**: **GitHub App** の **Device Flow** を採用。`client_id` のみで完結し client secret 不要
+  - App 設定で「Expire user authorization tokens」を無効化すると、リフレッシュ不要の**非有効期限 user-to-server トークン**が得られる（Device Flow のトークン交換自体も secret 不要）。これにより当初 OAuth App を選んだ理由（GitHub App は refresh に secret が要る）が解消されるため D10 を更新
+  - GitHub App ならインストール時に**ユーザーがリポジトリを選択**でき、`Contents` / `Pull requests`（read/write）の細かい権限だけを付与できる（OAuth App の粗い `repo` スコープより最小権限）
+  - `client_id` はビルド時の env 変数 `BARK_GITHUB_CLIENT_ID`（公開値・secret ではない）から注入する。`.envrc.local`（direnv）で設定し、`BARK_` prefix のみバンドルに露出させることで `GH_PAT` 等の secret が混入しないようにする
+- api.github.com は CORS を返すため、トークンを `Authorization` ヘッダに載せてブラウザから直接呼べる。一方 github.com の device エンドポイント（`/login/device/code`, `/login/oauth/access_token`）は CORS を返さないため、その fetch は host_permissions で CORS を回避できる background service worker で実行する
 
 ### 7.7 ローカルストレージ設計
 

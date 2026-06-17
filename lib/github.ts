@@ -130,7 +130,8 @@ export class GitHubApiError extends Error {
 
 /**
  * REST client that calls api.github.com directly (runs in the browser / CORS-friendly, §4).
- * v1 auth is a fine-grained PAT (§7.6). Scope limited to the #1 slice (read operations).
+ * The bearer token comes from the GitHub App device flow (§7.6 / D10); this client
+ * is auth-method agnostic and just sends whatever token it is given.
  */
 export class GitHubClient {
   constructor(private readonly token: string) {}

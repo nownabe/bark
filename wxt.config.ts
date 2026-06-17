@@ -4,6 +4,10 @@ import { defineConfig } from "wxt";
 // Manifest maps to Design Doc §10 (Manifest V3 / permissions).
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
+  // Expose BARK_-prefixed env vars to the bundle (e.g. BARK_GITHUB_CLIENT_ID,
+  // §7.6). The prefix gate keeps non-prefixed secrets like GH_PAT out of the
+  // shipped extension; WXT_/VITE_ stay enabled for WXT's own conventions.
+  vite: () => ({ envPrefix: ["WXT_", "VITE_", "BARK_"] }),
   manifest: {
     name: "Bark",
     description: "Google Docs-like Markdown review for GitHub Pull Requests",

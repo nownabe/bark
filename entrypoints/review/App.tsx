@@ -51,6 +51,7 @@ import {
   type SuggestionDecision,
 } from "../../lib/drafts";
 import { clearToken, getToken, setToken as persistToken } from "../../lib/storage";
+import { pollForToken, requestDeviceAuthorization, type DeviceAuthorization } from "../../lib/auth";
 import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/metadata";
 import { sampleDoc } from "./sample";
 
@@ -83,7 +84,10 @@ export function App() {
 
   const [token, setToken] = useState<string | null>(null);
   const [tokenLoaded, setTokenLoaded] = useState(false);
-  const [tokenInput, setTokenInput] = useState("");
+  // Device-flow auth state (§7.6): the pending grant + transient UI status.
+  const [deviceAuth, setDeviceAuth] = useState<DeviceAuthorization | null>(null);
+  const [authStarting, setAuthStarting] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const [files, setFiles] = useState<ChangedFile[]>([]);
   const [headSha, setHeadSha] = useState<string | null>(null);
@@ -200,6 +204,49 @@ export function App() {
       setTokenLoaded(true);
     });
   }, []);
+
+  // Device-flow polling (§7.6): once a grant exists, poll GitHub at its interval
+  // until the user authorizes (or the code expires / is denied). A self-scheduling
+  // timeout lets us honor `slow_down` by widening the gap.
+  useEffect(() => {
+    if (!deviceAuth) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let delay = deviceAuth.interval * 1000;
+    const deadline = Date.now() + deviceAuth.expiresIn * 1000;
+
+    const tick = async () => {
+      if (cancelled) return;
+      if (Date.now() > deadline) {
+        setAuthError("The code expired before you authorized. Please try again.");
+        setDeviceAuth(null);
+        return;
+      }
+      try {
+        const r = await pollForToken(deviceAuth.deviceCode);
+        if (cancelled) return;
+        if (r.kind === "authorized") {
+          await persistToken(r.token);
+          setToken(r.token);
+          setDeviceAuth(null);
+          return;
+        }
+        if (r.kind === "slow_down") delay = r.interval * 1000;
+      } catch (e) {
+        if (cancelled) return;
+        setAuthError(e instanceof Error ? e.message : String(e));
+        setDeviceAuth(null);
+        return;
+      }
+      timer = setTimeout(tick, delay);
+    };
+
+    timer = setTimeout(tick, delay);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [deviceAuth]);
 
   useEffect(() => {
     if (!client || !ref) return;
@@ -617,17 +664,25 @@ export function App() {
     }
   };
 
-  const saveToken = async () => {
-    const t = tokenInput.trim();
-    if (!t) return;
-    await persistToken(t);
-    setToken(t);
-    setTokenInput("");
+  // Begin the device flow: ask GitHub for a user code, then render it; the
+  // polling effect below takes over once `deviceAuth` is set.
+  const startDeviceFlow = async () => {
+    setAuthError(null);
+    setAuthStarting(true);
+    try {
+      setDeviceAuth(await requestDeviceAuthorization());
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAuthStarting(false);
+    }
   };
 
   const handleClearToken = async () => {
     await clearToken();
     setToken(null);
+    setDeviceAuth(null);
+    setAuthError(null);
     setFiles([]);
     setHeadSha(null);
     setSelectedPath(null);
@@ -700,25 +755,60 @@ export function App() {
     return (
       <div className="gate">
         <h1>Bark</h1>
-        <p>
-          Opening {owner}/{repo} #{prNum} requires a GitHub fine-grained PAT.
-        </p>
-        <p className="notice--muted" style={{ fontSize: 13 }}>
-          Issue a token with <code>Contents: Read and Write</code> /{" "}
-          <code>Pull requests: Read and Write</code> for the target repository (§7.6). The token is
-          stored only in <code>chrome.storage.local</code> and is never sent anywhere else (§9).
-        </p>
-        <input
-          className="field"
-          type="password"
-          value={tokenInput}
-          onChange={(e) => setTokenInput(e.target.value)}
-          placeholder="github_pat_..."
-          style={{ marginBottom: 12 }}
-        />
-        <button type="button" className="btn btn--primary" onClick={saveToken}>
-          Save and open
-        </button>
+        {deviceAuth ? (
+          <>
+            <p>
+              Authorize Bark for {owner}/{repo} #{prNum}. Enter this code on GitHub:
+            </p>
+            <div className="device-code">{deviceAuth.userCode}</div>
+            <div className="gate__actions">
+              <a
+                className="btn btn--primary"
+                href={deviceAuth.verificationUri}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open GitHub
+              </a>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void navigator.clipboard?.writeText(deviceAuth.userCode)}
+              >
+                Copy code
+              </button>
+            </div>
+            <p className="notice--muted" style={{ fontSize: 13 }}>
+              Pick the repositories Bark may access, then approve. Keep this tab open — it continues
+              automatically once you authorize.
+            </p>
+          </>
+        ) : (
+          <>
+            <p>
+              Opening {owner}/{repo} #{prNum} requires access to GitHub. Authorize Bark with the
+              device flow — there's no token to copy by hand.
+            </p>
+            <p className="notice--muted" style={{ fontSize: 13 }}>
+              You choose which repositories Bark can access (<code>Contents</code> /{" "}
+              <code>Pull requests</code>, §7.6). The resulting token is stored only in{" "}
+              <code>chrome.storage.local</code> and is never sent anywhere else (§9).
+            </p>
+            {authError && (
+              <p className="notice--error" style={{ fontSize: 13 }}>
+                {authError}
+              </p>
+            )}
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={startDeviceFlow}
+              disabled={authStarting}
+            >
+              {authStarting ? "Starting…" : "Connect GitHub"}
+            </button>
+          </>
+        )}
       </div>
     );
   }
