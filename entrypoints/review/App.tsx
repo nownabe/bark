@@ -14,6 +14,7 @@ import { richMarkdown, richMarkdownTheme } from "./richMarkdown";
 import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from "./suggestMode";
 import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from "./suggestionView";
 import { SelectionComposer } from "./components/SelectionComposer";
+import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import {
   buildPendingItems,
@@ -1057,8 +1058,14 @@ export function App() {
               className="field"
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
+              onKeyDown={(e) => {
+                if (isSubmitChord(e)) {
+                  e.preventDefault();
+                  addReply(t);
+                }
+              }}
               rows={2}
-              placeholder="Reply (added to the same thread)"
+              placeholder="Reply (⌘/Ctrl+Enter to add)"
               autoFocus
             />
             <div className="composer__row">

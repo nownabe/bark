@@ -85,4 +85,24 @@ describe("SelectionComposer", () => {
     expect(added).toBe(1);
     expect(discarded).toBe(1);
   });
+
+  test("Cmd/Ctrl+Enter in the field adds; plain Enter does not", () => {
+    let added = 0;
+    const { container } = render(
+      <SelectionComposer
+        anchor={anchor()}
+        value="hi"
+        onChange={() => {}}
+        onAdd={() => added++}
+        onDiscard={() => {}}
+      />,
+    );
+    const field = container.querySelector("textarea")!;
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(added).toBe(0);
+    fireEvent.keyDown(field, { key: "Enter", metaKey: true });
+    expect(added).toBe(1);
+    fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
+    expect(added).toBe(2);
+  });
 });
