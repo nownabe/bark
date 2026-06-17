@@ -75,6 +75,11 @@ const STATUS_LABEL: Partial<Record<AnchorStatus, string>> = {
   outdated: "position not found",
 };
 
+// Public slug of the Bark GitHub App; used to build its install URL so a 404/403
+// (likely "not installed on this repo") can offer a one-click install (§7.6).
+const APP_SLUG = import.meta.env.BARK_GITHUB_APP_SLUG;
+const installUrl = APP_SLUG ? `https://github.com/apps/${APP_SLUG}/installations/new` : null;
+
 export function App() {
   const params = new URLSearchParams(window.location.search);
   const owner = params.get("owner");
@@ -88,6 +93,9 @@ export function App() {
   const [deviceAuth, setDeviceAuth] = useState<DeviceAuthorization | null>(null);
   const [authStarting, setAuthStarting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  // Set when a repo/PR read fails with 404/403 — most often the GitHub App is
+  // not installed on this repository, so the UI offers an install link.
+  const [needsInstall, setNeedsInstall] = useState(false);
 
   const [files, setFiles] = useState<ChangedFile[]>([]);
   const [headSha, setHeadSha] = useState<string | null>(null);
@@ -198,6 +206,13 @@ export function App() {
     return res;
   }, [threads, source, lineStarts, headSha, curPath]);
 
+  // Surface an error and flag the likely "app not installed" case (404/403) so
+  // the UI can offer an install link.
+  const reportError = (e: unknown) => {
+    setError(errMessage(e));
+    setNeedsInstall(e instanceof GitHubApiError && (e.status === 404 || e.status === 403));
+  };
+
   useEffect(() => {
     getToken().then((t) => {
       setToken(t);
@@ -253,6 +268,7 @@ export function App() {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setNeedsInstall(false);
     (async () => {
       try {
         const { headSha: sha, headRef: hr } = await client.getPull(ref);
@@ -263,7 +279,7 @@ export function App() {
         setFiles(md);
         setSelectedPath((prev) => prev ?? md[0]?.path ?? null);
       } catch (e) {
-        if (!cancelled) setError(errMessage(e));
+        if (!cancelled) reportError(e);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -279,6 +295,7 @@ export function App() {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setNeedsInstall(false);
     (async () => {
       try {
         const text = await client.getFileContent(ref, selectedPath, headSha);
@@ -287,7 +304,7 @@ export function App() {
           setBaseSource(text);
         }
       } catch (e) {
-        if (!cancelled) setError(errMessage(e));
+        if (!cancelled) reportError(e);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -1154,6 +1171,18 @@ export function App() {
 
       {loading ? <p className="notice notice--muted">Loading…</p> : null}
       {error ? <p className="notice notice--error">{error}</p> : null}
+      {error && needsInstall ? (
+        <p className="notice notice--muted" style={{ fontSize: 13 }}>
+          If the repository and PR exist, Bark may not be installed on this repository yet.{" "}
+          {installUrl ? (
+            <a href={installUrl} target="_blank" rel="noreferrer">
+              Install Bark and select this repository
+            </a>
+          ) : (
+            "Install the Bark GitHub App and grant it access to this repository."
+          )}
+        </p>
+      ) : null}
       {ref && !loading && !error && files.length === 0 ? (
         <p className="notice notice--muted">This PR has no changed .md files.</p>
       ) : null}
