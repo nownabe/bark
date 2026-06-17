@@ -473,6 +473,26 @@ select.input:focus {
   border-radius: 4px;
   font-size: 12px;
 }
+.gate__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+.device-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-align: center;
+  padding: 14px;
+  margin: 8px 0;
+  color: var(--fg);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  user-select: all;
+}
 
 /* ---- CodeMirror tuning (pageless) ---- */
 .cm-editor {
