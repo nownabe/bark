@@ -20,7 +20,7 @@ jobs:
       - name: Setup mise
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
-          install_args: actionlint
+          install_args: aqua:rhysd/actionlint
       - name: Run actionlint
         # shellcheck is preinstalled on the runner and used for embedded run scripts.
         run: actionlint -color
@@ -39,7 +39,7 @@ jobs:
       - name: Setup mise
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
-          install_args: ghalint
+          install_args: aqua:suzuki-shunsuke/ghalint
       - name: Run ghalint
         run: ghalint run
 
@@ -57,6 +57,6 @@ jobs:
       - name: Setup mise
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
-          install_args: zizmor
+          install_args: aqua:zizmorcore/zizmor
       - name: Run zizmor
         run: zizmor --offline .github/workflows
