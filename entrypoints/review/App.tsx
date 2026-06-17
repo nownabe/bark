@@ -16,6 +16,7 @@ import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from ".
 import { SelectionComposer } from "./components/SelectionComposer";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import {
+  buildPendingItems,
   buildPendingSuggestions,
   buildReviewEntries,
   buildThreads,
@@ -107,6 +108,10 @@ export function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const cmRef = useRef<ReactCodeMirrorRef>(null);
+  // Set before a programmatic "jump to item" selection so the resulting
+  // selection update does not pop the new-comment composer (we are highlighting
+  // an existing item, not starting a new comment).
+  const suppressNextAnchor = useRef(false);
 
   const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
   const lineStarts = useMemo(() => buildLineIndex(source), [source]);
@@ -147,14 +152,18 @@ export function App() {
     });
   }, [role, suggestionHunks, curPath, suggestionComments, diffRanges]);
 
-  // Pending drafts + live suggestions + submitted threads in one sorted list.
-  const threads = useMemo(() => buildThreads(comments, curPath), [comments, curPath]);
-  const entries = useMemo(
-    () => buildReviewEntries({ drafts, threads, pendingSuggestions, currentPath: curPath }),
-    [drafts, threads, pendingSuggestions, curPath],
+  // Threads (submitted comments + pending replies merged) + live suggestions,
+  // in one sorted list.
+  const threads = useMemo(
+    () => buildThreads(comments, drafts, curPath),
+    [comments, drafts, curPath],
   );
-  const counts = reviewCounts(entries);
-  const pendingEntries = filterReviewEntries(entries, "pending");
+  const entries = useMemo(
+    () => buildReviewEntries({ threads, pendingSuggestions, currentPath: curPath }),
+    [threads, pendingSuggestions, curPath],
+  );
+  const counts = reviewCounts({ drafts, pendingSuggestions, comments, threads });
+  const pendingItems = buildPendingItems(drafts, pendingSuggestions);
   const visibleEntries = filterReviewEntries(entries, reviewFilter);
 
   useEffect(() => {
@@ -305,10 +314,12 @@ export function App() {
     }
     const r = reanchorComment(source, lineStarts, c.meta, headSha ?? "");
     if (r.status === "outdated") return;
+    suppressNextAnchor.current = true;
     view.dispatch({
       selection: { anchor: r.startOffset, head: r.endOffset },
       scrollIntoView: true,
     });
+    suppressNextAnchor.current = false; // update listener already ran synchronously
     view.focus();
   };
 
@@ -368,25 +379,43 @@ export function App() {
     setAnchor(null);
   };
 
-  // Thread reply: inherit the root's anchor and add a draft with the same thread id.
-  const addReply = async (root: ExistingComment) => {
-    if (!ref || !root.meta || !replyText.trim()) return;
-    const m = root.meta;
-    const ranges = parseRightRanges(files.find((f) => f.path === m.path)?.patch);
-    const inDiff = isRangeInDiff(ranges, m.range.sl, m.range.el);
+  // Thread reply: inherit the thread's anchor (from its first submitted comment,
+  // else its first pending draft) and add a draft with the same thread id.
+  const addReply = async (thread: ReviewThread) => {
+    if (!ref || !replyText.trim()) return;
+    const a = thread.rootComment?.meta
+      ? {
+          path: thread.rootComment.meta.path,
+          range: thread.rootComment.meta.range,
+          quote: thread.rootComment.meta.quote,
+          thread: thread.rootComment.meta.thread,
+          sha: thread.rootComment.meta.sha,
+        }
+      : thread.rootDraft
+        ? {
+            path: thread.rootDraft.path,
+            range: thread.rootDraft.range,
+            quote: thread.rootDraft.quote,
+            thread: thread.rootDraft.thread,
+            sha: thread.rootDraft.sha,
+          }
+        : null;
+    if (!a) return;
+    const ranges = parseRightRanges(files.find((f) => f.path === a.path)?.patch);
+    const inDiff = isRangeInDiff(ranges, a.range.sl, a.range.el);
     const draft: PendingDraft = {
       cid: crypto.randomUUID(),
-      path: m.path,
+      path: a.path,
       inDiff,
-      range: m.range,
-      quote: m.quote,
-      sha: headSha ?? m.sha,
-      thread: m.thread,
+      range: a.range,
+      quote: a.quote,
+      sha: headSha ?? a.sha,
+      thread: a.thread,
       body: replyText.trim(),
       kind: "comment",
       permalink:
         !inDiff && headSha
-          ? buildBlobPermalink(ref, m.path, headSha, m.range.sl, m.range.el)
+          ? buildBlobPermalink(ref, a.path, headSha, a.range.sl, a.range.el)
           : undefined,
     };
     const next = [...drafts, draft];
@@ -581,7 +610,9 @@ export function App() {
     if (!view) return;
     const len = view.state.doc.length;
     if (from < 0 || to > len || from >= to) return;
+    suppressNextAnchor.current = true;
     view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
+    suppressNextAnchor.current = false; // update listener already ran synchronously
     view.focus();
   };
 
@@ -636,33 +667,20 @@ export function App() {
   const lineRange = (r: { sl: number; el: number }) =>
     `L${r.sl}${r.el !== r.sl ? `–L${r.el}` : ""}`;
 
-  const renderDraft = (d: PendingDraft) => (
-    <div key={d.cid} className="thread thread--clickable" onClick={() => jumpToDraft(d)}>
-      <div className="comment__meta">
-        <span className="badge badge--pending">pending</span>
-        <span>{lineRange(d.range)}</span>
-      </div>
-      {d.kind === "suggestion" ? (
-        <>
-          <div className="sugg-old">{d.quote}</div>
-          <div className="sugg-new">{d.suggestion || "(delete)"}</div>
-        </>
-      ) : null}
-      {d.body ? <div className="comment__body">{d.body}</div> : null}
-      <div className="comment__actions">
-        <button
-          type="button"
-          className="btn btn--sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            removeDraft(d.cid);
-          }}
-        >
-          Delete
-        </button>
-      </div>
-    </div>
-  );
+  const jumpToThread = (t: ReviewThread) => {
+    if (t.rootComment?.meta) jumpTo(t.rootComment);
+    else if (t.rootDraft) jumpToDraft(t.rootDraft);
+  };
+
+  // Click a thread → highlight it in the body and open its reply box, so adding
+  // a comment goes into the existing thread instead of starting a new one.
+  const openThread = (t: ReviewThread) => {
+    jumpToThread(t);
+    if (replyTo !== t.id) {
+      setReplyTo(t.id);
+      setReplyText("");
+    }
+  };
 
   const renderLiveSuggestion = (s: PendingSuggestion) => (
     <div key={s.cid} className="thread">
@@ -687,83 +705,96 @@ export function App() {
     </div>
   );
 
+  const renderSubmittedMessage = (c: ExistingComment, isRoot: boolean, st: AnchorStatus | null) => (
+    <div key={`s-${c.source}-${c.id}`} className="comment">
+      <div className="comment__meta">
+        <span className="comment__author">@{c.author}</span>
+        {isRoot && st && STATUS_LABEL[st] ? (
+          <span className={`badge badge--${st}`}>{STATUS_LABEL[st]}</span>
+        ) : null}
+        {isRoot && !c.meta ? (
+          <span className="badge badge--issue">{c.line ? `L${c.line}` : "no anchor"}</span>
+        ) : null}
+      </div>
+      {c.meta?.kind === "suggestion" ? (
+        <>
+          {stripSuggestionBlock(c.body) ? (
+            <div className="comment__body">{stripSuggestionBlock(c.body)}</div>
+          ) : null}
+          <div className="sugg-old">{c.meta.quote}</div>
+          <div className="sugg-new">{extractSuggestionBlock(c.body) || "(delete)"}</div>
+        </>
+      ) : (
+        <div className="comment__body">{c.body || "(no body)"}</div>
+      )}
+    </div>
+  );
+
+  const renderPendingMessage = (d: PendingDraft) => (
+    <div key={`p-${d.cid}`} className="comment comment--pending">
+      <div className="comment__meta">
+        <span className="comment__author">You</span>
+        <span className="badge badge--pending">pending</span>
+      </div>
+      {d.kind === "suggestion" ? (
+        <>
+          <div className="sugg-old">{d.quote}</div>
+          <div className="sugg-new">{d.suggestion || "(delete)"}</div>
+        </>
+      ) : (
+        <div className="comment__body">{d.body || "(no body)"}</div>
+      )}
+      <div className="comment__actions">
+        <button
+          type="button"
+          className="btn btn--sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            removeDraft(d.cid);
+          }}
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+
   const renderThread = (t: ReviewThread) => {
-    const st = statusFor(t.root);
-    const clickable = !!t.root.meta;
+    const root = t.rootComment;
+    const st = root ? statusFor(root) : null;
+    const showAuthorActions = root?.meta?.kind === "suggestion" && role === "author";
     return (
-      <div
-        key={t.id}
-        className={clickable ? "thread thread--clickable" : "thread"}
-        onClick={clickable ? () => jumpTo(t.root) : undefined}
-      >
-        {t.root.meta ? <div className="thread__quote">{t.root.meta.quote}</div> : null}
-        {t.comments.map((c, i) => (
-          <div key={`${c.source}-${c.id}`} className="comment">
-            <div className="comment__meta">
-              <span className="comment__author">@{c.author}</span>
-              {i === 0 && st && STATUS_LABEL[st] ? (
-                <span className={`badge badge--${st}`}>{STATUS_LABEL[st]}</span>
-              ) : null}
-              {i === 0 && !c.meta ? (
-                <span className="badge badge--issue">{c.line ? `L${c.line}` : "no anchor"}</span>
-              ) : null}
-            </div>
-            {c.meta?.kind === "suggestion" ? (
-              <>
-                {stripSuggestionBlock(c.body) ? (
-                  <div className="comment__body">{stripSuggestionBlock(c.body)}</div>
-                ) : null}
-                <div className="sugg-old">{c.meta.quote}</div>
-                <div className="sugg-new">{extractSuggestionBlock(c.body) || "(delete)"}</div>
-              </>
+      <div key={t.id} className="thread thread--clickable" onClick={() => openThread(t)}>
+        {t.quote ? <div className="thread__quote">{t.quote}</div> : null}
+        {t.messages.map((m) =>
+          m.kind === "submitted"
+            ? renderSubmittedMessage(m.comment, m.comment === root, st)
+            : renderPendingMessage(m.draft),
+        )}
+        {showAuthorActions && root ? (
+          <div className="comment__actions" onClick={(e) => e.stopPropagation()}>
+            {dismissed[root.id] ? (
+              <span className="notice--muted" style={{ fontSize: 11 }}>
+                {dismissed[root.id] === "accepted" ? "accepted — Commit to apply" : "rejected"}
+              </span>
             ) : (
-              <div className="comment__body">{c.body || "(no body)"}</div>
+              <>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  onClick={() => acceptSuggestion(root)}
+                >
+                  Accept
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  onClick={() => rejectSuggestion(root)}
+                >
+                  Reject
+                </button>
+              </>
             )}
-          </div>
-        ))}
-        {t.root.meta ? (
-          <div className="comment__actions">
-            {t.root.meta.kind === "suggestion" && role === "author" ? (
-              dismissed[t.root.id] ? (
-                <span className="notice--muted" style={{ fontSize: 11 }}>
-                  {dismissed[t.root.id] === "accepted" ? "accepted — Commit to apply" : "rejected"}
-                </span>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn--primary btn--sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      acceptSuggestion(t.root);
-                    }}
-                  >
-                    Accept
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      rejectSuggestion(t.root);
-                    }}
-                  >
-                    Reject
-                  </button>
-                </>
-              )
-            ) : null}
-            <button
-              type="button"
-              className="btn btn--sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                setReplyTo(replyTo === t.id ? null : t.id);
-                setReplyText("");
-              }}
-            >
-              Reply
-            </button>
           </div>
         ) : null}
         {replyTo === t.id ? (
@@ -774,12 +805,13 @@ export function App() {
               onChange={(e) => setReplyText(e.target.value)}
               rows={2}
               placeholder="Reply (added to the same thread)"
+              autoFocus
             />
             <div className="composer__row">
               <button
                 type="button"
                 className="btn btn--primary btn--sm"
-                onClick={() => addReply(t.root)}
+                onClick={() => addReply(t)}
               >
                 Add
               </button>
@@ -976,7 +1008,10 @@ export function App() {
                 highlightActiveLineGutter: false,
               }}
               onChange={(v) => setSource(v)}
-              onUpdate={(vu) => handleSelectionUpdate(vu, setAnchor)}
+              onUpdate={(vu) => {
+                if (suppressNextAnchor.current) return;
+                handleSelectionUpdate(vu, setAnchor);
+              }}
             />
           </div>
         </main>
@@ -1014,11 +1049,9 @@ export function App() {
               <p className="empty">No items.</p>
             ) : (
               visibleEntries.map((e) =>
-                e.kind === "draft"
-                  ? renderDraft(e.draft)
-                  : e.kind === "liveSuggestion"
-                    ? renderLiveSuggestion(e.suggestion)
-                    : renderThread(e.thread),
+                e.kind === "liveSuggestion"
+                  ? renderLiveSuggestion(e.suggestion)
+                  : renderThread(e.thread),
               )
             )}
           </section>
@@ -1027,7 +1060,7 @@ export function App() {
 
       {showSubmitConfirm ? (
         <SubmitConfirmModal
-          items={pendingEntries}
+          items={pendingItems}
           onConfirm={submitReview}
           onCancel={() => setShowSubmitConfirm(false)}
           loading={loading}

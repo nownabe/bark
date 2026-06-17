@@ -1,10 +1,10 @@
 // Confirmation modal for "Submit review" — task 3.
 // Lists the pending items (drafts + the reviewer's live suggestions) that are
 // about to be sent to GitHub so the reviewer can confirm before submitting.
-import type { ReviewEntry } from "../reviewItems";
+import type { PendingItem } from "../reviewItems";
 
 interface Props {
-  items: ReviewEntry[];
+  items: PendingItem[];
   onConfirm: () => void;
   onCancel: () => void;
   loading?: boolean;
@@ -29,33 +29,25 @@ export function SubmitConfirmModal({ items, onConfirm, onCancel, loading }: Prop
           <p className="empty">Nothing to submit.</p>
         ) : (
           <div className="modal__list">
-            {items.map((e) => {
-              // The modal only lists pending items (drafts + live suggestions).
+            {items.map((item) => {
               const v =
-                e.kind === "liveSuggestion"
+                item.kind === "suggestion"
                   ? {
-                      cid: e.suggestion.cid,
-                      path: e.suggestion.path,
-                      range: e.suggestion.range,
-                      inDiff: e.suggestion.inDiff,
-                      body: e.suggestion.body,
+                      cid: item.suggestion.cid,
+                      range: item.suggestion.range,
+                      body: item.suggestion.body,
                       isSuggestion: true,
-                      quote: e.suggestion.quote,
-                      replacement: e.suggestion.replacement,
+                      quote: item.suggestion.quote,
+                      replacement: item.suggestion.replacement,
                     }
-                  : e.kind === "draft"
-                    ? {
-                        cid: e.draft.cid,
-                        path: e.draft.path,
-                        range: e.draft.range,
-                        inDiff: e.draft.inDiff,
-                        body: e.draft.body,
-                        isSuggestion: e.draft.kind === "suggestion",
-                        quote: e.draft.quote,
-                        replacement: e.draft.suggestion ?? "",
-                      }
-                    : null;
-              if (!v) return null;
+                  : {
+                      cid: item.draft.cid,
+                      range: item.draft.range,
+                      body: item.draft.body,
+                      isSuggestion: item.draft.kind === "suggestion",
+                      quote: item.draft.quote,
+                      replacement: item.draft.suggestion ?? "",
+                    };
               return (
                 <div key={v.cid} className="thread">
                   <div className="comment__meta">

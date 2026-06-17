@@ -1,18 +1,18 @@
-// Unified review-items model (sidebar) — tasks 2 & 4.
+// Unified review-items model (sidebar).
 //
-// The sidebar must show pending drafts, the reviewer's *live* suggestion edits
-// (treated as pending the moment they are made), and already-submitted comment
-// threads in a SINGLE list, sorted together by position (current file first).
-// A header filter narrows the list to all / pending / submitted.
+// Threads group submitted comments AND pending drafts by thread id, so a reply
+// to a comment (a pending draft with the same thread id) shows nested in the
+// same thread instead of as a separate item. Live suggestions are their own
+// pending entries. A header filter narrows to all / pending / submitted.
 import { describe, expect, test } from "bun:test";
 import {
   buildThreads,
   buildReviewEntries,
+  buildPendingItems,
   buildPendingSuggestions,
   filterReviewEntries,
   reviewCounts,
   type PendingSuggestion,
-  type ReviewThread,
 } from "../entrypoints/review/reviewItems";
 import type { ExistingComment } from "../lib/comments";
 import type { PendingDraft } from "../lib/drafts";
@@ -54,22 +54,116 @@ function draft(over: Partial<PendingDraft> & { cid: string }): PendingDraft {
   };
 }
 
+const liveSuggestion: PendingSuggestion = {
+  cid: "live:3:3",
+  path: "a.md",
+  inDiff: true,
+  range: { sl: 3, sc: 1, el: 3, ec: 1 },
+  quote: "old",
+  replacement: "new",
+  body: "",
+};
+
 describe("buildThreads", () => {
-  test("groups comments by thread id and sorts current path first then position", () => {
-    const comments: ExistingComment[] = [
-      comment({ id: 1, meta: meta(20, "b.md", "tb") }),
-      comment({ id: 2, meta: meta(5, "a.md", "ta") }),
-      comment({ id: 3, meta: meta(5, "a.md", "ta") }), // reply in same thread
-      comment({ id: 4, meta: meta(2, "a.md", "ta2") }),
+  test("merges a submitted comment and a pending reply with the same thread id", () => {
+    const comments = [comment({ id: 1, meta: meta(5, "a.md", "t1") })];
+    const drafts = [draft({ cid: "d1", thread: "t1", range: { sl: 5, sc: 1, el: 5, ec: 5 } })];
+    const threads = buildThreads(comments, drafts, "a.md");
+    expect(threads).toHaveLength(1);
+    const t = threads[0];
+    expect(t.messages.map((m) => m.kind)).toEqual(["submitted", "pending"]);
+    expect(t.hasSubmitted).toBe(true);
+    expect(t.hasPending).toBe(true);
+    expect(t.rootComment?.id).toBe(1);
+  });
+
+  test("a brand-new pending comment is its own thread; replies group, not split", () => {
+    const drafts = [
+      draft({ cid: "d1", thread: "th", range: { sl: 5, sc: 1, el: 5, ec: 5 }, body: "first" }),
+      draft({ cid: "d2", thread: "th", range: { sl: 5, sc: 1, el: 5, ec: 5 }, body: "reply" }),
+      draft({ cid: "d3", thread: "other", range: { sl: 9, sc: 1, el: 9, ec: 5 } }),
     ];
-    const threads = buildThreads(comments, "a.md");
-    // current path (a.md) threads come before b.md
-    expect(threads.map((t) => t.path)).toEqual(["a.md", "a.md", "b.md"]);
-    // within a.md, sorted by position (line 2 before line 5)
-    expect(threads[0].root.id).toBe(4);
-    expect(threads[1].root.id).toBe(2);
-    // the thread for ta has both comments 2 and 3
-    expect(threads[1].comments.map((c) => c.id)).toEqual([2, 3]);
+    const threads = buildThreads([], drafts, "a.md");
+    expect(threads).toHaveLength(2);
+    const th = threads.find((t) => t.id === "th")!;
+    expect(th.messages.map((m) => m.kind)).toEqual(["pending", "pending"]);
+    expect(th.hasSubmitted).toBe(false);
+    expect(th.rootDraft?.cid).toBe("d1");
+  });
+
+  test("sorts current path first then by position", () => {
+    const comments = [
+      comment({ id: 1, meta: meta(20, "b.md", "tb") }),
+      comment({ id: 2, meta: meta(8, "a.md", "ta") }),
+    ];
+    const threads = buildThreads(comments, [], "a.md");
+    expect(threads.map((t) => t.path)).toEqual(["a.md", "b.md"]);
+  });
+});
+
+describe("buildReviewEntries / filter", () => {
+  const comments = [comment({ id: 1, meta: meta(5, "a.md", "t1") })];
+  const drafts = [
+    draft({ cid: "d1", thread: "t1", range: { sl: 5, sc: 1, el: 5, ec: 5 } }), // reply to submitted
+    draft({ cid: "d2", thread: "new", range: { sl: 9, sc: 1, el: 9, ec: 5 } }), // new pending comment
+  ];
+  const threads = buildThreads(comments, drafts, "a.md");
+  const entries = buildReviewEntries({
+    threads,
+    pendingSuggestions: [liveSuggestion],
+    currentPath: "a.md",
+  });
+
+  test("entries are threads + live suggestions, position sorted", () => {
+    // a.md: live (L3), thread t1 (L5), thread new (L9)
+    const kinds = entries.map((e) =>
+      e.kind === "thread" ? `thread:${e.thread.id}` : `live:${e.suggestion.cid}`,
+    );
+    expect(kinds).toEqual(["live:live:3:3", "thread:t1", "thread:new"]);
+  });
+
+  test("'pending' shows threads with pending content + live suggestions", () => {
+    const pending = filterReviewEntries(entries, "pending");
+    // t1 (has pending reply), new (pending), live → 3
+    expect(pending).toHaveLength(3);
+  });
+
+  test("'submitted' shows only threads that have submitted comments", () => {
+    const submitted = filterReviewEntries(entries, "submitted");
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0].kind === "thread" && submitted[0].thread.id).toBe("t1");
+  });
+
+  test("'all' shows everything", () => {
+    expect(filterReviewEntries(entries, "all")).toHaveLength(3);
+  });
+});
+
+describe("reviewCounts", () => {
+  const comments = [comment({ id: 1, meta: meta(5) }), comment({ id: 2, meta: meta(6) })];
+  const drafts = [draft({ cid: "d1" })];
+  const threads = buildThreads(comments, drafts, "a.md");
+
+  test("pending = drafts + live suggestions; submitted = submitted comments", () => {
+    const counts = reviewCounts({
+      drafts,
+      pendingSuggestions: [liveSuggestion],
+      comments,
+      threads,
+    });
+    expect(counts.pending).toBe(2); // 1 draft + 1 live suggestion
+    expect(counts.submitted).toBe(2); // 2 submitted comments
+    expect(counts.all).toBe(threads.length + 1);
+  });
+});
+
+describe("buildPendingItems", () => {
+  test("flattens drafts and live suggestions into submittable items", () => {
+    const drafts = [draft({ cid: "d1" }), draft({ cid: "d2" })];
+    const items = buildPendingItems(drafts, [liveSuggestion]);
+    expect(items).toHaveLength(3);
+    expect(items.filter((i) => i.kind === "comment")).toHaveLength(2);
+    expect(items.filter((i) => i.kind === "suggestion")).toHaveLength(1);
   });
 });
 
@@ -87,112 +181,11 @@ describe("buildPendingSuggestions", () => {
       commentFor: (cid) => comments[cid] ?? "",
     });
     expect(out.map((s) => s.cid)).toEqual(["live:3:3", "live:7:8"]);
-    // each suggestion keeps its own comment (its GitHub "first comment")
     expect(out[0].body).toBe("fix this");
     expect(out[1].body).toBe("");
     expect(out[0].inDiff).toBe(true);
     expect(out[1].inDiff).toBe(false);
     expect(out[0].replacement).toBe("new3");
     expect(out[1].range).toEqual({ sl: 7, sc: 1, el: 8, ec: 1 });
-  });
-});
-
-describe("buildReviewEntries", () => {
-  const drafts: PendingDraft[] = [
-    draft({ cid: "d1", range: { sl: 10, sc: 1, el: 10, ec: 5 } }),
-    draft({ cid: "d2", path: "b.md", range: { sl: 1, sc: 1, el: 1, ec: 5 } }),
-  ];
-  const suggestions: PendingSuggestion[] = [
-    {
-      cid: "live:3",
-      path: "a.md",
-      inDiff: true,
-      range: { sl: 3, sc: 1, el: 3, ec: 1 },
-      quote: "old line",
-      replacement: "new line",
-      body: "(suggested edit)",
-    },
-  ];
-  const threads: ReviewThread[] = buildThreads(
-    [comment({ id: 1, meta: meta(50, "a.md", "t50") })],
-    "a.md",
-  );
-
-  test("merges drafts, live suggestions and submitted threads, tagged with status", () => {
-    const entries = buildReviewEntries({
-      drafts,
-      threads,
-      pendingSuggestions: suggestions,
-      currentPath: "a.md",
-    });
-    const byKind = entries.map((e) => e.kind);
-    expect(byKind).toContain("draft");
-    expect(byKind).toContain("liveSuggestion");
-    expect(byKind).toContain("thread");
-    const liveEntry = entries.find((e) => e.kind === "liveSuggestion")!;
-    expect(liveEntry.status).toBe("pending");
-    const threadEntry = entries.find((e) => e.kind === "thread")!;
-    expect(threadEntry.status).toBe("submitted");
-  });
-
-  test("sorts current path first, then by position, across pending and submitted", () => {
-    const entries = buildReviewEntries({
-      drafts,
-      threads,
-      pendingSuggestions: suggestions,
-      currentPath: "a.md",
-    });
-    // a.md entries: live suggestion (L3), draft d1 (L10), thread (L50); then b.md draft d2
-    const ids = entries.map((e) => {
-      if (e.kind === "draft") return e.draft.cid;
-      if (e.kind === "liveSuggestion") return e.suggestion.cid;
-      return `thread:${e.thread.root.id}`;
-    });
-    expect(ids).toEqual(["live:3", "d1", "thread:1", "d2"]);
-  });
-});
-
-describe("filterReviewEntries & reviewCounts", () => {
-  const drafts: PendingDraft[] = [draft({ cid: "d1" })];
-  const suggestions: PendingSuggestion[] = [
-    {
-      cid: "live:3",
-      path: "a.md",
-      inDiff: true,
-      range: { sl: 3, sc: 1, el: 3, ec: 1 },
-      quote: "old",
-      replacement: "new",
-      body: "(suggested edit)",
-    },
-  ];
-  const threads = buildThreads([comment({ id: 1, meta: meta(50) })], "a.md");
-  const entries = buildReviewEntries({
-    drafts,
-    threads,
-    pendingSuggestions: suggestions,
-    currentPath: "a.md",
-  });
-
-  test("filter 'all' returns everything", () => {
-    expect(filterReviewEntries(entries, "all").length).toBe(3);
-  });
-
-  test("filter 'pending' returns drafts and live suggestions only", () => {
-    const pending = filterReviewEntries(entries, "pending");
-    expect(pending.length).toBe(2);
-    expect(pending.every((e) => e.status === "pending")).toBe(true);
-  });
-
-  test("filter 'submitted' returns threads only", () => {
-    const submitted = filterReviewEntries(entries, "submitted");
-    expect(submitted.length).toBe(1);
-    expect(submitted.every((e) => e.status === "submitted")).toBe(true);
-  });
-
-  test("reviewCounts reports pending (drafts + live suggestions) and submitted totals", () => {
-    const counts = reviewCounts(entries);
-    expect(counts.pending).toBe(2);
-    expect(counts.submitted).toBe(1);
-    expect(counts.all).toBe(3);
   });
 });

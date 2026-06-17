@@ -276,6 +276,12 @@ select.input:focus {
   padding-top: 8px;
   border-top: 1px dashed var(--border-subtle);
 }
+/* a not-yet-submitted reply/comment inside a thread */
+.comment--pending {
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
+  margin-left: -2px;
+}
 .comment__meta {
   display: flex;
   align-items: center;

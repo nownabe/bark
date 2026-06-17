@@ -10,7 +10,7 @@ if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
 import { describe, expect, test } from "bun:test";
 import { render, fireEvent } from "@testing-library/react";
 import { SubmitConfirmModal } from "../entrypoints/review/components/SubmitConfirmModal";
-import { buildReviewEntries, type PendingSuggestion } from "../entrypoints/review/reviewItems";
+import { buildPendingItems, type PendingSuggestion } from "../entrypoints/review/reviewItems";
 import type { PendingDraft } from "../lib/drafts";
 
 const drafts: PendingDraft[] = [
@@ -39,7 +39,7 @@ const pendingSuggestions: PendingSuggestion[] = [
 ];
 
 function pendingEntries() {
-  return buildReviewEntries({ drafts, threads: [], pendingSuggestions, currentPath: "docs/a.md" });
+  return buildPendingItems(drafts, pendingSuggestions);
 }
 
 describe("SubmitConfirmModal", () => {
