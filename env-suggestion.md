@@ -19,3 +19,11 @@ them; agents do not edit config files directly.
 - **Symptom**: `bun node_modules/wxt/bin/wxt.mjs build` fails with `error: Cannot find package 'js-tokens' from '.../node_modules/strip-literal/dist/index.mjs'`. The directories `node_modules/js-tokens` and `node_modules/strip-literal/node_modules/js-tokens` exist on disk, but `ls` of them returns empty inside the sandbox (content is unreadable). The same build succeeds with a one-off `dangerouslyDisableSandbox`.
 - **Cause**: the sandbox `filesystem.read` denylist auto-denies paths matching a `*token*` pattern (a secret-scan heuristic). This sweeps in the legitimate `js-tokens` package (a transitive dep of `strip-literal`, used by vite/wxt during build), so the bundler cannot read it.
 - **Proposal (narrowest first)**: add an `allowWithinDeny` (read) exception for exactly these two paths — `node_modules/js-tokens` and `node_modules/strip-literal/node_modules/js-tokens` — so `wxt build` works sandboxed. Do **not** broaden the `*token*` denylist removal. If other `*token*`-named packages surface in future builds (e.g. `comma-separated-tokens`, `space-separated-tokens`, already on the denylist), add each specific path the same way rather than relaxing the pattern.
+
+---
+
+## Sandbox read-denies `.mcp.json` → `oxfmt --check` (`bun run check:format`) fails inside the sandbox
+
+- **Symptom**: `bun run check:format` fails inside the sandbox with `Failed to read file: .../.mcp.json` / `This may be due to the file being a binary or inaccessible.` The same check passes with a one-off `dangerouslyDisableSandbox` ("All matched files use the correct format", 69 files).
+- **Cause**: `.mcp.json` is on the sandbox `filesystem.read` denylist, so oxfmt (which globs the repo root) cannot read it and aborts the whole format check.
+- **Proposal (narrowest first)**: exclude `.mcp.json` from oxfmt's input rather than loosening the sandbox — e.g. add an oxfmt ignore entry / config for `.mcp.json` (it is local agent config, not project source that needs formatting). Only if oxfmt must format it should an `allowRead` exception for exactly `.mcp.json` be considered. Do **not** broaden the read denylist.
