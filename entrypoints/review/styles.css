@@ -493,6 +493,15 @@ select.input:focus {
   border-radius: var(--radius);
   user-select: all;
 }
+.linkish {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
 
 /* ---- CodeMirror tuning (pageless) ---- */
 .cm-editor {
