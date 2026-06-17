@@ -4,6 +4,7 @@
     "defaultMode": "acceptEdits",
     "allow": [
       "Bash(bun run build)",
+      "Bash(gh pr create *)",
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git fetch *)",
