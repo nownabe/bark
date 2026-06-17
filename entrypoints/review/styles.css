@@ -282,6 +282,12 @@ select.input:focus {
   border-color: var(--accent);
   box-shadow: var(--ring);
 }
+/* Inside an emphasized thread the card already carries the focus ring; don't
+   double up by also ringing the reply field that opens within it. */
+.thread--emphasized .field:focus {
+  border-color: var(--border);
+  box-shadow: none;
+}
 .field--mono {
   font-family: var(--font-mono);
 }
