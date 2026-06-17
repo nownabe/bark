@@ -11,7 +11,7 @@
 // widget's computed style against the styled reference element on the same line.
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
 
 import { describe, expect, test } from "bun:test";
 import { markdown } from "@codemirror/lang-markdown";
