@@ -747,8 +747,9 @@ export function App() {
     );
   };
 
-  // Click commented (highlighted) text in the body → select that comment's range
-  // and emphasize its thread in the sidebar (instead of starting a new comment).
+  // Click commented (highlighted) text in the body → select that comment's range,
+  // emphasize its thread in the sidebar, and open its reply box (so it behaves
+  // like clicking the thread itself, not like starting a new comment).
   const emphasizeThread = (hit: ThreadRange) => {
     const view = cmRef.current?.view;
     if (!view) return;
@@ -759,6 +760,10 @@ export function App() {
       setReviewFilter("all"); // make sure the emphasized thread is visible
     }
     setEmphasizedThreadId(hit.id);
+    if (replyTo !== hit.id) {
+      setReplyTo(hit.id);
+      setReplyText("");
+    }
   };
 
   const onEditorClick = (e: ReactMouseEvent) => {
