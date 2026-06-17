@@ -778,7 +778,10 @@ export function App() {
   if (ref && !token) {
     return (
       <div className="gate">
-        <h1>Bark</h1>
+        <div className="gate__brand">
+          <img className="gate__logo" src="/icon/128.png" alt="" />
+          <h1>Bark</h1>
+        </div>
         {deviceAuth ? (
           <>
             <p>
@@ -843,7 +846,10 @@ export function App() {
   if (ref && needsInstall) {
     return (
       <div className="gate">
-        <h1>Bark</h1>
+        <div className="gate__brand">
+          <img className="gate__logo" src="/icon/128.png" alt="" />
+          <h1>Bark</h1>
+        </div>
         <p>
           Bark can't open {owner}/{repo} #{prNum} yet.
         </p>
