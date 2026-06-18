@@ -74,10 +74,26 @@ export interface RawIssueComment {
   user: { login: string } | null;
 }
 
-/** PR head info. */
+/** PR head info + display metadata (title/body/author/status). */
 export interface PullInfo {
   headSha: string;
   headRef: string;
+  title: string;
+  /** PR description (Markdown); empty string when none. */
+  body: string;
+  author: string;
+  state: "open" | "closed";
+  draft: boolean;
+  merged: boolean;
+}
+
+export type PullStatus = "draft" | "merged" | "open" | "closed";
+
+/** Collapse the GitHub PR fields into a single display status. */
+export function pullStatus(info: { state: string; draft?: boolean; merged?: boolean }): PullStatus {
+  if (info.merged) return "merged";
+  if (info.draft) return "draft";
+  return info.state === "closed" ? "closed" : "open";
 }
 
 const API_BASE = "https://api.github.com";
@@ -211,14 +227,31 @@ export class GitHubClient {
     await this.post(`/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`, { body });
   }
 
-  /** PR metadata: the head SHA (the baseline, §7.9) and ref (commit target branch, §7.4). */
+  /** PR metadata: head SHA/ref (§7.9/§7.4) plus title/body/author/status for display. */
   async getPull(ref: PrRef): Promise<PullInfo> {
     const res = await this.request(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`);
-    const json = (await res.json()) as { head?: { sha?: string; ref?: string } };
+    const json = (await res.json()) as {
+      head?: { sha?: string; ref?: string };
+      title?: string;
+      body?: string | null;
+      user?: { login?: string } | null;
+      state?: string;
+      draft?: boolean;
+      merged?: boolean;
+    };
     if (!json.head?.sha || !json.head?.ref) {
       throw new GitHubApiError(res.status, "PR head not found");
     }
-    return { headSha: json.head.sha, headRef: json.head.ref };
+    return {
+      headSha: json.head.sha,
+      headRef: json.head.ref,
+      title: json.title ?? "",
+      body: json.body ?? "",
+      author: json.user?.login ?? "unknown",
+      state: json.state === "closed" ? "closed" : "open",
+      draft: Boolean(json.draft),
+      merged: Boolean(json.merged),
+    };
   }
 
   async getPullHeadSha(ref: PrRef): Promise<string> {

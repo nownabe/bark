@@ -1,5 +1,24 @@
 import { describe, expect, test } from "bun:test";
-import { avatarUrl, buildBlobPermalink, buildSuggestionBlock, parseNextLink } from "../lib/github";
+import {
+  avatarUrl,
+  buildBlobPermalink,
+  buildSuggestionBlock,
+  parseNextLink,
+  pullStatus,
+} from "../lib/github";
+
+describe("pullStatus", () => {
+  test("merged wins over everything", () => {
+    expect(pullStatus({ state: "closed", merged: true, draft: true })).toBe("merged");
+  });
+  test("draft when open and not merged", () => {
+    expect(pullStatus({ state: "open", draft: true })).toBe("draft");
+  });
+  test("open / closed otherwise", () => {
+    expect(pullStatus({ state: "open" })).toBe("open");
+    expect(pullStatus({ state: "closed" })).toBe("closed");
+  });
+});
 
 describe("avatarUrl", () => {
   test("builds the github.com avatar URL with a size", () => {
