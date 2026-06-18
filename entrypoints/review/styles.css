@@ -152,6 +152,10 @@ select:focus-visible {
 .topbar__pr:hover {
   color: var(--accent);
 }
+/* the title sets its own color, so tint it on hover too for consistency */
+.topbar__pr:hover .topbar__pr-title {
+  color: var(--accent);
+}
 .topbar__pr-ref {
   font-weight: 600;
   flex: none;
