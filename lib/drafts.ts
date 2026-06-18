@@ -95,3 +95,13 @@ export async function saveDismissedSuggestions(
 ): Promise<void> {
   await browser.storage.local.set({ [dismissedKey(ref)]: decisions });
 }
+
+/**
+ * Discard every pending review item for a PR: the reviewer's comment/suggestion
+ * drafts and their in-progress suggestion edits. The author's accept/reject
+ * decisions (dismissed suggestions) are deliberately left intact — they reflect
+ * already-submitted suggestions, not pending review state.
+ */
+export async function discardAllDrafts(ref: PrRef): Promise<void> {
+  await Promise.all([saveDrafts(ref, []), saveSuggestionEdits(ref, {})]);
+}
