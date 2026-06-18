@@ -42,13 +42,16 @@ export async function saveDrafts(ref: PrRef, drafts: PendingDraft[]): Promise<vo
 }
 
 /**
- * The reviewer's in-progress suggestion edits for one file: the edited document
- * text plus the comment attached to each live suggestion (keyed by its cid).
- * Persisted per path so pending suggestions survive a reload, the way pending
- * comment drafts do (they are otherwise derived only from the in-memory editor
- * state and vanish when the file is re-fetched).
+ * The reviewer's in-progress suggestion edits for one file: the base document
+ * text (the file at head, what the edit is diffed against), the edited document
+ * text, and the comment attached to each live suggestion (keyed by its cid).
+ * Persisted per path so pending suggestions survive a reload — and so the
+ * suggestions for files that aren't currently open can still be reconstructed
+ * (base → edited diff) for an all-files Submit, the way pending comment drafts
+ * span every file.
  */
 export interface SuggestionEdit {
+  base: string;
   source: string;
   comments: Record<string, string>;
 }

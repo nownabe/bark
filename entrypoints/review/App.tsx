@@ -147,6 +147,11 @@ export function App() {
   const [replyText, setReplyText] = useState("");
   // Per-suggestion attached comment, keyed by live suggestion cid (`live:sl:el`).
   const [suggestionComments, setSuggestionComments] = useState<Record<string, string>>({});
+  // Persisted suggestion edits for every file (base + edited doc + comments),
+  // mirrored to storage. The source of truth for both reload survival and the
+  // all-files Submit (the current file's are also surfaced live; other files'
+  // suggestions are reconstructed from here).
+  const [suggestionEdits, setSuggestionEdits] = useState<Record<string, SuggestionEdit>>({});
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [emphasizedThreadId, setEmphasizedThreadId] = useState<string | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
@@ -162,13 +167,14 @@ export function App() {
   // The pending-suggestion ids seen on the previous render, so a newly created
   // suggestion can be scrolled into view in the review list (see effect below).
   const seenSuggestionCids = useRef<Set<string>>(new Set());
-  // Per-path suggestion edits awaiting a debounced write to storage (so pending
-  // suggestions survive a reload). Accumulated by path — not a single value — so
-  // switching files mid-debounce can never drop another file's pending write.
-  // `null` means "clear this path". Flushed via read-modify-write to avoid
-  // clobbering paths edited in other ways.
-  const pendingEditWrites = useRef<Record<string, SuggestionEdit | null>>({});
+  // Debounces the storage write of `suggestionEdits` (the full map is the source
+  // of truth, so a single timer can't drop a path).
   const editSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Always-current mirror of `suggestionEdits`, so the async file-load effect can
+  // merge storage with the latest in-memory edits (in-memory wins) instead of
+  // clobbering an edit made while a different file was loading.
+  const suggestionEditsRef = useRef(suggestionEdits);
+  suggestionEditsRef.current = suggestionEdits;
   // Set before a programmatic "jump to item" selection so the resulting
   // selection update does not pop the new-comment composer (we are highlighting
   // an existing item, not starting a new comment).
@@ -213,6 +219,33 @@ export function App() {
     });
   }, [role, suggestionHunks, curPath, suggestionComments, diffRanges]);
 
+  // Pending suggestions for the *other* files (reconstructed from their persisted
+  // base → edited diff). The current file is covered by the live
+  // `pendingSuggestions` above, so it is excluded here to avoid duplication.
+  const crossFileSuggestions = useMemo<PendingSuggestion[]>(() => {
+    if (role !== "reviewer") return [];
+    const out: PendingSuggestion[] = [];
+    for (const [path, edit] of Object.entries(suggestionEdits)) {
+      if (path === curPath || !edit.base || edit.source === edit.base) continue;
+      const dRanges = parseRightRanges(files.find((f) => f.path === path)?.patch);
+      out.push(
+        ...buildPendingSuggestions(diffToSuggestions(edit.base, edit.source), {
+          path,
+          isInDiff: (sl, el) => isRangeInDiff(dRanges, sl, el),
+          commentFor: (cid) => edit.comments[cid] ?? "",
+        }),
+      );
+    }
+    return out;
+  }, [role, suggestionEdits, curPath, files]);
+
+  // Every pending suggestion across all files — Submit review's scope (the
+  // sidebar stays per-file via `pendingSuggestions`), matching pending comments.
+  const allPendingSuggestions = useMemo(
+    () => [...pendingSuggestions, ...crossFileSuggestions],
+    [pendingSuggestions, crossFileSuggestions],
+  );
+
   // Threads (submitted comments + pending replies merged) + live suggestions,
   // in one sorted list.
   const threads = useMemo(
@@ -225,7 +258,8 @@ export function App() {
   );
   const counts = reviewEntryCounts(entries);
   const prStatus = pull ? pullStatus(pull) : null;
-  const pendingItems = buildPendingItems(drafts, pendingSuggestions);
+  // Submit review spans all files (drafts already do; suggestions now too).
+  const pendingItems = buildPendingItems(drafts, allPendingSuggestions);
   const visibleEntries = filterReviewEntries(entries, reviewFilter);
 
   // Highlighted span of each thread on the current file, so clicking commented
@@ -388,10 +422,15 @@ export function App() {
     (async () => {
       try {
         const text = await client.getFileContent(ref, selectedPath, headSha);
-        // Restore any persisted suggestion edit for this file so pending
-        // suggestions survive a reload (read fresh to avoid a load/mount race).
-        const edits = await listSuggestionEdits(ref);
+        // Restore persisted edits (read fresh to avoid a load/mount race) so the
+        // current file's pending suggestions survive a reload and the other
+        // files' edits are available for the all-files Submit.
+        const stored = await listSuggestionEdits(ref);
+        // Merge with the latest in-memory edits (newer) so an edit made while a
+        // different file was loading is not clobbered by the stale storage read.
+        const edits = { ...stored, ...suggestionEditsRef.current };
         if (!cancelled) {
+          setSuggestionEdits(edits);
           const edit = role === "reviewer" ? edits[selectedPath] : undefined;
           setBaseSource(text);
           setSource(edit?.source ?? text);
@@ -405,9 +444,6 @@ export function App() {
     })();
     return () => {
       cancelled = true;
-      // Persist any pending edit before switching files / unmounting, so a quick
-      // reload right after an edit still restores the pending suggestion.
-      void flushSuggestionEdits();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, headSha, selectedPath, ref?.owner, ref?.repo, ref?.number]);
@@ -665,7 +701,7 @@ export function App() {
   // Materialize the reviewer's live suggestion edits into real drafts at submit
   // time (they are kept "live" in the editor until then; task 4).
   const suggestionsToDrafts = (): PendingDraft[] =>
-    pendingSuggestions.map((s) => {
+    allPendingSuggestions.map((s) => {
       const id = crypto.randomUUID();
       return {
         cid: id,
@@ -743,8 +779,10 @@ export function App() {
       await saveDrafts(ref, []);
       setSource(baseSource); // live suggestion edits are now submitted
       setSuggestionComments({});
-      pendingEditWrites.current[curPath] = null; // submitted → drop the persisted edit
-      await flushSuggestionEdits();
+      // All files' suggestions were just submitted → drop every persisted edit.
+      if (editSaveTimer.current) clearTimeout(editSaveTimer.current);
+      setSuggestionEdits({});
+      await saveSuggestionEdits(ref, {});
       const [reviews, issues] = await Promise.all([
         client.listReviewComments(ref),
         client.listIssueComments(ref),
@@ -780,8 +818,12 @@ export function App() {
       const newText = await client.getFileContent(ref, selectedPath, sha);
       setSource(newText);
       setBaseSource(newText);
-      pendingEditWrites.current[selectedPath] = null; // committed → drop the persisted edit
-      await flushSuggestionEdits();
+      // Committed to the branch → drop this file's persisted edit.
+      const nextEdits = { ...suggestionEdits };
+      delete nextEdits[selectedPath];
+      if (editSaveTimer.current) clearTimeout(editSaveTimer.current);
+      setSuggestionEdits(nextEdits);
+      await saveSuggestionEdits(ref, nextEdits);
       const [reviews, issues] = await Promise.all([
         client.listReviewComments(ref),
         client.listIssueComments(ref),
@@ -821,28 +863,17 @@ export function App() {
     setAnchor(null);
   };
 
-  // Read-modify-write the accumulated per-path edits to storage, so a path edited
-  // elsewhere (or another tab) is never clobbered. Clears the pending buffer.
-  const flushSuggestionEdits = async () => {
+  // Write the full edits map to storage (debounced). The map is the source of
+  // truth, so writing it whole can never drop a path.
+  const scheduleEditsSave = (edits: Record<string, SuggestionEdit>) => {
     if (!ref) return;
-    const writes = pendingEditWrites.current;
-    pendingEditWrites.current = {};
-    if (editSaveTimer.current) {
-      clearTimeout(editSaveTimer.current);
-      editSaveTimer.current = null;
-    }
-    if (Object.keys(writes).length === 0) return;
-    const stored = await listSuggestionEdits(ref);
-    for (const [p, edit] of Object.entries(writes)) {
-      if (edit) stored[p] = edit;
-      else delete stored[p];
-    }
-    await saveSuggestionEdits(ref, stored);
+    if (editSaveTimer.current) clearTimeout(editSaveTimer.current);
+    editSaveTimer.current = setTimeout(() => void saveSuggestionEdits(ref, edits), 400);
   };
 
-  // Persist (debounced) the reviewer's edit for `path`: the edited document and
-  // its attached comments, so pending suggestions survive a reload. A document
-  // matching the base means no edits remain → clear the path.
+  // Update the persisted edit for `path`: base + edited doc + attached comments,
+  // so pending suggestions survive a reload and feed the all-files Submit. A
+  // document matching the base means no edits remain → drop the path.
   const persistSuggestionEdit = (
     path: string,
     src: string,
@@ -850,9 +881,11 @@ export function App() {
     comments: Record<string, string>,
   ) => {
     if (!ref || role !== "reviewer") return;
-    pendingEditWrites.current[path] = src !== base ? { source: src, comments } : null;
-    if (editSaveTimer.current) clearTimeout(editSaveTimer.current);
-    editSaveTimer.current = setTimeout(() => void flushSuggestionEdits(), 400);
+    const next = { ...suggestionEdits };
+    if (src !== base) next[path] = { base, source: src, comments };
+    else delete next[path];
+    setSuggestionEdits(next);
+    scheduleEditsSave(next);
   };
 
   const onSourceChange = (v: string) => {
