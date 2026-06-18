@@ -456,6 +456,30 @@ select.input:focus {
   display: flex;
   gap: 6px;
 }
+/* compact ✕ to remove a pending item, tucked at the end of its meta row */
+.btn-x {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.btn-x:hover {
+  background: var(--red-tint);
+  color: var(--red);
+}
 .thread__quote {
   font-size: 11px;
   color: var(--muted);

@@ -983,6 +983,18 @@ export function App() {
       <div className="comment__meta">
         <span className="comment__author">You</span>
         <span className="badge badge--pending">pending</span>
+        <button
+          type="button"
+          className="btn-x"
+          aria-label="Delete pending item"
+          title="Delete"
+          onClick={(e) => {
+            e.stopPropagation();
+            removeDraft(d.cid);
+          }}
+        >
+          ✕
+        </button>
       </div>
       {d.kind === "suggestion" ? (
         <>
@@ -992,18 +1004,6 @@ export function App() {
       ) : (
         <div className="comment__body">{d.body || "(no body)"}</div>
       )}
-      <div className="comment__actions">
-        <button
-          type="button"
-          className="btn btn--sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            removeDraft(d.cid);
-          }}
-        >
-          Delete
-        </button>
-      </div>
     </div>
   );
 
