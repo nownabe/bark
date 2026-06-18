@@ -12,7 +12,7 @@ import {
   buildPendingSuggestions,
   buildSuggestionMarks,
   filterReviewEntries,
-  reviewCounts,
+  reviewEntryCounts,
   summarizePending,
   threadRangeAt,
   type PendingSuggestion,
@@ -218,23 +218,44 @@ describe("buildReviewEntries / filter", () => {
   test("'all' shows everything", () => {
     expect(filterReviewEntries(entries, "all")).toHaveLength(3);
   });
+
+  test("excludes items anchored to other files", () => {
+    const multi = buildThreads(
+      [
+        comment({ id: 1, meta: meta(5, "a.md", "ta") }),
+        comment({ id: 2, meta: meta(7, "b.md", "tb") }),
+      ],
+      [],
+      "a.md",
+    );
+    const scoped = buildReviewEntries({
+      threads: multi,
+      pendingSuggestions: [
+        liveSuggestion, // a.md
+        { ...liveSuggestion, cid: "live:9:9", path: "b.md", range: { sl: 9, sc: 1, el: 9, ec: 1 } },
+      ],
+      currentPath: "a.md",
+    });
+    expect(scoped).toHaveLength(2); // thread ta + a.md live suggestion
+    const paths = scoped.map((e) => (e.kind === "thread" ? e.thread.path : e.suggestion.path));
+    expect(paths.every((p) => p === "a.md")).toBe(true);
+  });
 });
 
-describe("reviewCounts", () => {
-  const comments = [comment({ id: 1, meta: meta(5) }), comment({ id: 2, meta: meta(6) })];
-  const drafts = [draft({ cid: "d1" })];
-  const threads = buildThreads(comments, drafts, "a.md");
-
-  test("pending = drafts + live suggestions; submitted = submitted comments", () => {
-    const counts = reviewCounts({
-      drafts,
-      pendingSuggestions: [liveSuggestion],
-      comments,
+describe("reviewEntryCounts", () => {
+  test("all/pending/submitted derive from the current-file entries", () => {
+    const comments = [comment({ id: 1, meta: meta(5, "a.md", "t1") })];
+    const drafts = [draft({ cid: "d1", thread: "t1", range: { sl: 5, sc: 1, el: 5, ec: 5 } })];
+    const threads = buildThreads(comments, drafts, "a.md");
+    const entries = buildReviewEntries({
       threads,
+      pendingSuggestions: [liveSuggestion],
+      currentPath: "a.md",
     });
-    expect(counts.pending).toBe(2); // 1 draft + 1 live suggestion
-    expect(counts.submitted).toBe(2); // 2 submitted comments
-    expect(counts.all).toBe(threads.length + 1);
+    const counts = reviewEntryCounts(entries);
+    expect(counts.all).toBe(2); // thread t1 + live suggestion
+    expect(counts.pending).toBe(2); // t1 has a pending reply + live suggestion
+    expect(counts.submitted).toBe(1); // t1 has a submitted comment
   });
 });
 

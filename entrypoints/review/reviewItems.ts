@@ -177,6 +177,11 @@ export function buildThreads(
   return list;
 }
 
+/**
+ * Entries to show in the sidebar for the file currently open in the editor.
+ * Only items anchored to currentPath are included — review of one file at a time
+ * — sorted by position. Items on other files are reachable by switching files.
+ */
 export function buildReviewEntries(args: {
   threads: ReviewThread[];
   pendingSuggestions: PendingSuggestion[];
@@ -184,27 +189,28 @@ export function buildReviewEntries(args: {
 }): ReviewEntry[] {
   const { threads, pendingSuggestions, currentPath } = args;
   const entries: ReviewEntry[] = [
-    ...threads.map(
-      (thread): ReviewEntry => ({
-        kind: "thread",
-        sortPath: thread.path ?? "",
-        sortPos: thread.pos,
-        thread,
-      }),
-    ),
-    ...pendingSuggestions.map(
-      (suggestion): ReviewEntry => ({
-        kind: "liveSuggestion",
-        sortPath: suggestion.path,
-        sortPos: posOf(suggestion.range),
-        suggestion,
-      }),
-    ),
+    ...threads
+      .filter((thread) => thread.path === currentPath)
+      .map(
+        (thread): ReviewEntry => ({
+          kind: "thread",
+          sortPath: thread.path ?? "",
+          sortPos: thread.pos,
+          thread,
+        }),
+      ),
+    ...pendingSuggestions
+      .filter((suggestion) => suggestion.path === currentPath)
+      .map(
+        (suggestion): ReviewEntry => ({
+          kind: "liveSuggestion",
+          sortPath: suggestion.path,
+          sortPos: posOf(suggestion.range),
+          suggestion,
+        }),
+      ),
   ];
-  entries.sort(
-    (a, b) =>
-      rank(a.sortPath, currentPath) - rank(b.sortPath, currentPath) || a.sortPos - b.sortPos,
-  );
+  entries.sort((a, b) => a.sortPos - b.sortPos);
   return entries;
 }
 
@@ -299,15 +305,18 @@ export function buildSuggestionMarks(args: {
     .map(({ from, to, replacement }): SuggestionRender => ({ from, to, replacement }));
 }
 
-export function reviewCounts(args: {
-  drafts: PendingDraft[];
-  pendingSuggestions: PendingSuggestion[];
-  comments: ExistingComment[];
-  threads: ReviewThread[];
-}): { all: number; pending: number; submitted: number } {
+/**
+ * Counts for the all / pending / submitted filter tabs, derived from the
+ * (already current-file-scoped) entries so the tab numbers match the list.
+ */
+export function reviewEntryCounts(entries: ReviewEntry[]): {
+  all: number;
+  pending: number;
+  submitted: number;
+} {
   return {
-    all: args.threads.length + args.pendingSuggestions.length,
-    pending: args.drafts.length + args.pendingSuggestions.length,
-    submitted: args.comments.length,
+    all: entries.length,
+    pending: filterReviewEntries(entries, "pending").length,
+    submitted: filterReviewEntries(entries, "submitted").length,
   };
 }
