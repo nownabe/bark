@@ -16,7 +16,12 @@ import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { GFM } from "@lezer/markdown";
 import { EditorView } from "@codemirror/view";
-import { handleSelectionUpdate, bubbleAnchorPoint, type BubblePos } from "./cmAnchor";
+import {
+  handleSelectionUpdate,
+  cmSelectionToAnchor,
+  bubbleAnchorPoint,
+  type BubblePos,
+} from "./cmAnchor";
 import { commentHighlightField, commentHighlightTheme, setCommentHighlights } from "./highlight";
 import { richMarkdown, richMarkdownTheme } from "./richMarkdown";
 import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from "./suggestMode";
@@ -748,24 +753,60 @@ export function App() {
     setBubblePos(null);
   };
 
-  // Keep the bubble pinned above the selection as the editor scrolls or the
-  // window resizes; hide it if the selection start scrolls out of view.
+  // Position the bubble below-right of the current selection's end (or hide it
+  // when there is no selection). Recomputed from the live editor state so it
+  // stays correct on scroll/resize and after the mouse settles.
+  const refreshBubble = useCallback(() => {
+    const view = cmRef.current?.view;
+    if (!view) return;
+    const anchor = cmSelectionToAnchor(view.state);
+    if (!anchor) {
+      setBubblePos(null);
+      return;
+    }
+    const coords = view.coordsAtPos(anchor.endOffset);
+    setBubblePos(coords ? bubbleAnchorPoint(coords) : null);
+  }, []);
+
+  // The bubble should appear once the user *finishes* selecting (mouse release),
+  // not jump around mid-drag. Track the pressed state: while the button is held
+  // we suppress the bubble; on release we show it.
+  const selectingRef = useRef(false);
+  const onEditorMouseDown = () => {
+    selectingRef.current = true;
+    setBubblePos(null);
+  };
+  const onEditorMouseUp = () => {
+    selectingRef.current = false;
+    // Let CodeMirror settle the selection, then show the bubble.
+    requestAnimationFrame(refreshBubble);
+  };
+
+  // Keyboard selection (shift+arrows) has no mouse release, so show the bubble
+  // when the selection changes while no drag is in progress. A collapsed
+  // selection clears it.
+  useEffect(() => {
+    if (selectingRef.current) return;
+    if (!selection) {
+      setBubblePos(null);
+      return;
+    }
+    refreshBubble();
+  }, [selection, refreshBubble]);
+
+  // Keep the bubble pinned to the selection as the editor scrolls or the window
+  // resizes; it hides itself if the selection end scrolls out of view.
   useEffect(() => {
     if (!selection) return;
-    const view = cmRef.current?.view;
-    const scroller = view?.scrollDOM;
-    if (!view || !scroller) return;
-    const reposition = () => {
-      const coords = view.coordsAtPos(selection.startOffset);
-      setBubblePos(coords ? bubbleAnchorPoint(coords) : null);
-    };
-    scroller.addEventListener("scroll", reposition, { passive: true });
-    window.addEventListener("resize", reposition);
+    const scroller = cmRef.current?.view?.scrollDOM;
+    if (!scroller) return;
+    scroller.addEventListener("scroll", refreshBubble, { passive: true });
+    window.addEventListener("resize", refreshBubble);
     return () => {
-      scroller.removeEventListener("scroll", reposition);
-      window.removeEventListener("resize", reposition);
+      scroller.removeEventListener("scroll", refreshBubble);
+      window.removeEventListener("resize", refreshBubble);
     };
-  }, [selection]);
+  }, [selection, refreshBubble]);
 
   // Thread reply: inherit the thread's anchor (from its first submitted comment,
   // else its first pending draft) and add a draft with the same thread id.
@@ -1810,7 +1851,12 @@ export function App() {
 
       <div className="layout">
         <main>
-          <div className="doc" onClick={onEditorClick}>
+          <div
+            className="doc"
+            onClick={onEditorClick}
+            onMouseDown={onEditorMouseDown}
+            onMouseUp={onEditorMouseUp}
+          >
             <CodeMirror
               ref={cmRef}
               value={source}
@@ -1825,7 +1871,7 @@ export function App() {
               onChange={onSourceChange}
               onUpdate={(vu) => {
                 if (suppressNextAnchor.current) return;
-                handleSelectionUpdate(vu, { setSelection, setBubblePos });
+                handleSelectionUpdate(vu, setSelection);
               }}
             />
           </div>

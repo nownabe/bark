@@ -1132,32 +1132,47 @@ select.input:focus {
   animation: pop-in 200ms var(--ease) both;
 }
 
-/* Bubble button shown just above a text selection in the editor. Its top/left
-   are set inline from the selection's viewport coords; translateY lifts it so it
-   sits above that point. */
+/* Bubble button shown just below-right of a text selection in the editor. Its
+   top/left are set inline from the selection's viewport coords. It fades in
+   softly once the mouse is released (bubble-rise). */
 .selection-bubble {
   position: fixed;
   z-index: 45;
-  transform: translateY(-100%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 30px;
   height: 30px;
   border-radius: var(--radius-pill);
-  border: 1px solid transparent;
-  background: var(--brand);
-  color: #fff;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  color: var(--muted);
   cursor: pointer;
-  box-shadow: var(--shadow-md);
-  animation: pop-in 160ms var(--ease) both;
+  box-shadow: var(--shadow);
+  animation: bubble-rise 220ms var(--ease) both;
   transition:
     transform var(--dur) var(--ease),
-    background var(--dur) var(--ease);
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
 }
 .selection-bubble:hover {
-  background: var(--brand-strong);
-  transform: translateY(-100%) translateY(-2px);
+  color: var(--accent);
+  background: var(--accent-tint);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* Soft float-in for the selection bubble. */
+@keyframes bubble-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* dev-only role switch (right-bottom) */

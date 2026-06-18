@@ -12,40 +12,31 @@ export interface BubblePos {
   left: number;
 }
 
-export interface SelectionHandlers {
-  /** The pending selection that drives the bubble button (null clears it). */
-  setSelection: (a: SourceAnchor | null) => void;
-  /** The bubble button's viewport position (null hides it). */
-  setBubblePos: (p: BubblePos | null) => void;
-}
+// Gap (px) between the selection's bottom-right corner and the bubble.
+const BUBBLE_GAP = 6;
 
-// Gap (px) between the top of the selection and the bubble's anchor point.
-const BUBBLE_GAP = 8;
-
-// CM update handler. Selecting text no longer opens the composer; it sets a
-// pending selection plus the bubble button position (just above the selection
-// start). The composer only opens when the bubble is clicked (App.tsx). When
-// the selection collapses, both are cleared.
-export function handleSelectionUpdate(vu: ViewUpdate, h: SelectionHandlers): void {
+// CM update handler. Selecting text no longer opens the composer; it just tracks
+// the pending selection (anchor, or null when the selection collapses). The
+// bubble button's visibility/position is driven separately in App.tsx — it
+// appears when the mouse is released, not while dragging.
+export function handleSelectionUpdate(
+  vu: ViewUpdate,
+  setSelection: (a: SourceAnchor | null) => void,
+): void {
   if (!vu.selectionSet) return;
-  const anchor = cmSelectionToAnchor(vu.state);
-  h.setSelection(anchor);
-  if (!anchor) {
-    h.setBubblePos(null);
-    return;
-  }
-  const coords = vu.view?.coordsAtPos(anchor.startOffset);
-  h.setBubblePos(coords ? bubbleAnchorPoint(coords) : null);
+  setSelection(cmSelectionToAnchor(vu.state));
 }
 
-// The point just above a selection's top-left, where the bubble is anchored.
-// Kept pure (no DOM) so it can be unit-tested; the button itself sits above
-// this point via CSS (translateY(-100%)).
+// The point just below-right of a selection's end, where the bubble is anchored.
+// Kept pure (no DOM) so it can be unit-tested. `coords` is a CodeMirror caret
+// rect at the selection end; we drop the bubble below its bottom and a touch to
+// the right.
 export function bubbleAnchorPoint(
-  coords: { top: number; left: number },
+  coords: { bottom: number; left: number },
   opts: { gap?: number } = {},
 ): BubblePos {
-  return { top: coords.top - (opts.gap ?? BUBBLE_GAP), left: coords.left };
+  const gap = opts.gap ?? BUBBLE_GAP;
+  return { top: coords.bottom + gap, left: coords.left + gap };
 }
 
 export function cmSelectionToAnchor(state: EditorState): SourceAnchor | null {

@@ -19,8 +19,21 @@ export function SelectionBubble({ pos, onClick }: Props) {
       aria-label="Comment on selection"
       title="Comment"
     >
-      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
-        <path d="M1.75 2.5A1.75 1.75 0 0 0 0 4.25v6.5C0 11.716.784 12.5 1.75 12.5H3v2.19c0 .47.553.72.905.41L7.2 12.5h7.05A1.75 1.75 0 0 0 16 10.75v-6.5A1.75 1.75 0 0 0 14.25 2.5H1.75Z" />
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      >
+        {/* speech bubble with a tail */}
+        <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v5A1.5 1.5 0 0 1 12.5 10H6.5l-3 2.5V10H3.5A1.5 1.5 0 0 1 2 8.5v-5Z" />
+        {/* plus inside */}
+        <path d="M8 4.3v3.4M6.3 6h3.4" />
       </svg>
     </button>
   );
