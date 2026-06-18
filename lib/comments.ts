@@ -46,3 +46,37 @@ export function normalizeComments(
   });
   return [...fromReviews, ...fromIssues];
 }
+
+/** True when every expected cid appears in the comments' embedded metadata. */
+export function commentsContainCids(comments: ExistingComment[], cids: string[]): boolean {
+  if (cids.length === 0) return true;
+  const present = new Set<string>();
+  for (const c of comments) if (c.meta?.cid) present.add(c.meta.cid);
+  return cids.every((cid) => present.has(cid));
+}
+
+/**
+ * Re-fetch comments until every just-submitted item (identified by its embedded
+ * cid) is present, working around GitHub's read-after-write lag: a GET on
+ * .../comments right after a POST .../reviews can momentarily omit the comments
+ * the review just created, which made just-submitted items vanish from the
+ * sidebar until the next reload.
+ *
+ * Polls up to `attempts` times with `delayMs` between tries, then returns the
+ * last result regardless — a comment that never arrives must not hang the UI.
+ */
+export async function reloadCommentsUntil(
+  fetchComments: () => Promise<ExistingComment[]>,
+  expectedCids: string[],
+  opts: { attempts?: number; delayMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<ExistingComment[]> {
+  const attempts = opts.attempts ?? 5;
+  const delayMs = opts.delayMs ?? 400;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let comments = await fetchComments();
+  for (let i = 1; i < attempts && !commentsContainCids(comments, expectedCids); i++) {
+    await sleep(delayMs);
+    comments = await fetchComments();
+  }
+  return comments;
+}
