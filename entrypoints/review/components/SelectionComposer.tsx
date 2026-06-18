@@ -3,6 +3,7 @@
 // to attach a comment. Add confirms it as a pending item; Discard throws the
 // input away. No review/issue/suggestion tags, no filename.
 import type { SourceAnchor } from "../../../lib/anchor";
+import { isSubmitChord } from "../keys";
 
 interface Props {
   anchor: SourceAnchor;
@@ -20,8 +21,14 @@ export function SelectionComposer({ anchor, value, onChange, onAdd, onDiscard }:
         className="field"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (isSubmitChord(e)) {
+            e.preventDefault();
+            onAdd();
+          }
+        }}
         rows={3}
-        placeholder="Comment on the selected range"
+        placeholder="Comment on the selected range (⌘/Ctrl+Enter to add)"
         autoFocus
       />
       <div className="composer__row">
