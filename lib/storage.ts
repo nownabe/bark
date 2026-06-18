@@ -4,6 +4,7 @@
 import { browser } from "wxt/browser";
 
 const TOKEN_KEY = "github_token";
+const AUTH_METHOD_KEY = "auth_method";
 
 /** IndexedDB / storage key design (§7.7): drafts live under pr:{owner}/{repo}#{number}. */
 export const storageKeys = {
@@ -22,7 +23,22 @@ export async function setToken(token: string): Promise<void> {
   await browser.storage.local.set({ [TOKEN_KEY]: token });
 }
 
-/** Delete the token (§9: deletion path). */
+/** Delete the token and auth-method marker (§9: deletion path). */
 export async function clearToken(): Promise<void> {
-  await browser.storage.local.remove(TOKEN_KEY);
+  await browser.storage.local.remove([TOKEN_KEY, AUTH_METHOD_KEY]);
+}
+
+/** Which method produced the stored token, so failure UIs can adapt. */
+export type AuthMethod = "app" | "pat";
+
+/** Get the stored auth method (null if unset or unrecognized). */
+export async function getAuthMethod(): Promise<AuthMethod | null> {
+  const result = await browser.storage.local.get(AUTH_METHOD_KEY);
+  const method = result[AUTH_METHOD_KEY];
+  return method === "app" || method === "pat" ? method : null;
+}
+
+/** Record which method produced the current token. */
+export async function setAuthMethod(method: AuthMethod): Promise<void> {
+  await browser.storage.local.set({ [AUTH_METHOD_KEY]: method });
 }
