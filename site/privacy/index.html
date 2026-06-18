@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bark Privacy Policy</title>
+    <meta name="robots" content="index,follow" />
+    <style>
+      :root {
+        --fg: #1f2328;
+        --muted: #59636e;
+        --border: #d1d9e0;
+        --bg: #ffffff;
+        --accent: #0969da;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          16px/1.6 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 48px 20px 96px;
+      }
+      h1 {
+        font-size: 28px;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 20px;
+        margin: 40px 0 8px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+      }
+      h3 {
+        font-size: 16px;
+        margin: 24px 0 4px;
+      }
+      .updated {
+        color: var(--muted);
+        font-size: 14px;
+        margin-bottom: 24px;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 12px 0;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid var(--border);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f6f8fa;
+      }
+      code {
+        background: #f6f8fa;
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-size: 0.9em;
+      }
+      footer {
+        margin-top: 48px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Bark Privacy Policy</h1>
+      <p class="updated">Last updated: 2026-06-19</p>
+
+      <p>
+        Bark is a Chrome extension that renders the changed Markdown files of a GitHub Pull Request
+        and lets you review them with comments and Suggestions, similar to Google Docs. This
+        document explains exactly what data Bark handles and where it goes.
+      </p>
+
+      <h2>Summary</h2>
+      <ul>
+        <li>
+          <strong>Bark has no backend server.</strong> The developer operates no servers and
+          receives <strong>no data</strong> from you whatsoever.
+        </li>
+        <li>
+          Bark talks to <strong>GitHub only</strong> (<code>github.com</code> and
+          <code>api.github.com</code>) to read the Pull Request and to create or update your
+          reviews, comments, and Suggestions.
+        </li>
+        <li>
+          Everything Bark stores — your GitHub access token and any draft (pending) comments — is
+          kept <strong>locally in your browser</strong>
+          and is never transmitted anywhere except to GitHub's own API on your behalf.
+        </li>
+        <li>
+          Bark contains
+          <strong
+            >no analytics, no tracking, no advertising, and no third-party network calls</strong
+          >. It uses no remote fonts or remote code.
+        </li>
+      </ul>
+
+      <h2>What data Bark handles</h2>
+
+      <h3>GitHub authentication token</h3>
+      <p>
+        To act on your behalf, Bark authenticates you through GitHub's official
+        <strong>GitHub App device flow</strong>. You authorize the app on
+        <code>github.com</code> and choose which repositories Bark may access. GitHub then issues a
+        user access token.
+      </p>
+      <ul>
+        <li>
+          The token is stored in <code>chrome.storage.local</code> (local browser storage) on your
+          device.
+        </li>
+        <li>
+          It is sent <strong>only</strong> to <code>api.github.com</code> /
+          <code>github.com</code> in the standard <code>Authorization</code>
+          header to perform the actions you request (reading the PR, posting comments, submitting
+          reviews, etc.).
+        </li>
+        <li>It is never sent to the developer or any third party.</li>
+      </ul>
+
+      <h3>Draft (pending) review content</h3>
+      <p>
+        Comments and Suggestions you draft before submitting are saved locally in
+        <code>chrome.storage.local</code>, keyed by Pull Request, so you can continue a review
+        later. When you submit a review, that content is sent to GitHub and becomes part of the Pull
+        Request. Drafts never leave your browser until you submit them to GitHub.
+      </p>
+
+      <h3>GitHub content you view</h3>
+      <p>
+        When you open a Pull Request in Bark, Bark fetches the PR's metadata, the changed Markdown
+        files, and existing review comments from GitHub's API to render them. This content is
+        processed in memory in your browser and is not collected, retained off-device, or shared by
+        the developer.
+      </p>
+
+      <h2>Where data goes</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Stored</th>
+            <th>Sent to</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GitHub access token</td>
+            <td><code>chrome.storage.local</code> (your browser)</td>
+            <td><code>github.com</code> / <code>api.github.com</code> only</td>
+          </tr>
+          <tr>
+            <td>Draft comments &amp; Suggestions</td>
+            <td><code>chrome.storage.local</code> (your browser)</td>
+            <td><code>github.com</code> / <code>api.github.com</code> only (on submit)</td>
+          </tr>
+          <tr>
+            <td>PR content you review</td>
+            <td>In-memory in your browser</td>
+            <td>Not sent anywhere by Bark</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Bark's network access is restricted by its manifest to
+        <code>https://github.com/*</code> and <code>https://api.github.com/*</code>. It cannot send
+        data to any other host.
+      </p>
+
+      <h2>Data the developer collects</h2>
+      <p>
+        <strong>None.</strong> The developer does not collect, store, sell, or share any of your
+        data. Bark has no telemetry and no servers.
+      </p>
+
+      <h2>Permissions</h2>
+      <ul>
+        <li>
+          <code>storage</code> — to keep your token and draft comments locally on your device.
+        </li>
+        <li>
+          <code>scripting</code> — to add the "Open in Bark" entry point on GitHub Pull Request
+          pages.
+        </li>
+        <li>
+          Host access to <code>github.com</code> and <code>api.github.com</code> — to read the Pull
+          Request and submit your reviews to GitHub.
+        </li>
+      </ul>
+
+      <h2>Removing your data</h2>
+      <ul>
+        <li>
+          Your local data (token and drafts) is removed when you sign out in Bark or when you remove
+          the extension / clear the extension's storage in Chrome.
+        </li>
+        <li>
+          Content already submitted to GitHub lives in your GitHub account; manage or delete it
+          there. To revoke Bark's access entirely, remove the authorization from your GitHub
+          <strong>Settings → Applications</strong>.
+        </li>
+      </ul>
+
+      <h2>Children</h2>
+      <p>Bark is a developer tool and is not directed at children under 13.</p>
+
+      <h2>Changes to this policy</h2>
+      <p>
+        If this policy changes, the updated version will be published at the same URL with a new
+        "Last updated" date.
+      </p>
+
+      <h2>Contact</h2>
+      <p>
+        Questions about this policy can be raised as an issue at
+        <a href="https://github.com/nownabe/bark/issues">https://github.com/nownabe/bark/issues</a>.
+      </p>
+
+      <footer>Bark — Markdown review for GitHub Pull Requests.</footer>
+    </main>
+  </body>
+</html>
