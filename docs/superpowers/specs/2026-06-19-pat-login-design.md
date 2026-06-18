@@ -125,6 +125,12 @@ pros/cons) so the user picks what fits:
 
 `[ Connect ]` → `screen = "app"`. `[ Use → ]` → `screen = "pat"`.
 
+**Shared privacy note.** A single message, common to both methods, is shown on
+the `choose` screen (and repeated on the `pat` screen near the input): the token
+(whether from the GitHub App or a PAT) is stored only in this browser
+(`chrome.storage.local`) and is never sent anywhere except GitHub. This holds
+for both methods, so it lives as one shared line rather than per-card text.
+
 **2. `app` — existing device-flow screens.** Unchanged "before" (Connect GitHub)
 and "during" (user code + Open GitHub + Copy) UI and logic. On authorized token:
 `setToken` + `setAuthMethod("app")` → `onAuthenticated`. A back link returns to
@@ -184,8 +190,8 @@ linking to install the Bark app) assumes the App method. Make it method-aware:
 - **`tests/storage.test.ts`** — `getAuthMethod`/`setAuthMethod` round-trip;
   `clearToken` clears both token and auth method.
 - **`LoginGate` component test** (testing-library + happy-dom, via `render()`'s
-  `container`, not `screen`) — `choose` renders both cards; `[ Use → ]` shows the
-  setup steps and input; an invalid token surfaces the inline error and keeps the
+  `container`, not `screen`) — `choose` renders both cards and the shared
+  "stored only in this browser" note; `[ Use → ]` shows the setup steps and input; an invalid token surfaces the inline error and keeps the
   value; a valid token (mocked `validatePat`) calls `onAuthenticated`; the back
   link returns to `choose`.
 
