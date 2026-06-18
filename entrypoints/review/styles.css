@@ -570,11 +570,9 @@ select.input:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border: 0;
-  background: none;
   color: var(--fg);
+  text-decoration: none;
   cursor: pointer;
-  padding: 0;
 }
 .topbar__pr-title:hover {
   color: var(--accent);

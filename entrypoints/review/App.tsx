@@ -146,6 +146,8 @@ export function App() {
   const [showDebug, setShowDebug] = useState(false);
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const sidebarRef = useRef<HTMLElement>(null);
+  const prInfoRef = useRef<HTMLDivElement>(null);
+  const prInfoBtnRef = useRef<HTMLButtonElement>(null);
   // Set before a programmatic "jump to item" selection so the resulting
   // selection update does not pop the new-comment composer (we are highlighting
   // an existing item, not starting a new comment).
@@ -237,6 +239,18 @@ export function App() {
     setNeedsInstall(e instanceof GitHubApiError && (e.status === 404 || e.status === 403));
   };
   const retryLoad = () => setReloadKey((k) => k + 1);
+
+  // Dismiss the PR details popover on a click outside it (and outside its toggle).
+  useEffect(() => {
+    if (!showPrInfo) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (prInfoRef.current?.contains(t) || prInfoBtnRef.current?.contains(t)) return;
+      setShowPrInfo(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [showPrInfo]);
 
   useEffect(() => {
     getToken().then((t) => {
@@ -1146,13 +1160,26 @@ export function App() {
                 {owner}/{repo} #{prNum}
               </a>
               {pull?.title ? (
-                <button
-                  type="button"
+                <a
                   className="topbar__pr-title"
-                  onClick={() => setShowPrInfo((v) => !v)}
-                  title="Pull request details"
+                  href={`https://github.com/${owner}/${repo}/pull/${prNum}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={pull.title}
                 >
                   {pull.title}
+                </a>
+              ) : null}
+              {pull ? (
+                <button
+                  type="button"
+                  ref={prInfoBtnRef}
+                  className="help-btn"
+                  title="Pull request details"
+                  aria-label="Pull request details"
+                  onClick={() => setShowPrInfo((v) => !v)}
+                >
+                  ℹ
                 </button>
               ) : null}
               {headSha ? <span>@ {headSha.slice(0, 7)}</span> : null}
@@ -1227,7 +1254,7 @@ export function App() {
           <span className="topbar__meta">sample document (no PR specified)</span>
         )}
         {showPrInfo && pull ? (
-          <div className="popover popover--pr" role="dialog">
+          <div className="popover popover--pr" role="dialog" ref={prInfoRef}>
             <h3>{pull.title || "(no title)"}</h3>
             <div className="pr-info__meta">
               <img
@@ -1246,19 +1273,6 @@ export function App() {
               ) : null}
             </div>
             <div className="pr-info__body">{pull.body || "(no description)"}</div>
-            <div className="popover__footer">
-              <a
-                className="btn btn--sm"
-                href={`https://github.com/${owner}/${repo}/pull/${prNum}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open on GitHub
-              </a>
-              <button type="button" className="btn btn--sm" onClick={() => setShowPrInfo(false)}>
-                Close
-              </button>
-            </div>
           </div>
         ) : null}
         {showHelp ? (
