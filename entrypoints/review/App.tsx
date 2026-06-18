@@ -150,6 +150,9 @@ export function App() {
   const prInfoBtnRef = useRef<HTMLButtonElement>(null);
   const helpRef = useRef<HTMLDivElement>(null);
   const helpBtnRef = useRef<HTMLButtonElement>(null);
+  // The pending-suggestion ids seen on the previous render, so a newly created
+  // suggestion can be scrolled into view in the review list (see effect below).
+  const seenSuggestionCids = useRef<Set<string>>(new Set());
   // Set before a programmatic "jump to item" selection so the resulting
   // selection update does not pop the new-comment composer (we are highlighting
   // an existing item, not starting a new comment).
@@ -461,6 +464,20 @@ export function App() {
       .querySelector(`[data-thread-id="${CSS.escape(emphasizedThreadId)}"]`)
       ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [emphasizedThreadId, reviewFilter]);
+
+  // When a new suggestion is created (a pending-suggestion id that wasn't there
+  // before), scroll its item into view in the review list so the reviewer sees
+  // the suggestion they just made.
+  useEffect(() => {
+    const ids = pendingSuggestions.map((s) => s.cid);
+    const fresh = ids.filter((cid) => !seenSuggestionCids.current.has(cid));
+    seenSuggestionCids.current = new Set(ids);
+    const newest = fresh.at(-1);
+    if (!newest) return;
+    document
+      .querySelector(`[data-suggestion-cid="${CSS.escape(newest)}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [pendingSuggestions]);
 
   const jumpTo = (c: ExistingComment) => {
     const view = cmRef.current?.view;
@@ -979,7 +996,7 @@ export function App() {
   };
 
   const renderLiveSuggestion = (s: PendingSuggestion) => (
-    <div key={s.cid} className="thread">
+    <div key={s.cid} data-suggestion-cid={s.cid} className="thread">
       <div className="comment__meta">
         <span className="badge badge--pending">pending</span>
         <span>{lineRange(s.range)}</span>
