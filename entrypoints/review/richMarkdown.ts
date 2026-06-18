@@ -8,6 +8,8 @@
 import { syntaxTree } from "@codemirror/language";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 import { type EditorState, type Range, StateField } from "@codemirror/state";
+import type { SyntaxNode } from "@lezer/common";
+import { isMermaidFence, renderMermaid } from "./mermaid";
 
 // Map a syntax-node name to its inline decoration class (heading/bold/italic/code).
 // Exported so suggest mode can style deleted-text widgets with the same context.
@@ -104,6 +106,35 @@ class TableWidget extends WidgetType {
   }
 }
 
+// A rendered ```mermaid diagram. Async render (mermaid is lazy-loaded); the DOM
+// is reused while the code is unchanged (eq), so cursor moves don't re-render.
+class MermaidWidget extends WidgetType {
+  constructor(readonly code: string) {
+    super();
+  }
+  eq(other: MermaidWidget) {
+    return other.code === this.code;
+  }
+  toDOM() {
+    const div = document.createElement("div");
+    div.className = "dr-mermaid";
+    div.textContent = "Rendering diagram…";
+    void renderMermaid(div, this.code);
+    return div;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
+/** The code inside a fenced block (the CodeText child), excluding the fences. */
+function fencedCodeBody(state: EditorState, node: SyntaxNode): string {
+  for (let c = node.firstChild; c; c = c.nextSibling) {
+    if (c.name === "CodeText") return state.doc.sliceString(c.from, c.to);
+  }
+  return "";
+}
+
 function buildDecorations(state: EditorState): DecorationSet {
   const decos: Array<Range<Decoration>> = [];
   const cursor = state.selection.main.head;
@@ -152,6 +183,21 @@ function buildDecorations(state: EditorState): DecorationSet {
           );
         }
         return false; // do not process children (marks/URL)
+      }
+
+      // Mermaid: render the diagram in place of the ```mermaid block when the
+      // cursor is outside it; show the source for editing when inside.
+      if (node.name === "FencedCode" && isMermaidFence(state.doc.lineAt(node.from).text)) {
+        const inside = cursor >= node.from && cursor <= node.to;
+        if (!inside) {
+          decos.push(
+            Decoration.replace({
+              widget: new MermaidWidget(fencedCodeBody(state, node.node)),
+              block: true,
+            }).range(node.from, node.to),
+          );
+          return false; // skip default code-block styling / children
+        }
       }
 
       // Block line decorations
@@ -251,4 +297,17 @@ export const richMarkdownTheme = EditorView.baseTheme({
     textAlign: "left",
   },
   ".dr-table th": { backgroundColor: "#f6f8fa", fontWeight: "bold" },
+  ".dr-mermaid": {
+    display: "flex",
+    justifyContent: "center",
+    padding: "8px 0",
+  },
+  ".dr-mermaid svg": { maxWidth: "100%", height: "auto" },
+  ".dr-mermaid--error": {
+    display: "block",
+    color: "#cf222e",
+    fontFamily: "monospace",
+    fontSize: "0.9em",
+    whiteSpace: "pre-wrap",
+  },
 });

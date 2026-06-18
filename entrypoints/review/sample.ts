@@ -29,5 +29,15 @@ function hello(name: string) {
 }
 \`\`\`
 
+## Mermaid diagram
+
+\`\`\`mermaid
+flowchart LR
+  A[Open PR] --> B{Reviewer?}
+  B -->|yes| C[Comment / Suggest]
+  B -->|no| D[Edit & Commit]
+  C --> E[Submit review]
+\`\`\`
+
 The final paragraph. This is the end of the sample document.
 `;
