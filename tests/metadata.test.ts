@@ -42,4 +42,11 @@ describe("metadata", () => {
     expect(r.meta).toEqual(meta);
     expect(r.body).toBe("legacy");
   });
+
+  test("round-trips the resolution event field", () => {
+    const ev: CommentMetadata = { ...meta, cid: "c-evt", event: "resolve" };
+    const r = extractMetadata(embedMetadata("Resolved via Bark.", ev));
+    expect(r.body).toBe("Resolved via Bark.");
+    expect(r.meta).toEqual(ev);
+  });
 });

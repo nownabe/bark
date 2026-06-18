@@ -30,6 +30,8 @@ export interface CommentMetadata {
   thread: string;
   /** comment | suggestion (§7.2). Treated as comment when omitted. */
   kind?: "comment" | "suggestion";
+  /** Set only on resolution-marker comments; toggles a thread's resolved state. */
+  event?: "resolve" | "unresolve";
 }
 
 const MARKER = "bark:v1";
