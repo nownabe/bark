@@ -1227,15 +1227,11 @@ export function App() {
     });
   };
 
-  // Click commented (highlighted) text in the body → select that comment's range,
-  // emphasize its thread in the sidebar, and open its reply box (so it behaves
-  // like clicking the thread itself, not like starting a new comment).
+  // Click commented (highlighted) text in the body → emphasize its thread in the
+  // sidebar and open its reply box (so it behaves like clicking the thread
+  // itself). The editor cursor is left where the user clicked — we must not
+  // hijack the selection, or editing/suggesting at that spot becomes impossible.
   const emphasizeThread = (hit: ThreadRange) => {
-    const view = cmRef.current?.view;
-    if (!view) return;
-    suppressNextAnchor.current = true;
-    view.dispatch({ selection: { anchor: hit.from, head: hit.to } });
-    suppressNextAnchor.current = false; // update listener already ran synchronously
     if (!visibleEntries.some((e) => e.kind === "thread" && e.thread.id === hit.id)) {
       setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"])); // make sure the emphasized thread is visible
     }
