@@ -38,7 +38,7 @@ jobs:
               - 'oxlint.config.*'
               - 'mise.toml'
               - 'mise.lock'
-            test:
+            check:
               - '**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}'
               - 'package.json'
               - 'bun.lock'
@@ -78,13 +78,13 @@ jobs:
       contents: read
     uses: ./.github/workflows/reusable-shellcheck.yaml
 
-  test:
-    name: Test
+  check:
+    name: Check
     needs: filter
-    if: ${{ fromJSON(needs.filter.outputs.changes).test == 'true' }}
+    if: ${{ fromJSON(needs.filter.outputs.changes).check == 'true' }}
     permissions:
       contents: read
-    uses: ./.github/workflows/reusable-test.yaml
+    uses: ./.github/workflows/reusable-check.yaml
 
   secret-scan:
     name: Secret Scan
@@ -100,7 +100,7 @@ jobs:
       - oxfmt
       - oxlint
       - shellcheck
-      - test
+      - check
       - secret-scan
     runs-on: ubuntu-slim
     timeout-minutes: 5
