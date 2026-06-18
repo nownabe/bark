@@ -971,6 +971,18 @@ select.input:focus {
   margin: 0 -4px;
   padding: 0 4px;
 }
+.submit-group + .submit-group {
+  margin-top: 14px;
+}
+.submit-group__file {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-soft);
+  padding: 4px 0;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+  word-break: break-all;
+}
 .modal__footer {
   display: flex;
   justify-content: flex-end;

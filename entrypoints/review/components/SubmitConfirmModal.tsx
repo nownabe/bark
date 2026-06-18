@@ -3,7 +3,12 @@
 // posts it (one review for in-diff items, separate PR comments for out-of-diff) —
 // then lists the individual pending items so the reviewer can confirm with full
 // understanding before anything goes out.
-import { summarizePending, type PendingItem, type SubmitGroup } from "../reviewItems";
+import {
+  groupPendingByFile,
+  summarizePending,
+  type PendingItem,
+  type SubmitGroup,
+} from "../reviewItems";
 
 interface Props {
   items: PendingItem[];
@@ -81,40 +86,51 @@ export function SubmitConfirmModal({ items, target, onConfirm, onCancel, loading
               </p>
             </div>
             <div className="modal__list">
-              {items.map((item) => {
-                const v =
-                  item.kind === "suggestion"
-                    ? {
-                        cid: item.suggestion.cid,
-                        range: item.suggestion.range,
-                        body: item.suggestion.body,
-                        isSuggestion: true,
-                        quote: item.suggestion.quote,
-                        replacement: item.suggestion.replacement,
-                      }
-                    : {
-                        cid: item.draft.cid,
-                        range: item.draft.range,
-                        body: item.draft.body,
-                        isSuggestion: item.draft.kind === "suggestion",
-                        quote: item.draft.quote,
-                        replacement: item.draft.suggestion ?? "",
-                      };
-                return (
-                  <div key={v.cid} className="thread">
-                    <div className="comment__meta">
-                      <span>{lineLabel(v.range)}</span>
-                    </div>
-                    {v.body ? <div className="comment__body">{v.body}</div> : null}
-                    {v.isSuggestion ? (
-                      <>
-                        <div className="sugg-old">{v.quote}</div>
-                        <div className="sugg-new">{v.replacement || "(delete)"}</div>
-                      </>
-                    ) : null}
-                  </div>
-                );
-              })}
+              {groupPendingByFile(items).map(({ path, items: groupItems }) => (
+                <div key={path} className="submit-group">
+                  <div className="submit-group__file">{path}</div>
+                  {groupItems.map((item) => {
+                    const v =
+                      item.kind === "suggestion"
+                        ? {
+                            cid: item.suggestion.cid,
+                            range: item.suggestion.range,
+                            body: item.suggestion.body,
+                            isSuggestion: true,
+                            quote: item.suggestion.quote,
+                            replacement: item.suggestion.replacement,
+                          }
+                        : {
+                            cid: item.draft.cid,
+                            range: item.draft.range,
+                            body: item.draft.body,
+                            isSuggestion: item.draft.kind === "suggestion",
+                            quote: item.draft.quote,
+                            replacement: item.draft.suggestion ?? "",
+                          };
+                    return (
+                      <div key={v.cid} className="thread">
+                        <div className="comment__meta">
+                          <span>{lineLabel(v.range)}</span>
+                        </div>
+                        {v.isSuggestion ? (
+                          <>
+                            <div className="sugg-old">{v.quote}</div>
+                            <div className="sugg-new">{v.replacement || "(delete)"}</div>
+                            {v.body ? <div className="comment__body">{v.body}</div> : null}
+                          </>
+                        ) : (
+                          <>
+                            {/* the text being commented on */}
+                            {v.quote ? <div className="composer__quote">{v.quote}</div> : null}
+                            {v.body ? <div className="comment__body">{v.body}</div> : null}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           </>
         )}

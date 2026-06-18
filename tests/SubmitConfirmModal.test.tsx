@@ -55,13 +55,26 @@ describe("SubmitConfirmModal", () => {
     expect(text).toContain("2");
   });
 
-  test("does not show the filename or review/issue/suggestion tags inside items", () => {
+  test("groups items by file with a filename heading (submit spans all files)", () => {
     const { container } = render(
       <SubmitConfirmModal items={pendingEntries()} onConfirm={() => {}} onCancel={() => {}} />,
     );
+    // no review/issue/suggestion badges inside the item list
     expect(container.querySelector(".modal__list .badge")).toBeNull();
+    // the filename is shown as a group heading
+    const heading = container.querySelector(".submit-group__file")?.textContent ?? "";
+    expect(heading).toContain("docs/a.md");
+  });
+
+  test("shows the selected text being commented on, not just the line number", () => {
+    const { container } = render(
+      <SubmitConfirmModal items={pendingEntries()} onConfirm={() => {}} onCancel={() => {}} />,
+    );
     const listText = container.querySelector(".modal__list")?.textContent ?? "";
-    expect(listText).not.toContain("docs/a.md");
+    // the quoted source text the plain comment targets
+    expect(listText).toContain("old text");
+    // and the line label is still present
+    expect(listText).toContain("L4");
   });
 
   test("Submit triggers onConfirm, not before", () => {
