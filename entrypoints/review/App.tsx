@@ -29,7 +29,7 @@ import {
   reviewEntryCounts,
   threadRangeAt,
   type PendingSuggestion,
-  type ReviewFilter,
+  type ReviewFacet,
   type ReviewThread,
   type ThreadRange,
 } from "./reviewItems";
@@ -46,6 +46,7 @@ import {
   avatarUrl,
   buildBlobPermalink,
   buildSuggestionBlock,
+  findThreadNodeId,
   GitHubApiError,
   GitHubClient,
   pullStatus,
@@ -161,7 +162,9 @@ export function App() {
   // way pending comment drafts already do. The open file's entry is kept in sync
   // synchronously by persistSuggestionEdit.
   const [suggestionEdits, setSuggestionEdits] = useState<Record<string, SuggestionEdit>>({});
-  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
+  const [reviewFilter, setReviewFilter] = useState<Set<ReviewFacet>>(
+    () => new Set<ReviewFacet>(["pending", "submitted"]),
+  );
   const [emphasizedThreadId, setEmphasizedThreadId] = useState<string | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
@@ -241,8 +244,9 @@ export function App() {
   // Threads (submitted comments + pending replies merged) + live suggestions,
   // in one sorted list.
   const threads = useMemo(
-    () => buildThreads(comments, drafts, curPath),
-    [comments, drafts, curPath],
+    () =>
+      buildThreads(comments, drafts, curPath, { accepted: (id) => dismissed[id] === "accepted" }),
+    [comments, drafts, curPath, dismissed],
   );
   const entries = useMemo(
     () => buildReviewEntries({ threads, pendingSuggestions, currentPath: curPath }),
@@ -732,6 +736,44 @@ export function App() {
     setReplyTo(null);
   };
 
+  const toggleFacet = (f: ReviewFacet) =>
+    setReviewFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(f)) next.delete(f);
+      else next.add(f);
+      return next;
+    });
+
+  // Post a resolution-event comment (hidden metadata SoT) and, for in-diff
+  // threads, mirror it with GitHub's native resolve. Immediate; then reload.
+  const setThreadResolved = async (t: ReviewThread, resolved: boolean) => {
+    if (!client || !ref || !headSha) return;
+    const root = t.rootComment;
+    if (!root?.meta) return;
+    const evMeta: CommentMetadata = {
+      cid: crypto.randomUUID(),
+      path: root.meta.path,
+      range: root.meta.range,
+      quote: root.meta.quote,
+      sha: headSha,
+      thread: t.id,
+      kind: "comment",
+      event: resolved ? "resolve" : "unresolve",
+    };
+    const body = embedMetadata(resolved ? "Resolved via Bark." : "Reopened via Bark.", evMeta);
+    if (root.source === "review") {
+      await client.replyToReviewComment(ref, root.id, body);
+      const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
+      if (nodeId) {
+        if (resolved) await client.resolveReviewThread(nodeId);
+        else await client.unresolveReviewThread(nodeId);
+      }
+    } else {
+      await client.createIssueComment(ref, body);
+    }
+    setReloadKey((k) => k + 1);
+  };
+
   // author: record an accept/reject decision on a submitted suggestion.
   const setDecision = async (id: number, decision: SuggestionDecision) => {
     const next = { ...dismissed, [id]: decision };
@@ -856,7 +898,7 @@ export function App() {
       setComments(normalizeComments(reviews, issues));
       // The pending items just became submitted; if the list was filtered to
       // "Pending" it would now look empty, so reveal everything.
-      setReviewFilter("all");
+      setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"]));
       setEmphasizedThreadId(null);
     } catch (e) {
       setError(errMessage(e));
@@ -1065,7 +1107,7 @@ export function App() {
     view.dispatch({ selection: { anchor: hit.from, head: hit.to } });
     suppressNextAnchor.current = false; // update listener already ran synchronously
     if (!visibleEntries.some((e) => e.kind === "thread" && e.thread.id === hit.id)) {
-      setReviewFilter("all"); // make sure the emphasized thread is visible
+      setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"])); // make sure the emphasized thread is visible
     }
     setEmphasizedThreadId(hit.id);
     if (replyTo !== hit.id) {
@@ -1084,7 +1126,7 @@ export function App() {
       if (r && r.from < r.to) jumpToOffsets(r.from, r.to);
     }
     if (!visibleEntries.some((e) => e.kind === "liveSuggestion" && e.suggestion.cid === cid)) {
-      setReviewFilter("all"); // make sure the emphasized suggestion is visible
+      setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"])); // make sure the emphasized suggestion is visible
     }
     setEmphasizedThreadId(cid);
     setReplyTo(null);
@@ -1340,6 +1382,11 @@ export function App() {
     const root = t.rootComment;
     const st = root ? statusFor(root) : null;
     const showAuthorActions = root?.meta?.kind === "suggestion" && role === "author";
+    // A thread is event-resolvable when it has a Bark root comment with a
+    // submitted comment. Reopen is offered only when resolution came from an
+    // event, not from accepting a suggestion (which resolves implicitly).
+    const acceptedRoot = root?.meta?.kind === "suggestion" && dismissed[root.id] === "accepted";
+    const canResolve = Boolean(root?.meta) && t.hasSubmitted && !acceptedRoot;
     return (
       <div
         key={t.id}
@@ -1350,6 +1397,11 @@ export function App() {
         onClick={() => openThread(t)}
       >
         {t.quote ? <div className="thread__quote">{t.quote}</div> : null}
+        {t.resolved ? (
+          <div className="comment__meta">
+            <span className="badge badge--resolved">resolved</span>
+          </div>
+        ) : null}
         {t.messages.map((m) =>
           m.kind === "submitted"
             ? renderSubmittedMessage(m.comment, m.comment === root, st)
@@ -1378,6 +1430,33 @@ export function App() {
                   Reject
                 </button>
               </>
+            )}
+          </div>
+        ) : null}
+        {canResolve ? (
+          <div className="comment__actions" onClick={(e) => e.stopPropagation()}>
+            {t.resolved ? (
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void setThreadResolved(t, false);
+                }}
+              >
+                Reopen
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void setThreadResolved(t, true);
+                }}
+              >
+                Resolve
+              </button>
             )}
           </div>
         ) : null}
@@ -1670,14 +1749,15 @@ export function App() {
             <div className="panel__head">
               <h2 className="panel__title">Review</h2>
               <div className="seg seg--sm">
-                {(["all", "pending", "submitted"] as const).map((f) => (
+                {(["pending", "submitted", "resolved"] as const).map((f) => (
                   <button
                     key={f}
                     type="button"
-                    aria-pressed={reviewFilter === f}
-                    onClick={() => setReviewFilter(f)}
+                    aria-pressed={reviewFilter.has(f)}
+                    onClick={() => toggleFacet(f)}
                   >
-                    {f === "all" ? "All" : f === "pending" ? "Pending" : "Sent"} ({counts[f]})
+                    {f === "pending" ? "Pending" : f === "submitted" ? "Sent" : "Resolved"} (
+                    {counts[f]})
                   </button>
                 ))}
               </div>

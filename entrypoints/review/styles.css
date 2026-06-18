@@ -604,6 +604,10 @@ select.input:focus {
   background: var(--red-tint);
   color: var(--red);
 }
+.badge--resolved {
+  background: var(--brand-tint);
+  color: var(--brand);
+}
 /* PR status badges (open / merged / draft / closed) */
 .badge--pr {
   text-transform: uppercase;
