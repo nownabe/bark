@@ -115,11 +115,21 @@ class MermaidWidget extends WidgetType {
   eq(other: MermaidWidget) {
     return other.code === this.code;
   }
-  toDOM() {
+  toDOM(view: EditorView) {
     const div = document.createElement("div");
     div.className = "dr-mermaid";
     div.textContent = "Rendering diagram…";
     void renderMermaid(div, this.code);
+    // Click the rendered diagram to select its source block, which opens the
+    // comment composer for it (the block reveals its source while selected).
+    div.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const pos = view.posAtDOM(div);
+      let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(pos, 1);
+      while (node && node.name !== "FencedCode") node = node.parent;
+      view.dispatch({ selection: { anchor: node?.from ?? pos, head: node?.to ?? pos } });
+      view.focus();
+    });
     return div;
   }
   ignoreEvent() {
@@ -301,6 +311,7 @@ export const richMarkdownTheme = EditorView.baseTheme({
     display: "flex",
     justifyContent: "center",
     padding: "8px 0",
+    cursor: "pointer",
   },
   ".dr-mermaid svg": { maxWidth: "100%", height: "auto" },
   ".dr-mermaid--error": {
