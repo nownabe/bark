@@ -1164,7 +1164,7 @@ export function App() {
                   <button
                     type="button"
                     ref={prInfoBtnRef}
-                    className="help-btn"
+                    className="topbar__info-btn"
                     title="Pull request details"
                     aria-label="Pull request details"
                     onClick={() => setShowPrInfo((v) => !v)}
