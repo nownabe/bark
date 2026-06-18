@@ -540,13 +540,15 @@ select.input:focus {
   display: flex;
   gap: 6px;
 }
-/* Quiet, compact resolve/reopen affordance, right-aligned at the foot of a
-   thread — a muted text button that tints on hover, not a heavy framed button. */
-.thread__foot {
-  margin-top: 8px;
-  display: flex;
-  justify-content: flex-end;
+/* Pushes the resolve/reopen action to the right end of the root comment's
+   author row, so it costs no extra vertical space. */
+.comment__meta-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
 }
+/* Quiet, compact resolve/reopen affordance — a muted text button that tints on
+   hover, not a heavy framed button. */
 .thread__resolve {
   font: inherit;
   font-size: 11px;

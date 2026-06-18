@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
@@ -265,6 +266,14 @@ export function App() {
   const prStatus = pull ? pullStatus(pull) : null;
   const pendingItems = buildPendingItems(drafts, allPendingSuggestions);
   const visibleEntries = filterReviewEntries(entries, reviewFilter);
+  // Threads currently shown in the sidebar (per the active filter). The editor
+  // highlights and clickable anchors track this set, so resolved threads are
+  // highlighted exactly when the Resolved facet is selected.
+  const visibleThreadIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of visibleEntries) if (e.kind === "thread") ids.add(e.thread.id);
+    return ids;
+  }, [visibleEntries]);
 
   // The createdAtSha source for a comment, if we've fetched it — feeds the
   // diff-based re-anchoring path (undefined → quote-search fallback).
@@ -278,8 +287,9 @@ export function App() {
     const res: ThreadRange[] = [];
     for (const t of threads) {
       if (t.path !== curPath) continue;
-      // Resolved threads are hidden from the document (no highlight, not clickable).
-      if (t.resolved) continue;
+      // Only threads visible in the sidebar (per the active filter) are clickable
+      // in the document — resolved threads become clickable when Resolved is on.
+      if (!visibleThreadIds.has(t.id)) continue;
       let from: number;
       let to: number;
       if (t.rootComment?.meta) {
@@ -302,7 +312,7 @@ export function App() {
       if (from >= 0 && to <= docLen && from < to) res.push({ id: t.id, from, to });
     }
     return res;
-  }, [threads, source, lineStarts, headSha, curPath, oldSources]);
+  }, [threads, visibleThreadIds, source, lineStarts, headSha, curPath, oldSources]);
 
   // The current-doc char span of each pending suggestion's edited text, so a
   // click on the suggested text in the editor maps back to its review item. The
@@ -566,10 +576,10 @@ export function App() {
     const docLen = view.state.doc.length;
     const clip = (r: { from: number; to: number; pending?: boolean }) =>
       r.from >= 0 && r.to <= docLen && r.from < r.to;
-    // Resolved threads disappear from the document (like Google Docs); their
-    // anchors are not highlighted. Resolution-event markers carry the root's
-    // anchor but are not real messages, so they're excluded too.
-    const resolvedThreadIds = new Set(threads.filter((t) => t.resolved).map((t) => t.id));
+    // The document highlights track what the sidebar shows: only comments whose
+    // thread is currently visible (per the filter) are highlighted, so resolved
+    // threads light up exactly when the Resolved facet is selected. Resolution-
+    // event markers carry the root's anchor but aren't real messages → excluded.
     const existing = comments
       // Suggestions render via their own strikethrough/insert view, not the plain
       // comment highlight — don't double up.
@@ -579,7 +589,7 @@ export function App() {
           c.meta.path === curPath &&
           c.meta.kind !== "suggestion" &&
           !c.meta.event &&
-          !resolvedThreadIds.has(c.meta.thread),
+          visibleThreadIds.has(c.meta.thread),
       )
       .map((c) =>
         reanchorComment(
@@ -594,7 +604,7 @@ export function App() {
       .map((r) => ({ from: r.startOffset, to: r.endOffset }))
       .filter(clip);
     const pending = drafts
-      .filter((d) => d.path === curPath)
+      .filter((d) => d.path === curPath && visibleThreadIds.has(d.thread))
       .map((d) => ({
         from: lineColToOffset(d.range.sl, d.range.sc, lineStarts),
         to: lineColToOffset(d.range.el, d.range.ec, lineStarts),
@@ -602,7 +612,7 @@ export function App() {
       }))
       .filter(clip);
     view.dispatch({ effects: setCommentHighlights.of([...existing, ...pending]) });
-  }, [comments, drafts, threads, source, lineStarts, headSha, selectedPath, oldSources]);
+  }, [comments, drafts, visibleThreadIds, source, lineStarts, headSha, selectedPath, oldSources]);
 
   // Render submitted suggestions in the body as tracked changes (old = strikethrough / new = green block).
   useEffect(() => {
@@ -1356,7 +1366,12 @@ export function App() {
     );
   };
 
-  const renderSubmittedMessage = (c: ExistingComment, isRoot: boolean, st: AnchorStatus | null) => (
+  const renderSubmittedMessage = (
+    c: ExistingComment,
+    isRoot: boolean,
+    st: AnchorStatus | null,
+    actions?: ReactNode,
+  ) => (
     <div key={`s-${c.source}-${c.id}`} className="comment">
       <div className="comment__meta">
         <img
@@ -1374,6 +1389,7 @@ export function App() {
         {isRoot && !c.meta ? (
           <span className="badge badge--issue">{c.line ? `L${c.line}` : "no anchor"}</span>
         ) : null}
+        {actions ? <span className="comment__meta-actions">{actions}</span> : null}
       </div>
       {c.meta?.kind === "suggestion" ? (
         <>
@@ -1426,6 +1442,26 @@ export function App() {
     // event, not from accepting a suggestion (which resolves implicitly).
     const acceptedRoot = root?.meta?.kind === "suggestion" && dismissed[root.id] === "accepted";
     const canResolve = Boolean(root?.meta) && t.hasSubmitted && !acceptedRoot;
+    // Resolve/Reopen sits at the right end of the root comment's author row.
+    const resolveAction = canResolve ? (
+      <button
+        type="button"
+        className="thread__resolve"
+        disabled={resolvingId === t.id}
+        onClick={(e) => {
+          e.stopPropagation();
+          void setThreadResolved(t, !t.resolved);
+        }}
+      >
+        {resolvingId === t.id
+          ? t.resolved
+            ? "Reopening…"
+            : "Resolving…"
+          : t.resolved
+            ? "Reopen"
+            : "✓ Resolve"}
+      </button>
+    ) : null;
     return (
       <div
         key={t.id}
@@ -1443,7 +1479,12 @@ export function App() {
         ) : null}
         {t.messages.map((m) =>
           m.kind === "submitted"
-            ? renderSubmittedMessage(m.comment, m.comment === root, st)
+            ? renderSubmittedMessage(
+                m.comment,
+                m.comment === root,
+                st,
+                m.comment === root ? resolveAction : undefined,
+              )
             : renderPendingMessage(m.draft),
         )}
         {showAuthorActions && root ? (
@@ -1470,27 +1511,6 @@ export function App() {
                 </button>
               </>
             )}
-          </div>
-        ) : null}
-        {canResolve ? (
-          <div className="thread__foot" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className="thread__resolve"
-              disabled={resolvingId === t.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                void setThreadResolved(t, !t.resolved);
-              }}
-            >
-              {resolvingId === t.id
-                ? t.resolved
-                  ? "Reopening…"
-                  : "Resolving…"
-                : t.resolved
-                  ? "Reopen"
-                  : "✓ Resolve"}
-            </button>
           </div>
         ) : null}
         {replyTo === t.id ? (
