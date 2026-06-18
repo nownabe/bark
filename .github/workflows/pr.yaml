@@ -6,6 +6,13 @@ on:
 permissions: {}
 
 jobs:
+  common-checks:
+    name: Common Checks
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: nownabe/workflows/.github/workflows/pr.yaml@b9f2480e7b902455bb4f9183f02f6731b5cecf46 # main
+
   filter:
     name: Filter
     runs-on: ubuntu-slim
@@ -20,63 +27,11 @@ jobs:
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d
         with:
           filters: |
-            github_workflow:
-              - '.github/workflows/**'
-            oxfmt:
-              - '**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}'
-              - '**/*.{json,jsonc,json5}'
-              - '**/*.{css,scss,less}'
-              - '**/*.{yaml,yml,toml}'
-              - '**/*.{html,vue,graphql}'
-              - '**/*.{md,mdx}'
-              - '.oxfmtrc*'
-              - 'mise.toml'
-              - 'mise.lock'
-            oxlint:
-              - '**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}'
-              - '.oxlintrc*'
-              - 'oxlint.config.*'
-              - 'mise.toml'
-              - 'mise.lock'
             check:
               - '**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}'
               - 'package.json'
               - 'bun.lock'
               - 'tsconfig.json'
-            shellcheck:
-              - '**/*.sh'
-
-  github-workflow:
-    name: GitHub Workflow
-    needs: filter
-    if: ${{ fromJSON(needs.filter.outputs.changes).github_workflow == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/reusable-github-workflow.yaml
-
-  oxfmt:
-    name: oxfmt
-    needs: filter
-    if: ${{ fromJSON(needs.filter.outputs.changes).oxfmt == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/reusable-oxfmt.yaml
-
-  oxlint:
-    name: oxlint
-    needs: filter
-    if: ${{ fromJSON(needs.filter.outputs.changes).oxlint == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/reusable-oxlint.yaml
-
-  shellcheck:
-    name: shellcheck
-    needs: filter
-    if: ${{ fromJSON(needs.filter.outputs.changes).shellcheck == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/reusable-shellcheck.yaml
 
   check:
     name: Check
@@ -86,22 +41,12 @@ jobs:
       contents: read
     uses: ./.github/workflows/reusable-check.yaml
 
-  secret-scan:
-    name: Secret Scan
-    permissions:
-      contents: read
-    uses: ./.github/workflows/reusable-secret-scan.yaml
-
-  status-check:
-    name: Pull Request Status Check
+  result:
+    name: Pull Request Checks
     if: always()
     needs:
-      - github-workflow
-      - oxfmt
-      - oxlint
-      - shellcheck
+      - common-checks
       - check
-      - secret-scan
     runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions: {}
