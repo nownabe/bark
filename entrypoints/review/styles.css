@@ -548,8 +548,11 @@ select.input:focus {
   align-items: center;
 }
 /* Quiet, compact resolve/reopen affordance — a muted text button that tints on
-   hover, not a heavy framed button. */
+   hover, not a heavy framed button. Hidden until the thread is hovered or
+   focused (emphasized); the in-flight state (:disabled) stays visible so
+   "Resolving…/Reopening…" doesn't vanish when focus moves away. */
 .thread__resolve {
+  display: none;
   font: inherit;
   font-size: 11px;
   font-weight: 500;
@@ -562,6 +565,11 @@ select.input:focus {
   transition:
     color var(--dur) var(--ease),
     background var(--dur) var(--ease);
+}
+.thread:hover .thread__resolve,
+.thread--emphasized .thread__resolve,
+.thread__resolve:disabled {
+  display: inline-flex;
 }
 .thread__resolve:not(:disabled):hover {
   color: var(--accent);
@@ -645,11 +653,6 @@ select.input:focus {
 .badge--outdated {
   background: var(--red-tint);
   color: var(--red);
-}
-/* Resolved = done/quiet — a muted pill (distinct from the green review badge). */
-.badge--resolved {
-  background: var(--bg-inset);
-  color: var(--muted);
 }
 /* PR status badges (open / merged / draft / closed) */
 .badge--pr {

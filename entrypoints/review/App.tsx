@@ -1472,11 +1472,6 @@ export function App() {
         onClick={() => openThread(t)}
       >
         {t.quote ? <div className="thread__quote">{t.quote}</div> : null}
-        {t.resolved ? (
-          <div className="comment__meta">
-            <span className="badge badge--resolved">✓ resolved</span>
-          </div>
-        ) : null}
         {t.messages.map((m) =>
           m.kind === "submitted"
             ? renderSubmittedMessage(
