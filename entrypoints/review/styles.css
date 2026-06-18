@@ -568,11 +568,12 @@ select.input:focus {
   color: var(--red);
 }
 
-/* PR title shown after the repo/#n ref inside the same link (secondary text) */
+/* PR title shown after the repo/#n ref inside the same link — the headline */
 .topbar__pr-title {
-  font-weight: 400;
-  color: var(--muted);
-  max-width: 360px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  max-width: 420px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
