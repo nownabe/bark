@@ -23,7 +23,7 @@ import {
   buildSuggestionMarks,
   buildThreads,
   filterReviewEntries,
-  reviewCounts,
+  reviewEntryCounts,
   threadRangeAt,
   type PendingSuggestion,
   type ReviewFilter,
@@ -188,7 +188,7 @@ export function App() {
     () => buildReviewEntries({ threads, pendingSuggestions, currentPath: curPath }),
     [threads, pendingSuggestions, curPath],
   );
-  const counts = reviewCounts({ drafts, pendingSuggestions, comments, threads });
+  const counts = reviewEntryCounts(entries);
   const pendingItems = buildPendingItems(drafts, pendingSuggestions);
   const visibleEntries = filterReviewEntries(entries, reviewFilter);
 
