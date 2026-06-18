@@ -113,7 +113,7 @@ behavior).
 Each card lists **neutral characteristics** on the same dimensions (not
 pros/cons) so the user picks what fits:
 
-- **GitHub App** (badge: *Recommended*)
+- **GitHub App** (badge: _Recommended_)
   - No expiry — access keeps working without renewal.
   - Repository access is chosen when you install the app.
   - Revoke anytime by uninstalling the app in GitHub settings.
@@ -151,6 +151,7 @@ and "during" (user code + Open GitHub + Copy) UI and logic. On authorized token:
 - A back link to `choose`.
 
 Submit flow: disable the button, call `validatePat(input)`.
+
 - Success → `setToken(token)` + `setAuthMethod("pat")` → `onAuthenticated`
   (entering the app; the resolved `login` may be shown as confirmation).
 - `PatError` → inline message under the field, keeping the entered value:
@@ -166,21 +167,21 @@ linking to install the Bark app) assumes the App method. Make it method-aware:
 
 - `auth_method === "app"` (or null/legacy) → unchanged: "Install the Bark app"
   link + retry.
-- `auth_method === "pat"` → "This token can't access *{owner}/{repo}*. Check the
+- `auth_method === "pat"` → "This token can't access _{owner}/{repo}_. Check the
   token's repository access and its Contents / Pull requests permissions," with
   a control that signs out / returns to the login choice (so the user can fix or
   re-enter the token).
 
 ## Error handling summary
 
-| Situation                         | Handling                                                        |
-| --------------------------------- | --------------------------------------------------------------- |
-| Empty/whitespace PAT              | Rejected as `invalid` with no network request                   |
-| PAT `GET /user` → 401             | `PatError("invalid")` → "Token is invalid or expired."          |
-| PAT `GET /user` → 403             | `PatError("forbidden")` → permissions hint                      |
-| PAT network failure               | `PatError("network")` → connection hint                         |
-| Repo load 404/403, method = pat   | Method-aware gate: token-access hint + back to login            |
-| Repo load 404/403, method = app   | Unchanged install-app gate                                      |
+| Situation                       | Handling                                               |
+| ------------------------------- | ------------------------------------------------------ |
+| Empty/whitespace PAT            | Rejected as `invalid` with no network request          |
+| PAT `GET /user` → 401           | `PatError("invalid")` → "Token is invalid or expired." |
+| PAT `GET /user` → 403           | `PatError("forbidden")` → permissions hint             |
+| PAT network failure             | `PatError("network")` → connection hint                |
+| Repo load 404/403, method = pat | Method-aware gate: token-access hint + back to login   |
+| Repo load 404/403, method = app | Unchanged install-app gate                             |
 
 ## Testing (TDD)
 
