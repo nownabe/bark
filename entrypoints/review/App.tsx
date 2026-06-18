@@ -1242,10 +1242,10 @@ export function App() {
                 type="button"
                 className="btn btn--primary"
                 onClick={() => setShowSubmitConfirm(true)}
-                disabled={loading || counts.pending === 0}
-                title="Review the pending items before submitting"
+                disabled={loading || pendingItems.length === 0}
+                title="Review the pending items from all files before submitting"
               >
-                Submit review ({counts.pending})
+                Submit review ({pendingItems.length})
               </button>
             ) : null}
             <button

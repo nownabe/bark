@@ -9,6 +9,7 @@ import {
   buildThreads,
   buildReviewEntries,
   buildPendingItems,
+  groupPendingByFile,
   buildPendingSuggestions,
   buildSuggestionMarks,
   filterReviewEntries,
@@ -266,6 +267,29 @@ describe("buildPendingItems", () => {
     expect(items).toHaveLength(3);
     expect(items.filter((i) => i.kind === "comment")).toHaveLength(2);
     expect(items.filter((i) => i.kind === "suggestion")).toHaveLength(1);
+  });
+});
+
+describe("groupPendingByFile", () => {
+  test("groups items by path (sorted), items by line (submit spans all files)", () => {
+    const items = buildPendingItems(
+      [
+        draft({ cid: "d1", path: "docs/b.md", range: { sl: 9, sc: 1, el: 9, ec: 5 } }),
+        draft({ cid: "d2", path: "docs/a.md", range: { sl: 4, sc: 1, el: 4, ec: 5 } }),
+        draft({ cid: "d3", path: "docs/a.md", range: { sl: 2, sc: 1, el: 2, ec: 5 } }),
+      ],
+      [{ ...liveSuggestion, cid: "s1", path: "docs/b.md", range: { sl: 1, sc: 1, el: 1, ec: 1 } }],
+    );
+    const groups = groupPendingByFile(items);
+    expect(groups.map((g) => g.path)).toEqual(["docs/a.md", "docs/b.md"]);
+    // a.md items sorted by line: d3 (L2) then d2 (L4)
+    expect(groups[0].items.map((i) => (i.kind === "comment" ? i.draft.cid : ""))).toEqual([
+      "d3",
+      "d2",
+    ]);
+    // b.md: suggestion (L1) before the draft (L9)
+    expect(groups[1].items[0].kind).toBe("suggestion");
+    expect(groups[1].items).toHaveLength(2);
   });
 });
 

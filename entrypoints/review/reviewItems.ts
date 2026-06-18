@@ -232,6 +232,29 @@ export function buildPendingItems(
   ];
 }
 
+export function pendingItemPath(item: PendingItem): string {
+  return item.kind === "suggestion" ? item.suggestion.path : item.draft.path;
+}
+
+/**
+ * Group pending items by file for the submit-review confirmation (which spans all
+ * files, unlike the per-file sidebar). Groups are sorted by path, items by line.
+ */
+export function groupPendingByFile(items: PendingItem[]): { path: string; items: PendingItem[] }[] {
+  const lineOf = (i: PendingItem) =>
+    i.kind === "suggestion" ? i.suggestion.range.sl : i.draft.range.sl;
+  const groups = new Map<string, PendingItem[]>();
+  for (const item of items) {
+    const p = pendingItemPath(item);
+    const g = groups.get(p);
+    if (g) g.push(item);
+    else groups.set(p, [item]);
+  }
+  return [...groups.entries()]
+    .map(([path, list]) => ({ path, items: [...list].sort((a, b) => lineOf(a) - lineOf(b)) }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
 /** Counts of comments vs suggestions in a group of pending items. */
 export interface SubmitGroup {
   comments: number;
