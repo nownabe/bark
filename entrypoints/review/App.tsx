@@ -231,6 +231,13 @@ export function App() {
     });
   }, []);
 
+  // Starting a fresh selection (new-comment composer) means focus moved off the
+  // emphasized item, so drop the emphasis. Programmatic jump/emphasis selections
+  // set suppressNextAnchor and never set `anchor`, so they don't trigger this.
+  useEffect(() => {
+    if (anchor) setEmphasizedThreadId(null);
+  }, [anchor]);
+
   // Device-flow polling (§7.6): once a grant exists, poll GitHub at its interval
   // until the user authorizes (or the code expires / is denied). A self-scheduling
   // timeout lets us honor `slow_down` by widening the gap.
@@ -797,6 +804,7 @@ export function App() {
     if (pos == null) return;
     const hit = threadRangeAt(threadRanges, pos);
     if (hit) emphasizeThread(hit);
+    else setEmphasizedThreadId(null); // clicked away from any comment → drop emphasis
   };
 
   if (!tokenLoaded) return <p className="notice notice--muted">Loading…</p>;
