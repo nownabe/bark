@@ -40,8 +40,11 @@ import {
   buildSuggestionBlock,
   GitHubApiError,
   GitHubClient,
+  pullStatus,
   type ChangedFile,
   type PrRef,
+  type PullInfo,
+  type PullStatus,
   type ReviewCommentInput,
 } from "../../lib/github";
 import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
@@ -78,6 +81,13 @@ const STATUS_LABEL: Partial<Record<AnchorStatus, string>> = {
   outdated: "position not found",
 };
 
+const PR_STATUS_LABEL: Record<PullStatus, string> = {
+  open: "Open",
+  merged: "Merged",
+  draft: "Draft",
+  closed: "Closed",
+};
+
 // The author/reviewer switch is a development aid only. It renders as a floating
 // control bottom-right exclusively in builds where BARK_DEV_ROLE_SWITCH is set;
 // normal builds hide it and keep the default role.
@@ -108,6 +118,7 @@ export function App() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const [files, setFiles] = useState<ChangedFile[]>([]);
+  const [pull, setPull] = useState<PullInfo | null>(null);
   const [headSha, setHeadSha] = useState<string | null>(null);
   const [headRef, setHeadRef] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -130,6 +141,7 @@ export function App() {
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [emphasizedThreadId, setEmphasizedThreadId] = useState<string | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [showPrInfo, setShowPrInfo] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const cmRef = useRef<ReactCodeMirrorRef>(null);
@@ -189,6 +201,7 @@ export function App() {
     [threads, pendingSuggestions, curPath],
   );
   const counts = reviewEntryCounts(entries);
+  const prStatus = pull ? pullStatus(pull) : null;
   const pendingItems = buildPendingItems(drafts, pendingSuggestions);
   const visibleEntries = filterReviewEntries(entries, reviewFilter);
 
@@ -290,11 +303,12 @@ export function App() {
     setNeedsInstall(false);
     (async () => {
       try {
-        const { headSha: sha, headRef: hr } = await client.getPull(ref);
+        const info = await client.getPull(ref);
         const md = await client.listMarkdownFiles(ref);
         if (cancelled) return;
-        setHeadSha(sha);
-        setHeadRef(hr);
+        setPull(info);
+        setHeadSha(info.headSha);
+        setHeadRef(info.headRef);
         setFiles(md);
         setSelectedPath((prev) => prev ?? md[0]?.path ?? null);
       } catch (e) {
@@ -1117,6 +1131,11 @@ export function App() {
         {ref ? (
           <>
             <span className="topbar__meta">
+              {prStatus ? (
+                <span className={`badge badge--pr badge--pr-${prStatus}`}>
+                  {PR_STATUS_LABEL[prStatus]}
+                </span>
+              ) : null}
               <a
                 className="topbar__pr"
                 href={`https://github.com/${owner}/${repo}/pull/${prNum}`}
@@ -1126,6 +1145,16 @@ export function App() {
               >
                 {owner}/{repo} #{prNum}
               </a>
+              {pull?.title ? (
+                <button
+                  type="button"
+                  className="topbar__pr-title"
+                  onClick={() => setShowPrInfo((v) => !v)}
+                  title="Pull request details"
+                >
+                  {pull.title}
+                </button>
+              ) : null}
               {headSha ? <span>@ {headSha.slice(0, 7)}</span> : null}
             </span>
             {files.length > 0 ? (
@@ -1197,6 +1226,41 @@ export function App() {
         ) : (
           <span className="topbar__meta">sample document (no PR specified)</span>
         )}
+        {showPrInfo && pull ? (
+          <div className="popover popover--pr" role="dialog">
+            <h3>{pull.title || "(no title)"}</h3>
+            <div className="pr-info__meta">
+              <img
+                className="comment__avatar"
+                src={avatarUrl(pull.author, 40)}
+                alt=""
+                width={18}
+                height={18}
+                loading="lazy"
+              />
+              <span className="comment__author">{pull.author}</span>
+              {prStatus ? (
+                <span className={`badge badge--pr badge--pr-${prStatus}`}>
+                  {PR_STATUS_LABEL[prStatus]}
+                </span>
+              ) : null}
+            </div>
+            <div className="pr-info__body">{pull.body || "(no description)"}</div>
+            <div className="popover__footer">
+              <a
+                className="btn btn--sm"
+                href={`https://github.com/${owner}/${repo}/pull/${prNum}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open on GitHub
+              </a>
+              <button type="button" className="btn btn--sm" onClick={() => setShowPrInfo(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
         {showHelp ? (
           <div className="popover" role="dialog">
             <h3>How to use</h3>
