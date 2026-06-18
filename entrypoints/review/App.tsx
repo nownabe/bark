@@ -17,6 +17,7 @@ import { SelectionComposer } from "./components/SelectionComposer";
 import { SuggestionDiff } from "./components/SuggestionDiff";
 import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
+import { DiscardAllConfirmModal } from "./components/DiscardAllConfirmModal";
 import {
   buildAllPendingSuggestions,
   buildPendingItems,
@@ -56,6 +57,7 @@ import {
 } from "../../lib/github";
 import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
 import {
+  discardAllDrafts,
   listDismissedSuggestions,
   listDrafts,
   listSuggestionEdits,
@@ -157,6 +159,7 @@ export function App() {
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [emphasizedThreadId, setEmphasizedThreadId] = useState<string | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [showPrInfo, setShowPrInfo] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
@@ -923,6 +926,24 @@ export function App() {
     persistSuggestionEdit(curPath, baseSource, baseSource, {});
   };
 
+  // Drop every pending review item — comment/suggestion drafts and all files'
+  // in-progress suggestion edits — from both memory and storage. The open editor
+  // is reset to its base so no stale live suggestion lingers, and any debounced
+  // edit write is cancelled so it can't resurrect what we just cleared.
+  const discardAllPending = async () => {
+    setShowDiscardConfirm(false);
+    setDrafts([]);
+    setSource(baseSource);
+    setSuggestionComments({});
+    setSuggestionEdits({});
+    pendingEditWrites.current = {};
+    if (editSaveTimer.current) {
+      clearTimeout(editSaveTimer.current);
+      editSaveTimer.current = null;
+    }
+    if (ref) await discardAllDrafts(ref);
+  };
+
   const setSuggestionComment = (cid: string, value: string) => {
     const next = { ...suggestionComments, [cid]: value };
     setSuggestionComments(next);
@@ -1429,15 +1450,43 @@ export function App() {
               </button>
             ) : null}
             {role === "reviewer" ? (
-              <button
-                type="button"
-                className="btn btn--primary"
-                onClick={() => setShowSubmitConfirm(true)}
-                disabled={loading || pendingItems.length === 0}
-                title="Review the pending items from all files before submitting"
-              >
-                Submit review ({pendingItems.length})
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn--icon"
+                  onClick={() => setShowDiscardConfirm(true)}
+                  disabled={loading || pendingItems.length === 0}
+                  aria-label="Discard all pending review items"
+                  title="Discard all pending review items (comments and suggestions) across every file"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 6h18" />
+                    <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <line x1="10" x2="10" y1="11" y2="17" />
+                    <line x1="14" x2="14" y1="11" y2="17" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => setShowSubmitConfirm(true)}
+                  disabled={loading || pendingItems.length === 0}
+                  title="Review the pending items from all files before submitting"
+                >
+                  Submit review ({pendingItems.length})
+                </button>
+              </>
             ) : null}
             <button
               type="button"
@@ -1600,6 +1649,15 @@ export function App() {
           target={ref ?? undefined}
           onConfirm={submitReview}
           onCancel={() => setShowSubmitConfirm(false)}
+          loading={loading}
+        />
+      ) : null}
+
+      {showDiscardConfirm ? (
+        <DiscardAllConfirmModal
+          count={pendingItems.length}
+          onConfirm={discardAllPending}
+          onCancel={() => setShowDiscardConfirm(false)}
           loading={loading}
         />
       ) : null}

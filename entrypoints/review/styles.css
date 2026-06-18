@@ -246,7 +246,7 @@ select:focus-visible {
     box-shadow var(--dur) var(--ease),
     transform var(--dur) var(--ease);
 }
-.btn:hover {
+.btn:not(:disabled):hover {
   background: var(--bg-subtle);
   border-color: var(--muted);
 }
@@ -266,7 +266,7 @@ select:focus-visible {
     0 1px 2px rgba(31, 136, 61, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
-.btn--primary:hover {
+.btn--primary:not(:disabled):hover {
   background: var(--brand-strong);
   border-color: transparent;
 }
@@ -274,12 +274,36 @@ select:focus-visible {
   font-size: 11px;
   padding: 4px 10px;
 }
+/* Square icon-only button — a quiet, muted glyph with no frame or fill (the SVG
+   inherits the button's color via currentColor). At rest it stays gray
+   regardless of state; only an enabled button reacts on hover, darkening the
+   glyph alone. */
+.btn--icon {
+  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+.btn--icon:not(:disabled):hover {
+  color: var(--fg);
+  background: none;
+  border-color: transparent;
+}
+/* Keep the resting look identical whether or not there are pending items — the
+   hover reaction (enabled only) is the sole affordance, so don't dim when empty. */
+.btn--icon:disabled {
+  opacity: 1;
+}
 .btn--danger {
   color: var(--red);
   border-color: #f1c0c4;
   background: var(--bg);
 }
-.btn--danger:hover {
+.btn--danger:not(:disabled):hover {
   background: var(--red-tint);
   border-color: var(--red);
 }
