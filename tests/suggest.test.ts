@@ -4,6 +4,7 @@ import {
   diffToSuggestions,
   extractSuggestionBlock,
   stripSuggestionBlock,
+  suggestionEditRanges,
 } from "../lib/suggest";
 
 describe("diffToSuggestions", () => {
@@ -24,6 +25,36 @@ describe("diffToSuggestions", () => {
 
   test("no change yields no hunks", () => {
     expect(diffToSuggestions("a\nb\n", "a\nb\n")).toEqual([]);
+  });
+});
+
+describe("suggestionEditRanges", () => {
+  test("single-line replacement: range covers the replacement text in the edited doc", () => {
+    const edited = "line1\nLINE2 changed\nline3\n";
+    const r = suggestionEditRanges("line1\nline2\nline3\n", edited);
+    expect(r).toEqual([{ sl: 2, el: 2, from: 6, to: 19 }]);
+    expect(edited.slice(r[0].from, r[0].to)).toBe("LINE2 changed");
+  });
+
+  test("multi-line replacement spans all replacement lines", () => {
+    const edited = "h1\nX\nY\nh2\n";
+    const r = suggestionEditRanges("h1\nx\ny\nz\nh2\n", edited);
+    expect(r).toEqual([{ sl: 2, el: 4, from: 3, to: 6 }]);
+    expect(edited.slice(r[0].from, r[0].to)).toBe("X\nY");
+  });
+
+  test("pure deletion collapses to the point where the text was", () => {
+    const r = suggestionEditRanges("a\nb\nc\n", "a\nc\n");
+    expect(r).toEqual([{ sl: 2, el: 2, from: 2, to: 2 }]);
+  });
+
+  test("ranges align by index with diffToSuggestions hunks", () => {
+    const base = "a\nb\nc\nd\n";
+    const edited = "a\nB\nc\nD\n";
+    const hunks = diffToSuggestions(base, edited);
+    const ranges = suggestionEditRanges(base, edited);
+    expect(ranges).toHaveLength(hunks.length);
+    expect(ranges.map((x) => [x.sl, x.el])).toEqual(hunks.map((h) => [h.sl, h.el]));
   });
 });
 

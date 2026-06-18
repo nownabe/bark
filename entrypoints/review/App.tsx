@@ -30,7 +30,12 @@ import {
   type ReviewThread,
   type ThreadRange,
 } from "./reviewItems";
-import { diffToSuggestions, extractSuggestionBlock, stripSuggestionBlock } from "../../lib/suggest";
+import {
+  diffToSuggestions,
+  extractSuggestionBlock,
+  stripSuggestionBlock,
+  suggestionEditRanges,
+} from "../../lib/suggest";
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
 import { normalizeComments, type ExistingComment } from "../../lib/comments";
 import { reanchorComment, type AnchorStatus } from "../../lib/reanchor";
@@ -236,6 +241,16 @@ export function App() {
     }
     return res;
   }, [threads, source, lineStarts, headSha, curPath]);
+
+  // The current-doc char span of each pending suggestion's edited text, so a
+  // click on the suggested text in the editor maps back to its review item. The
+  // ranges align by index with pendingSuggestions (same hunk order).
+  const suggestionRanges = useMemo<{ cid: string; from: number; to: number }[]>(() => {
+    if (role !== "reviewer" || source === baseSource) return [];
+    return suggestionEditRanges(baseSource, source)
+      .map((r, k) => ({ cid: pendingSuggestions[k]?.cid, from: r.from, to: r.to }))
+      .filter((r): r is { cid: string; from: number; to: number } => Boolean(r.cid));
+  }, [role, source, baseSource, pendingSuggestions]);
 
   // Surface an error from the initial load and flag the likely "app not
   // installed" case (404/403) so we can route to the dedicated install gate.
@@ -456,12 +471,14 @@ export function App() {
     view.dispatch({ effects: setSuggestionMarks.of(marks) });
   }, [comments, source, lineStarts, headSha, selectedPath, dismissed]);
 
-  // Scroll the emphasized thread (e.g. after clicking its highlighted text in
-  // the body) into view in the sidebar.
+  // Scroll the emphasized item (e.g. after clicking its highlighted text in the
+  // body) into view in the sidebar. The id is a thread id or a live-suggestion
+  // cid, so match either item attribute.
   useEffect(() => {
     if (!emphasizedThreadId) return;
+    const esc = CSS.escape(emphasizedThreadId);
     document
-      .querySelector(`[data-thread-id="${CSS.escape(emphasizedThreadId)}"]`)
+      .querySelector(`[data-thread-id="${esc}"], [data-suggestion-cid="${esc}"]`)
       ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [emphasizedThreadId, reviewFilter]);
 
@@ -813,17 +830,21 @@ export function App() {
     );
   };
 
-  // Scroll the sidebar so the given thread's card sits at the same viewport
-  // height as the current editor selection — keeps the text and its review item
-  // visible together even when the list is long. Runs after layout settles.
-  const alignItemToText = (threadId: string) => {
+  // Scroll the sidebar so the given item's card sits at the same viewport height
+  // as the current editor selection — keeps the text and its review item visible
+  // together even when the list is long. Runs after layout settles. `id` is a
+  // thread id or a live-suggestion cid.
+  const alignItemToText = (id: string) => {
     requestAnimationFrame(() => {
       const view = cmRef.current?.view;
       const sidebar = sidebarRef.current;
       if (!view || !sidebar) return;
       const coords = view.coordsAtPos(view.state.selection.main.from);
       if (!coords) return;
-      const item = sidebar.querySelector<HTMLElement>(`[data-thread-id="${CSS.escape(threadId)}"]`);
+      const esc = CSS.escape(id);
+      const item = sidebar.querySelector<HTMLElement>(
+        `[data-thread-id="${esc}"], [data-suggestion-cid="${esc}"]`,
+      );
       if (!item) return;
       const delta = item.getBoundingClientRect().top - coords.top;
       if (Math.abs(delta) > 1) sidebar.scrollBy({ top: delta, behavior: "smooth" });
@@ -850,6 +871,22 @@ export function App() {
     alignItemToText(hit.id);
   };
 
+  // Emphasize a pending suggestion's review item (and reveal its comment field).
+  // Unlike a thread it has no reply box, so clear replyTo. `select` selects the
+  // suggested text in the editor too (when the item, not the text, was clicked).
+  const emphasizeSuggestion = (cid: string, select: boolean) => {
+    if (select) {
+      const r = suggestionRanges.find((x) => x.cid === cid);
+      if (r && r.from < r.to) jumpToOffsets(r.from, r.to);
+    }
+    if (!visibleEntries.some((e) => e.kind === "liveSuggestion" && e.suggestion.cid === cid)) {
+      setReviewFilter("all"); // make sure the emphasized suggestion is visible
+    }
+    setEmphasizedThreadId(cid);
+    setReplyTo(null);
+    alignItemToText(cid);
+  };
+
   const onEditorClick = (e: ReactMouseEvent) => {
     const view = cmRef.current?.view;
     if (!view) return;
@@ -859,7 +896,13 @@ export function App() {
     const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
     if (pos == null) return;
     const hit = threadRangeAt(threadRanges, pos);
-    if (hit) emphasizeThread(hit);
+    if (hit) {
+      emphasizeThread(hit);
+      return;
+    }
+    const sHit = suggestionRanges.find((r) => r.from <= pos && pos <= r.to);
+    if (sHit)
+      emphasizeSuggestion(sHit.cid, false); // text already clicked; just emphasize the item
     else setEmphasizedThreadId(null); // clicked away from any comment → drop emphasis
   };
 
@@ -995,28 +1038,43 @@ export function App() {
     alignItemToText(t.id);
   };
 
-  const renderLiveSuggestion = (s: PendingSuggestion) => (
-    <div key={s.cid} data-suggestion-cid={s.cid} className="thread">
-      <div className="comment__meta">
-        <span className="badge badge--pending">pending</span>
-        <span>{lineRange(s.range)}</span>
+  // Click a pending suggestion → emphasize it (and select its text in the body).
+  // Its comment field + actions only show while it is emphasized, so the list
+  // stays compact when many suggestions are pending.
+  const renderLiveSuggestion = (s: PendingSuggestion) => {
+    const emphasized = emphasizedThreadId === s.cid;
+    return (
+      <div
+        key={s.cid}
+        data-suggestion-cid={s.cid}
+        className={`thread thread--clickable${emphasized ? " thread--emphasized" : ""}`}
+        onClick={() => emphasizeSuggestion(s.cid, true)}
+      >
+        <div className="comment__meta">
+          <span className="badge badge--pending">pending</span>
+          <span>{lineRange(s.range)}</span>
+        </div>
+        <div className="sugg-old">{s.quote}</div>
+        <div className="sugg-new">{s.replacement || "(delete)"}</div>
+        {emphasized ? (
+          <div onClick={(e) => e.stopPropagation()}>
+            <textarea
+              className="field"
+              value={suggestionComments[s.cid] ?? ""}
+              onChange={(e) => setSuggestionComment(s.cid, e.target.value)}
+              rows={2}
+              placeholder="Add a comment (optional)"
+            />
+            <div className="comment__actions">
+              <button type="button" className="btn btn--sm" onClick={discardEdits}>
+                Discard edits
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
-      <div className="sugg-old">{s.quote}</div>
-      <div className="sugg-new">{s.replacement || "(delete)"}</div>
-      <textarea
-        className="field"
-        value={suggestionComments[s.cid] ?? ""}
-        onChange={(e) => setSuggestionComment(s.cid, e.target.value)}
-        rows={2}
-        placeholder="Add a comment (optional)"
-      />
-      <div className="comment__actions">
-        <button type="button" className="btn btn--sm" onClick={discardEdits}>
-          Discard edits
-        </button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderSubmittedMessage = (c: ExistingComment, isRoot: boolean, st: AnchorStatus | null) => (
     <div key={`s-${c.source}-${c.id}`} className="comment">
