@@ -750,28 +750,36 @@ export function App() {
     if (!client || !ref || !headSha) return;
     const root = t.rootComment;
     if (!root?.meta) return;
-    const evMeta: CommentMetadata = {
-      cid: crypto.randomUUID(),
-      path: root.meta.path,
-      range: root.meta.range,
-      quote: root.meta.quote,
-      sha: headSha,
-      thread: t.id,
-      kind: "comment",
-      event: resolved ? "resolve" : "unresolve",
-    };
-    const body = embedMetadata(resolved ? "Resolved via Bark." : "Reopened via Bark.", evMeta);
-    if (root.source === "review") {
-      await client.replyToReviewComment(ref, root.id, body);
-      const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
-      if (nodeId) {
-        if (resolved) await client.resolveReviewThread(nodeId);
-        else await client.unresolveReviewThread(nodeId);
+    setLoading(true);
+    setError(null);
+    try {
+      const evMeta: CommentMetadata = {
+        cid: crypto.randomUUID(),
+        path: root.meta.path,
+        range: root.meta.range,
+        quote: root.meta.quote,
+        sha: headSha,
+        thread: t.id,
+        kind: "comment",
+        event: resolved ? "resolve" : "unresolve",
+      };
+      const body = embedMetadata(resolved ? "Resolved via Bark." : "Reopened via Bark.", evMeta);
+      if (root.source === "review") {
+        await client.replyToReviewComment(ref, root.id, body);
+        const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
+        if (nodeId) {
+          if (resolved) await client.resolveReviewThread(nodeId);
+          else await client.unresolveReviewThread(nodeId);
+        }
+      } else {
+        await client.createIssueComment(ref, body);
       }
-    } else {
-      await client.createIssueComment(ref, body);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      setError(errMessage(e));
+    } finally {
+      setLoading(false);
     }
-    setReloadKey((k) => k + 1);
   };
 
   // author: record an accept/reject decision on a submitted suggestion.
