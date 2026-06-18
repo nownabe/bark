@@ -203,7 +203,8 @@ export function LoginGate({
           .
         </li>
         <li>
-          Repository access → <strong>Only select repositories</strong> → choose {owner}/{repo}.
+          Repository access → <strong>Only select repositories</strong>, and include {owner}/{repo}.
+          You can select more repositories here to reuse one token across PRs.
         </li>
         <li>
           Permissions → <strong>Contents: Read and write</strong> and{" "}
