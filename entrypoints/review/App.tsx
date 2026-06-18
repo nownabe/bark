@@ -148,6 +148,8 @@ export function App() {
   const sidebarRef = useRef<HTMLElement>(null);
   const prInfoRef = useRef<HTMLDivElement>(null);
   const prInfoBtnRef = useRef<HTMLButtonElement>(null);
+  const helpRef = useRef<HTMLDivElement>(null);
+  const helpBtnRef = useRef<HTMLButtonElement>(null);
   // Set before a programmatic "jump to item" selection so the resulting
   // selection update does not pop the new-comment composer (we are highlighting
   // an existing item, not starting a new comment).
@@ -251,6 +253,18 @@ export function App() {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [showPrInfo]);
+
+  // Same for the help popover: a click outside it (and outside the ? toggle) closes it.
+  useEffect(() => {
+    if (!showHelp) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (helpRef.current?.contains(t) || helpBtnRef.current?.contains(t)) return;
+      setShowHelp(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [showHelp]);
 
   useEffect(() => {
     getToken().then((t) => {
@@ -1236,6 +1250,7 @@ export function App() {
             ) : null}
             <button
               type="button"
+              ref={helpBtnRef}
               className="help-btn"
               title="Help"
               aria-label="Help"
@@ -1270,7 +1285,7 @@ export function App() {
           </div>
         ) : null}
         {showHelp ? (
-          <div className="popover" role="dialog">
+          <div className="popover" role="dialog" ref={helpRef}>
             <h3>How to use</h3>
             <ul>
               <li>The body is always editable (the Markdown source is canonical).</li>
@@ -1299,8 +1314,8 @@ export function App() {
                 Add button).
               </li>
             </ul>
-            <div className="popover__footer">
-              {token ? (
+            {token ? (
+              <div className="popover__footer">
                 <button
                   type="button"
                   className="btn btn--sm btn--danger"
@@ -1311,13 +1326,8 @@ export function App() {
                 >
                   Delete token
                 </button>
-              ) : (
-                <span />
-              )}
-              <button type="button" className="btn btn--sm" onClick={() => setShowHelp(false)}>
-                Close
-              </button>
-            </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </header>
