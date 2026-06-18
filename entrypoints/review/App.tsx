@@ -970,7 +970,7 @@ export function App() {
           height={18}
           loading="lazy"
         />
-        <span className="comment__author">@{c.author}</span>
+        <span className="comment__author">{c.author}</span>
         {isRoot && st && STATUS_LABEL[st] ? (
           <span className={`badge badge--${st}`}>{STATUS_LABEL[st]}</span>
         ) : null}
