@@ -466,12 +466,13 @@ select.input:focus {
 .thread {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 12px;
-  margin-bottom: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
   background: var(--bg);
   transition:
     border-color var(--dur) var(--ease),
     box-shadow var(--dur) var(--ease),
+    opacity var(--dur) var(--ease),
     background var(--dur) var(--ease);
 }
 .thread:hover {
@@ -487,6 +488,16 @@ select.input:focus {
 .thread--emphasized {
   border-color: var(--accent);
   box-shadow: var(--ring);
+}
+/* Resolved threads recede — quiet surface, slightly dimmed — and lift back to
+   full presence on hover or when emphasized. */
+.thread--resolved {
+  background: var(--bg-subtle);
+  opacity: 0.72;
+}
+.thread--resolved:hover,
+.thread--resolved.thread--emphasized {
+  opacity: 1;
 }
 .comment + .comment {
   margin-top: 10px;
@@ -525,9 +536,38 @@ select.input:focus {
   word-break: break-word;
 }
 .comment__actions {
-  margin-top: 10px;
+  margin-top: 8px;
   display: flex;
   gap: 6px;
+}
+/* Quiet, compact resolve/reopen affordance, right-aligned at the foot of a
+   thread — a muted text button that tints on hover, not a heavy framed button. */
+.thread__foot {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+.thread__resolve {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.thread__resolve:not(:disabled):hover {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+.thread__resolve:disabled {
+  color: var(--faint);
+  cursor: default;
 }
 /* compact ✕ to remove a pending item, tucked at the end of its meta row */
 .btn-x {
@@ -604,9 +644,10 @@ select.input:focus {
   background: var(--red-tint);
   color: var(--red);
 }
+/* Resolved = done/quiet — a muted pill (distinct from the green review badge). */
 .badge--resolved {
-  background: var(--brand-tint);
-  color: var(--brand);
+  background: var(--bg-inset);
+  color: var(--muted);
 }
 /* PR status badges (open / merged / draft / closed) */
 .badge--pr {

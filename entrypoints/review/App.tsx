@@ -2,7 +2,14 @@
 // The document surface is CodeMirror 6 (always editable, source canonical §13),
 // Obsidian-style Raw/Preview. Controls live in a sticky header; comments are
 // position-sorted and threaded; debug info is collapsible.
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
@@ -166,6 +173,8 @@ export function App() {
     () => new Set<ReviewFacet>(["pending", "submitted"]),
   );
   const [emphasizedThreadId, setEmphasizedThreadId] = useState<string | null>(null);
+  // The thread whose resolve/reopen request is in flight, for in-place button feedback.
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [showPrInfo, setShowPrInfo] = useState(false);
@@ -269,6 +278,8 @@ export function App() {
     const res: ThreadRange[] = [];
     for (const t of threads) {
       if (t.path !== curPath) continue;
+      // Resolved threads are hidden from the document (no highlight, not clickable).
+      if (t.resolved) continue;
       let from: number;
       let to: number;
       if (t.rootComment?.meta) {
@@ -461,16 +472,24 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, headSha, selectedPath, ref?.owner, ref?.repo, ref?.number]);
 
-  useEffect(() => {
+  // Fetch the PR's review + issue comments and rebuild local state. Exposed as a
+  // callback so actions that mutate comments on GitHub (resolve / reopen) can
+  // refresh immediately instead of waiting for a full page reload.
+  const reloadComments = useCallback(async () => {
     if (!client || !ref) return;
+    const [reviews, issues] = await Promise.all([
+      client.listReviewComments(ref),
+      client.listIssueComments(ref),
+    ]);
+    setComments(normalizeComments(reviews, issues));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, ref?.owner, ref?.repo, ref?.number]);
+
+  useEffect(() => {
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
-        const [reviews, issues] = await Promise.all([
-          client.listReviewComments(ref),
-          client.listIssueComments(ref),
-        ]);
-        if (!cancelled) setComments(normalizeComments(reviews, issues));
+        if (!cancelled) await reloadComments();
       } catch {
         /* ignore */
       }
@@ -478,8 +497,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, ref?.owner, ref?.repo, ref?.number]);
+  }, [reloadComments]);
 
   // Fetch each commented file as of its createdAtSha so re-anchoring can diff
   // against the exact revision the comment was made on (Design Doc §7.8). Only
@@ -548,10 +566,21 @@ export function App() {
     const docLen = view.state.doc.length;
     const clip = (r: { from: number; to: number; pending?: boolean }) =>
       r.from >= 0 && r.to <= docLen && r.from < r.to;
+    // Resolved threads disappear from the document (like Google Docs); their
+    // anchors are not highlighted. Resolution-event markers carry the root's
+    // anchor but are not real messages, so they're excluded too.
+    const resolvedThreadIds = new Set(threads.filter((t) => t.resolved).map((t) => t.id));
     const existing = comments
       // Suggestions render via their own strikethrough/insert view, not the plain
       // comment highlight — don't double up.
-      .filter((c) => c.meta && c.meta.path === curPath && c.meta.kind !== "suggestion")
+      .filter(
+        (c) =>
+          c.meta &&
+          c.meta.path === curPath &&
+          c.meta.kind !== "suggestion" &&
+          !c.meta.event &&
+          !resolvedThreadIds.has(c.meta.thread),
+      )
       .map((c) =>
         reanchorComment(
           source,
@@ -573,7 +602,7 @@ export function App() {
       }))
       .filter(clip);
     view.dispatch({ effects: setCommentHighlights.of([...existing, ...pending]) });
-  }, [comments, drafts, source, lineStarts, headSha, selectedPath, oldSources]);
+  }, [comments, drafts, threads, source, lineStarts, headSha, selectedPath, oldSources]);
 
   // Render submitted suggestions in the body as tracked changes (old = strikethrough / new = green block).
   useEffect(() => {
@@ -750,7 +779,7 @@ export function App() {
     if (!client || !ref || !headSha) return;
     const root = t.rootComment;
     if (!root?.meta) return;
-    setLoading(true);
+    setResolvingId(t.id);
     setError(null);
     try {
       const evMeta: CommentMetadata = {
@@ -774,11 +803,13 @@ export function App() {
       } else {
         await client.createIssueComment(ref, body);
       }
-      setReloadKey((k) => k + 1);
+      // Refresh comments now so the thread's resolved state reflects immediately
+      // (the reloadKey path only reloads PR info/files, not comments).
+      await reloadComments();
     } catch (e) {
       setError(errMessage(e));
     } finally {
-      setLoading(false);
+      setResolvingId(null);
     }
   };
 
@@ -1399,7 +1430,7 @@ export function App() {
       <div
         key={t.id}
         data-thread-id={t.id}
-        className={`thread thread--clickable${
+        className={`thread thread--clickable${t.resolved ? " thread--resolved" : ""}${
           emphasizedThreadId === t.id ? " thread--emphasized" : ""
         }`}
         onClick={() => openThread(t)}
@@ -1407,7 +1438,7 @@ export function App() {
         {t.quote ? <div className="thread__quote">{t.quote}</div> : null}
         {t.resolved ? (
           <div className="comment__meta">
-            <span className="badge badge--resolved">resolved</span>
+            <span className="badge badge--resolved">✓ resolved</span>
           </div>
         ) : null}
         {t.messages.map((m) =>
@@ -1442,30 +1473,24 @@ export function App() {
           </div>
         ) : null}
         {canResolve ? (
-          <div className="comment__actions" onClick={(e) => e.stopPropagation()}>
-            {t.resolved ? (
-              <button
-                type="button"
-                className="btn btn--sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void setThreadResolved(t, false);
-                }}
-              >
-                Reopen
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn--sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void setThreadResolved(t, true);
-                }}
-              >
-                Resolve
-              </button>
-            )}
+          <div className="thread__foot" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="thread__resolve"
+              disabled={resolvingId === t.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                void setThreadResolved(t, !t.resolved);
+              }}
+            >
+              {resolvingId === t.id
+                ? t.resolved
+                  ? "Reopening…"
+                  : "Resolving…"
+                : t.resolved
+                  ? "Reopen"
+                  : "✓ Resolve"}
+            </button>
           </div>
         ) : null}
         {replyTo === t.id ? (
