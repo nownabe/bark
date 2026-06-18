@@ -41,6 +41,35 @@ export async function saveDrafts(ref: PrRef, drafts: PendingDraft[]): Promise<vo
   await browser.storage.local.set({ [draftsKey(ref)]: drafts });
 }
 
+/**
+ * The reviewer's in-progress suggestion edits for one file: the edited document
+ * text plus the comment attached to each live suggestion (keyed by its cid).
+ * Persisted per path so pending suggestions survive a reload, the way pending
+ * comment drafts do (they are otherwise derived only from the in-memory editor
+ * state and vanish when the file is re-fetched).
+ */
+export interface SuggestionEdit {
+  source: string;
+  comments: Record<string, string>;
+}
+
+function suggestionEditsKey(ref: PrRef): string {
+  return `${storageKeys.pr(ref.owner, ref.repo, ref.number)}:suggestion-edits`;
+}
+
+export async function listSuggestionEdits(ref: PrRef): Promise<Record<string, SuggestionEdit>> {
+  const key = suggestionEditsKey(ref);
+  const result = await browser.storage.local.get(key);
+  return (result[key] as Record<string, SuggestionEdit> | undefined) ?? {};
+}
+
+export async function saveSuggestionEdits(
+  ref: PrRef,
+  edits: Record<string, SuggestionEdit>,
+): Promise<void> {
+  await browser.storage.local.set({ [suggestionEditsKey(ref)]: edits });
+}
+
 /** author's accept/reject decision on submitted suggestions, keyed by GitHub comment id. */
 export type SuggestionDecision = "accepted" | "rejected";
 

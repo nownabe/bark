@@ -57,10 +57,13 @@ import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
 import {
   listDismissedSuggestions,
   listDrafts,
+  listSuggestionEdits,
   saveDismissedSuggestions,
   saveDrafts,
+  saveSuggestionEdits,
   type PendingDraft,
   type SuggestionDecision,
+  type SuggestionEdit,
 } from "../../lib/drafts";
 import { clearToken, getToken, setToken as persistToken } from "../../lib/storage";
 import { pollForToken, requestDeviceAuthorization, type DeviceAuthorization } from "../../lib/auth";
@@ -159,6 +162,13 @@ export function App() {
   // The pending-suggestion ids seen on the previous render, so a newly created
   // suggestion can be scrolled into view in the review list (see effect below).
   const seenSuggestionCids = useRef<Set<string>>(new Set());
+  // Per-path suggestion edits awaiting a debounced write to storage (so pending
+  // suggestions survive a reload). Accumulated by path — not a single value — so
+  // switching files mid-debounce can never drop another file's pending write.
+  // `null` means "clear this path". Flushed via read-modify-write to avoid
+  // clobbering paths edited in other ways.
+  const pendingEditWrites = useRef<Record<string, SuggestionEdit | null>>({});
+  const editSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Set before a programmatic "jump to item" selection so the resulting
   // selection update does not pop the new-comment composer (we are highlighting
   // an existing item, not starting a new comment).
@@ -378,9 +388,14 @@ export function App() {
     (async () => {
       try {
         const text = await client.getFileContent(ref, selectedPath, headSha);
+        // Restore any persisted suggestion edit for this file so pending
+        // suggestions survive a reload (read fresh to avoid a load/mount race).
+        const edits = await listSuggestionEdits(ref);
         if (!cancelled) {
-          setSource(text);
+          const edit = role === "reviewer" ? edits[selectedPath] : undefined;
           setBaseSource(text);
+          setSource(edit?.source ?? text);
+          setSuggestionComments(edit?.comments ?? {});
         }
       } catch (e) {
         if (!cancelled) setError(errMessage(e));
@@ -390,6 +405,9 @@ export function App() {
     })();
     return () => {
       cancelled = true;
+      // Persist any pending edit before switching files / unmounting, so a quick
+      // reload right after an edit still restores the pending suggestion.
+      void flushSuggestionEdits();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, headSha, selectedPath, ref?.owner, ref?.repo, ref?.number]);
@@ -725,6 +743,8 @@ export function App() {
       await saveDrafts(ref, []);
       setSource(baseSource); // live suggestion edits are now submitted
       setSuggestionComments({});
+      pendingEditWrites.current[curPath] = null; // submitted → drop the persisted edit
+      await flushSuggestionEdits();
       const [reviews, issues] = await Promise.all([
         client.listReviewComments(ref),
         client.listIssueComments(ref),
@@ -760,6 +780,8 @@ export function App() {
       const newText = await client.getFileContent(ref, selectedPath, sha);
       setSource(newText);
       setBaseSource(newText);
+      pendingEditWrites.current[selectedPath] = null; // committed → drop the persisted edit
+      await flushSuggestionEdits();
       const [reviews, issues] = await Promise.all([
         client.listReviewComments(ref),
         client.listIssueComments(ref),
@@ -799,13 +821,55 @@ export function App() {
     setAnchor(null);
   };
 
+  // Read-modify-write the accumulated per-path edits to storage, so a path edited
+  // elsewhere (or another tab) is never clobbered. Clears the pending buffer.
+  const flushSuggestionEdits = async () => {
+    if (!ref) return;
+    const writes = pendingEditWrites.current;
+    pendingEditWrites.current = {};
+    if (editSaveTimer.current) {
+      clearTimeout(editSaveTimer.current);
+      editSaveTimer.current = null;
+    }
+    if (Object.keys(writes).length === 0) return;
+    const stored = await listSuggestionEdits(ref);
+    for (const [p, edit] of Object.entries(writes)) {
+      if (edit) stored[p] = edit;
+      else delete stored[p];
+    }
+    await saveSuggestionEdits(ref, stored);
+  };
+
+  // Persist (debounced) the reviewer's edit for `path`: the edited document and
+  // its attached comments, so pending suggestions survive a reload. A document
+  // matching the base means no edits remain → clear the path.
+  const persistSuggestionEdit = (
+    path: string,
+    src: string,
+    base: string,
+    comments: Record<string, string>,
+  ) => {
+    if (!ref || role !== "reviewer") return;
+    pendingEditWrites.current[path] = src !== base ? { source: src, comments } : null;
+    if (editSaveTimer.current) clearTimeout(editSaveTimer.current);
+    editSaveTimer.current = setTimeout(() => void flushSuggestionEdits(), 400);
+  };
+
+  const onSourceChange = (v: string) => {
+    setSource(v);
+    persistSuggestionEdit(curPath, v, baseSource, suggestionComments);
+  };
+
   const discardEdits = () => {
     setSource(baseSource);
     setSuggestionComments({});
+    persistSuggestionEdit(curPath, baseSource, baseSource, {});
   };
 
   const setSuggestionComment = (cid: string, value: string) => {
-    setSuggestionComments((prev) => ({ ...prev, [cid]: value }));
+    const next = { ...suggestionComments, [cid]: value };
+    setSuggestionComments(next);
+    persistSuggestionEdit(curPath, source, baseSource, next);
   };
 
   // Side item click → scroll to the target in the body and highlight the selection.
@@ -1422,7 +1486,7 @@ export function App() {
                 highlightActiveLine: false,
                 highlightActiveLineGutter: false,
               }}
-              onChange={(v) => setSource(v)}
+              onChange={onSourceChange}
               onUpdate={(vu) => {
                 if (suppressNextAnchor.current) return;
                 handleSelectionUpdate(vu, setAnchor);
