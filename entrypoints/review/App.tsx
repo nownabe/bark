@@ -1314,8 +1314,8 @@ export function App() {
                 Add button).
               </li>
             </ul>
-            <div className="popover__footer">
-              {token ? (
+            {token ? (
+              <div className="popover__footer">
                 <button
                   type="button"
                   className="btn btn--sm btn--danger"
@@ -1326,13 +1326,8 @@ export function App() {
                 >
                   Delete token
                 </button>
-              ) : (
-                <span />
-              )}
-              <button type="button" className="btn btn--sm" onClick={() => setShowHelp(false)}>
-                Close
-              </button>
-            </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </header>
