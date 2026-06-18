@@ -106,7 +106,7 @@ export function buildAllPendingSuggestions(
     });
 }
 
-export type ReviewFilter = "all" | "pending" | "submitted";
+export type ReviewFacet = "pending" | "submitted" | "resolved";
 
 export type ReviewEntry =
   | { kind: "thread"; sortPath: string; sortPos: number; thread: ReviewThread }
@@ -258,11 +258,17 @@ export function buildReviewEntries(args: {
   return entries;
 }
 
-export function filterReviewEntries(entries: ReviewEntry[], filter: ReviewFilter): ReviewEntry[] {
-  if (filter === "all") return entries;
+export function filterReviewEntries(
+  entries: ReviewEntry[],
+  facets: Set<ReviewFacet>,
+): ReviewEntry[] {
   return entries.filter((e) => {
-    if (e.kind === "liveSuggestion") return filter === "pending";
-    return filter === "pending" ? e.thread.hasPending : e.thread.hasSubmitted;
+    if (e.kind === "liveSuggestion") return facets.has("pending");
+    const t = e.thread;
+    if (facets.has("resolved") && t.resolved) return true;
+    if (facets.has("pending") && t.hasPending && !t.resolved) return true;
+    if (facets.has("submitted") && t.hasSubmitted && !t.resolved) return true;
+    return false;
   });
 }
 
@@ -376,17 +382,14 @@ export function buildSuggestionMarks(args: {
 }
 
 /**
- * Counts for the all / pending / submitted filter tabs, derived from the
+ * Counts for the pending / submitted / resolved filter facets, derived from the
  * (already current-file-scoped) entries so the tab numbers match the list.
  */
 export function reviewEntryCounts(entries: ReviewEntry[]): {
-  all: number;
   pending: number;
   submitted: number;
+  resolved: number;
 } {
-  return {
-    all: entries.length,
-    pending: filterReviewEntries(entries, "pending").length,
-    submitted: filterReviewEntries(entries, "submitted").length,
-  };
+  const count = (f: ReviewFacet) => filterReviewEntries(entries, new Set([f])).length;
+  return { pending: count("pending"), submitted: count("submitted"), resolved: count("resolved") };
 }

@@ -207,19 +207,20 @@ describe("buildReviewEntries / filter", () => {
   });
 
   test("'pending' shows threads with pending content + live suggestions", () => {
-    const pending = filterReviewEntries(entries, "pending");
-    // t1 (has pending reply), new (pending), live → 3
-    expect(pending).toHaveLength(3);
+    const pending = filterReviewEntries(entries, new Set(["pending"] as const));
+    expect(pending).toHaveLength(3); // t1 (pending reply) + new (pending) + live
   });
 
   test("'submitted' shows only threads that have submitted comments", () => {
-    const submitted = filterReviewEntries(entries, "submitted");
+    const submitted = filterReviewEntries(entries, new Set(["submitted"] as const));
     expect(submitted).toHaveLength(1);
     expect(submitted[0].kind === "thread" && submitted[0].thread.id).toBe("t1");
   });
 
-  test("'all' shows everything", () => {
-    expect(filterReviewEntries(entries, "all")).toHaveLength(3);
+  test("pending+submitted is the union of the two facets", () => {
+    expect(filterReviewEntries(entries, new Set(["pending", "submitted"] as const))).toHaveLength(
+      3,
+    );
   });
 
   test("excludes items anchored to other files", () => {
@@ -246,7 +247,7 @@ describe("buildReviewEntries / filter", () => {
 });
 
 describe("reviewEntryCounts", () => {
-  test("all/pending/submitted derive from the current-file entries", () => {
+  test("pending/submitted/resolved derive from the current-file entries", () => {
     const comments = [comment({ id: 1, meta: meta(5, "a.md", "t1") })];
     const drafts = [draft({ cid: "d1", thread: "t1", range: { sl: 5, sc: 1, el: 5, ec: 5 } })];
     const threads = buildThreads(comments, drafts, "a.md");
@@ -256,9 +257,21 @@ describe("reviewEntryCounts", () => {
       currentPath: "a.md",
     });
     const counts = reviewEntryCounts(entries);
-    expect(counts.all).toBe(2); // thread t1 + live suggestion
-    expect(counts.pending).toBe(2); // t1 has a pending reply + live suggestion
+    expect(counts.pending).toBe(2); // t1 pending reply + live suggestion
     expect(counts.submitted).toBe(1); // t1 has a submitted comment
+    expect(counts.resolved).toBe(0);
+  });
+
+  test("resolved threads count under resolved and drop out of pending/submitted", () => {
+    const comments = [
+      comment({ id: 1, meta: meta(5, "a.md", "t1") }),
+      comment({ id: 2, meta: { ...meta(5, "a.md", "t1"), cid: "e2", event: "resolve" } }),
+    ];
+    const threads = buildThreads(comments, [], "a.md");
+    const entries = buildReviewEntries({ threads, pendingSuggestions: [], currentPath: "a.md" });
+    const counts = reviewEntryCounts(entries);
+    expect(counts.submitted).toBe(0);
+    expect(counts.resolved).toBe(1);
   });
 });
 
