@@ -28,7 +28,7 @@ export function SelectionComposer({ anchor, value, onChange, onAdd, onDiscard }:
           }
         }}
         rows={3}
-        placeholder="Comment on the selected range (⌘/Ctrl+Enter to add)"
+        placeholder="Comment on the selected range"
         autoFocus
       />
       <div className="composer__row">

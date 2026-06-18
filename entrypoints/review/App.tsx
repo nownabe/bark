@@ -1079,7 +1079,7 @@ export function App() {
                 }
               }}
               rows={2}
-              placeholder="Reply (⌘/Ctrl+Enter to add)"
+              placeholder="Reply"
               autoFocus
             />
             <div className="composer__row">
@@ -1221,6 +1221,10 @@ export function App() {
               <li>
                 Click a side item to jump to and highlight its place in the body. You can reply
                 within a thread.
+              </li>
+              <li>
+                Press <strong>⌘/Ctrl+Enter</strong> in a comment or reply box to add it (same as the
+                Add button).
               </li>
             </ul>
             <div className="popover__footer">
