@@ -289,6 +289,16 @@ export function filterReviewEntries(
   });
 }
 
+/**
+ * After "Submit review", the just-submitted drafts become submitted comments.
+ * If the list was filtered to "Pending" only, it would now look empty, so make
+ * sure "submitted" is on — while preserving the user's other facet choices
+ * (notably their "resolved" preference, which must not be forced on).
+ */
+export function revealSubmittedFacets(prev: Set<ReviewFacet>): Set<ReviewFacet> {
+  return new Set<ReviewFacet>([...prev, "submitted"]);
+}
+
 export function buildPendingItems(
   drafts: PendingDraft[],
   pendingSuggestions: PendingSuggestion[],

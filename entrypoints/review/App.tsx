@@ -41,6 +41,7 @@ import {
   buildThreads,
   composerInsertIndex,
   filterReviewEntries,
+  revealSubmittedFacets,
   reviewEntryCounts,
   sortPos,
   threadRangeAt,
@@ -1025,8 +1026,9 @@ export function App() {
       ]);
       setComments(normalizeComments(reviews, issues));
       // The pending items just became submitted; if the list was filtered to
-      // "Pending" it would now look empty, so reveal everything.
-      setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"]));
+      // "Pending" it would now look empty, so make sure "submitted" is on —
+      // without forcing the user's "resolved" preference on.
+      setReviewFilter(revealSubmittedFacets);
       setEmphasizedThreadId(null);
     } catch (e) {
       setError(errMessage(e));
