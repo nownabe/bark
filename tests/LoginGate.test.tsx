@@ -88,7 +88,7 @@ describe("LoginGate", () => {
     fireEvent.change(input, { target: { value: "  ghp_good  " } });
     fireEvent.click(container.querySelector<HTMLButtonElement>("[data-test='pat-save']")!);
     await waitFor(() => expect(got).not.toBeNull());
-    expect(got).toEqual(["ghp_good", "pat"]);
+    expect(got!).toEqual(["ghp_good", "pat"]);
   });
 
   test("choosing the app method then going back returns to the choose screen", () => {
