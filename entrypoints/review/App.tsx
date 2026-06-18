@@ -144,6 +144,11 @@ export function App() {
   const [anchor, setAnchor] = useState<SourceAnchor | null>(null);
   const [commentBody, setCommentBody] = useState("");
   const [comments, setComments] = useState<ExistingComment[]>([]);
+  // Source of each commented file as of its createdAtSha, keyed `${sha}:${path}`,
+  // so re-anchoring can diff against the exact revision a comment was made on
+  // (lib/reanchor diff path). Populated lazily; a missing entry just means
+  // re-anchoring falls back to quote search.
+  const [oldSources, setOldSources] = useState<Record<string, string>>({});
   const [drafts, setDrafts] = useState<PendingDraft[]>([]);
   const [dismissed, setDismissed] = useState<Record<string, SuggestionDecision>>({});
   const [replyTo, setReplyTo] = useState<string | null>(null);
@@ -248,6 +253,11 @@ export function App() {
   const pendingItems = buildPendingItems(drafts, allPendingSuggestions);
   const visibleEntries = filterReviewEntries(entries, reviewFilter);
 
+  // The createdAtSha source for a comment, if we've fetched it — feeds the
+  // diff-based re-anchoring path (undefined → quote-search fallback).
+  const oldSourceFor = (meta: CommentMetadata): string | undefined =>
+    meta.sha ? oldSources[`${meta.sha}:${meta.path}`] : undefined;
+
   // Highlighted span of each thread on the current file, so clicking commented
   // text in the body can map back to its thread.
   const threadRanges = useMemo<ThreadRange[]>(() => {
@@ -258,7 +268,13 @@ export function App() {
       let from: number;
       let to: number;
       if (t.rootComment?.meta) {
-        const r = reanchorComment(source, lineStarts, t.rootComment.meta, headSha ?? "");
+        const r = reanchorComment(
+          source,
+          lineStarts,
+          t.rootComment.meta,
+          headSha ?? "",
+          oldSourceFor(t.rootComment.meta),
+        );
         if (r.status === "outdated") continue;
         from = r.startOffset;
         to = r.endOffset;
@@ -271,7 +287,7 @@ export function App() {
       if (from >= 0 && to <= docLen && from < to) res.push({ id: t.id, from, to });
     }
     return res;
-  }, [threads, source, lineStarts, headSha, curPath]);
+  }, [threads, source, lineStarts, headSha, curPath, oldSources]);
 
   // The current-doc char span of each pending suggestion's edited text, so a
   // click on the suggested text in the editor maps back to its review item. The
@@ -461,6 +477,42 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, ref?.owner, ref?.repo, ref?.number]);
 
+  // Fetch each commented file as of its createdAtSha so re-anchoring can diff
+  // against the exact revision the comment was made on (Design Doc §7.8). Only
+  // missing `${sha}:${path}` keys are fetched (cached across renders), and a
+  // failed fetch is skipped so that comment falls back to quote search.
+  useEffect(() => {
+    if (!client || !ref || !headSha) return;
+    const needed = new Map<string, { path: string; sha: string }>();
+    for (const c of comments) {
+      const m = c.meta;
+      if (!m?.sha || !m.path || m.sha === headSha) continue;
+      const key = `${m.sha}:${m.path}`;
+      if (!(key in oldSources)) needed.set(key, { path: m.path, sha: m.sha });
+    }
+    if (needed.size === 0) return;
+    let cancelled = false;
+    (async () => {
+      const fetched: Record<string, string> = {};
+      await Promise.all(
+        [...needed].map(async ([key, { path, sha }]) => {
+          try {
+            fetched[key] = await client.getFileContent(ref, path, sha);
+          } catch {
+            /* leave unset → re-anchoring falls back to quote search */
+          }
+        }),
+      );
+      if (!cancelled && Object.keys(fetched).length > 0) {
+        setOldSources((prev) => ({ ...prev, ...fetched }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comments, client, headSha, ref?.owner, ref?.repo, ref?.number]);
+
   useEffect(() => {
     if (ref) listDrafts(ref).then(setDrafts);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -496,7 +548,15 @@ export function App() {
       // Suggestions render via their own strikethrough/insert view, not the plain
       // comment highlight — don't double up.
       .filter((c) => c.meta && c.meta.path === curPath && c.meta.kind !== "suggestion")
-      .map((c) => reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? ""))
+      .map((c) =>
+        reanchorComment(
+          source,
+          lineStarts,
+          c.meta as CommentMetadata,
+          headSha ?? "",
+          oldSourceFor(c.meta as CommentMetadata),
+        ),
+      )
       .filter((r) => r.status !== "outdated")
       .map((r) => ({ from: r.startOffset, to: r.endOffset }))
       .filter(clip);
@@ -509,7 +569,7 @@ export function App() {
       }))
       .filter(clip);
     view.dispatch({ effects: setCommentHighlights.of([...existing, ...pending]) });
-  }, [comments, drafts, source, lineStarts, headSha, selectedPath]);
+  }, [comments, drafts, source, lineStarts, headSha, selectedPath, oldSources]);
 
   // Render submitted suggestions in the body as tracked changes (old = strikethrough / new = green block).
   useEffect(() => {
@@ -522,9 +582,10 @@ export function App() {
       headSha: headSha ?? "",
       currentPath: curPath,
       dismissed,
+      oldSources,
     });
     view.dispatch({ effects: setSuggestionMarks.of(marks) });
-  }, [comments, source, lineStarts, headSha, selectedPath, dismissed]);
+  }, [comments, source, lineStarts, headSha, selectedPath, dismissed, oldSources]);
 
   // Scroll the emphasized item (e.g. after clicking its highlighted text in the
   // body) into view in the sidebar. The id is a thread id or a live-suggestion
@@ -558,7 +619,7 @@ export function App() {
       setSelectedPath(c.meta.path);
       return;
     }
-    const r = reanchorComment(source, lineStarts, c.meta, headSha ?? "");
+    const r = reanchorComment(source, lineStarts, c.meta, headSha ?? "", oldSourceFor(c.meta));
     if (r.status === "outdated") return;
     suppressNextAnchor.current = true;
     view.dispatch({
@@ -682,7 +743,7 @@ export function App() {
   const acceptSuggestion = async (c: ExistingComment) => {
     if (!c.meta) return;
     const replacement = extractSuggestionBlock(c.body) ?? "";
-    const r = reanchorComment(source, lineStarts, c.meta, headSha ?? "");
+    const r = reanchorComment(source, lineStarts, c.meta, headSha ?? "", oldSourceFor(c.meta));
     if (r.status === "outdated") return; // can't locate the target text anymore
     setSource(source.slice(0, r.startOffset) + replacement + source.slice(r.endOffset));
     await setDecision(c.id, "accepted");
@@ -1155,7 +1216,7 @@ export function App() {
 
   const statusFor = (c: ExistingComment): AnchorStatus | null => {
     if (!c.meta || c.meta.path !== (selectedPath ?? "sample")) return null;
-    return reanchorComment(source, lineStarts, c.meta, headSha ?? "").status;
+    return reanchorComment(source, lineStarts, c.meta, headSha ?? "", oldSourceFor(c.meta)).status;
   };
 
   // ---- unified review-list item renderers ----

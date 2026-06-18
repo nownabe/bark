@@ -338,14 +338,17 @@ export function buildSuggestionMarks(args: {
   headSha: string;
   currentPath: string;
   dismissed: Record<string, unknown>;
+  /** createdAtSha source per `${sha}:${path}`, for diff-based re-anchoring. */
+  oldSources?: Record<string, string>;
 }): SuggestionRender[] {
-  const { comments, source, lineStarts, headSha, currentPath, dismissed } = args;
+  const { comments, source, lineStarts, headSha, currentPath, dismissed, oldSources } = args;
   const docLen = source.length;
   return comments
     .filter((c) => c.meta?.kind === "suggestion" && c.meta.path === currentPath && !dismissed[c.id])
     .map((c) => {
       const meta = c.meta as CommentMetadata;
-      const r = reanchorComment(source, lineStarts, meta, headSha);
+      const oldSource = meta.sha ? oldSources?.[`${meta.sha}:${meta.path}`] : undefined;
+      const r = reanchorComment(source, lineStarts, meta, headSha, oldSource);
       const from = r.startOffset;
       const to = r.startOffset + (meta.quote?.length ?? 0);
       return { from, to, status: r.status, replacement: extractSuggestionBlock(c.body) ?? "" };
