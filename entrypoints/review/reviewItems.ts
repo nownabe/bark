@@ -11,9 +11,10 @@
 //
 // Everything here is pure so it can be unit-tested without React/CodeMirror.
 import type { ExistingComment } from "../../lib/comments";
-import type { PendingDraft } from "../../lib/drafts";
+import type { PendingDraft, SuggestionEdit } from "../../lib/drafts";
 import type { AnchorRange, CommentMetadata } from "../../lib/metadata";
-import { extractSuggestionBlock, type SuggestionHunk } from "../../lib/suggest";
+import { diffToSuggestions, extractSuggestionBlock, type SuggestionHunk } from "../../lib/suggest";
+import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
 import { reanchorComment } from "../../lib/reanchor";
 
 /** One message in a thread: either already submitted, or a pending local draft. */
@@ -76,6 +77,32 @@ export function buildPendingSuggestions(
       body: opts.commentFor(cid),
     };
   });
+}
+
+/**
+ * Reconstruct pending suggestions for *every* edited file from the persisted
+ * edits map (each entry's base → edited diff), so Submit review spans all files
+ * the way pending comments do — not just the file currently open. `patchOf`
+ * supplies a file's diff patch to classify in-diff vs out-of-diff. Files with no
+ * net change are skipped.
+ */
+export function buildAllPendingSuggestions(
+  edits: Record<string, SuggestionEdit>,
+  patchOf: (path: string) => string | undefined,
+): PendingSuggestion[] {
+  const out: PendingSuggestion[] = [];
+  for (const [path, edit] of Object.entries(edits)) {
+    if (!edit.base || edit.source === edit.base) continue;
+    const ranges = parseRightRanges(patchOf(path));
+    out.push(
+      ...buildPendingSuggestions(diffToSuggestions(edit.base, edit.source), {
+        path,
+        isInDiff: (sl, el) => isRangeInDiff(ranges, sl, el),
+        commentFor: (cid) => edit.comments[cid] ?? "",
+      }),
+    );
+  }
+  return out;
 }
 
 export type ReviewFilter = "all" | "pending" | "submitted";

@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildThreads,
   buildReviewEntries,
+  buildAllPendingSuggestions,
   buildPendingItems,
   groupPendingByFile,
   buildPendingSuggestions,
@@ -336,5 +337,36 @@ describe("buildPendingSuggestions", () => {
     expect(out[1].inDiff).toBe(false);
     expect(out[0].replacement).toBe("new3");
     expect(out[1].range).toEqual({ sl: 7, sc: 1, el: 8, ec: 1 });
+  });
+});
+
+describe("buildAllPendingSuggestions", () => {
+  test("reconstructs suggestions for every edited file (Submit spans all files)", () => {
+    const edits = {
+      "a.md": { base: "alpha\n", source: "ALPHA\n", comments: { "live:1:1": "why" } },
+      "b.md": { base: "one\ntwo\n", source: "one\nTWO\n", comments: {} },
+    };
+    const out = buildAllPendingSuggestions(edits, () => undefined);
+    expect(out.map((s) => s.path).sort()).toEqual(["a.md", "b.md"]);
+    const a = out.find((s) => s.path === "a.md")!;
+    expect(a.quote).toBe("alpha");
+    expect(a.replacement).toBe("ALPHA");
+    expect(a.body).toBe("why");
+  });
+
+  test("skips files with no net change or no base", () => {
+    const edits = {
+      "unchanged.md": { base: "same\n", source: "same\n", comments: {} },
+      "nobase.md": { base: "", source: "edited\n", comments: {} },
+    };
+    expect(buildAllPendingSuggestions(edits, () => undefined)).toEqual([]);
+  });
+
+  test("classifies in-diff vs out-of-diff from the file's patch", () => {
+    const edits = { "a.md": { base: "x\n", source: "Y\n", comments: {} } };
+    // a patch that marks line 1 on the right side as added → in-diff
+    const patch = "@@ -1 +1 @@\n-x\n+Y";
+    expect(buildAllPendingSuggestions(edits, () => patch)[0].inDiff).toBe(true);
+    expect(buildAllPendingSuggestions(edits, () => undefined)[0].inDiff).toBe(false);
   });
 });

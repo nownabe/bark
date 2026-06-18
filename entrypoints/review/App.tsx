@@ -18,6 +18,7 @@ import { SuggestionDiff } from "./components/SuggestionDiff";
 import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import {
+  buildAllPendingSuggestions,
   buildPendingItems,
   buildPendingSuggestions,
   buildReviewEntries,
@@ -207,6 +208,19 @@ export function App() {
   }, [viewMode, role]);
 
   const curPath = selectedPath ?? "sample";
+  // Always-current mirrors of the values `persistSuggestionEdit` needs. The
+  // editor's onChange/onUpdate callbacks can be captured with a stale closure, so
+  // reading these from refs (whose .current is updated every render) guarantees a
+  // keystroke is attributed to the right file/base and accumulated onto the
+  // latest edits map — without this, edits on other files are silently dropped.
+  const curPathRef = useRef(curPath);
+  curPathRef.current = curPath;
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
+  const baseSourceRef = useRef(baseSource);
+  baseSourceRef.current = baseSource;
+  const suggestionCommentsRef = useRef(suggestionComments);
+  suggestionCommentsRef.current = suggestionComments;
 
   // The reviewer's live editor edits are surfaced as pending suggestions the
   // moment they are made; each carries its own attached comment.
@@ -224,19 +238,9 @@ export function App() {
   // `pendingSuggestions` above, so it is excluded here to avoid duplication.
   const crossFileSuggestions = useMemo<PendingSuggestion[]>(() => {
     if (role !== "reviewer") return [];
-    const out: PendingSuggestion[] = [];
-    for (const [path, edit] of Object.entries(suggestionEdits)) {
-      if (path === curPath || !edit.base || edit.source === edit.base) continue;
-      const dRanges = parseRightRanges(files.find((f) => f.path === path)?.patch);
-      out.push(
-        ...buildPendingSuggestions(diffToSuggestions(edit.base, edit.source), {
-          path,
-          isInDiff: (sl, el) => isRangeInDiff(dRanges, sl, el),
-          commentFor: (cid) => edit.comments[cid] ?? "",
-        }),
-      );
-    }
-    return out;
+    const others = { ...suggestionEdits };
+    delete others[curPath];
+    return buildAllPendingSuggestions(others, (p) => files.find((f) => f.path === p)?.patch);
   }, [role, suggestionEdits, curPath, files]);
 
   // Every pending suggestion across all files — Submit review's scope (the
@@ -881,7 +885,9 @@ export function App() {
     comments: Record<string, string>,
   ) => {
     if (!ref || role !== "reviewer") return;
-    const next = { ...suggestionEdits };
+    // Build on the latest map from the ref (not a possibly-stale closure), so an
+    // edit on one file never overwrites or drops another file's pending edit.
+    const next = { ...suggestionEditsRef.current };
     if (src !== base) next[path] = { base, source: src, comments };
     else delete next[path];
     setSuggestionEdits(next);
@@ -890,7 +896,13 @@ export function App() {
 
   const onSourceChange = (v: string) => {
     setSource(v);
-    persistSuggestionEdit(curPath, v, baseSource, suggestionComments);
+    // Read file/base/comments from refs: this callback may be a stale closure.
+    persistSuggestionEdit(
+      curPathRef.current,
+      v,
+      baseSourceRef.current,
+      suggestionCommentsRef.current,
+    );
   };
 
   const discardEdits = () => {
@@ -900,9 +912,9 @@ export function App() {
   };
 
   const setSuggestionComment = (cid: string, value: string) => {
-    const next = { ...suggestionComments, [cid]: value };
+    const next = { ...suggestionCommentsRef.current, [cid]: value };
     setSuggestionComments(next);
-    persistSuggestionEdit(curPath, source, baseSource, next);
+    persistSuggestionEdit(curPathRef.current, sourceRef.current, baseSourceRef.current, next);
   };
 
   // Side item click → scroll to the target in the body and highlight the selection.
