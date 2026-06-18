@@ -25,7 +25,13 @@ let seq = 0;
 function loadMermaid(): Promise<MermaidModule> {
   if (!mermaidPromise) {
     mermaidPromise = import("mermaid").then((m) => {
-      m.default.initialize({ startOnLoad: false, securityLevel: "strict" });
+      m.default.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        // Don't let mermaid inject its "Syntax error in text" diagram into the
+        // DOM on failure — those error graphics otherwise pile up in <body>.
+        suppressErrorRendering: true,
+      });
       return m.default;
     });
   }
@@ -35,11 +41,15 @@ function loadMermaid(): Promise<MermaidModule> {
 /**
  * Render mermaid `code` into `container`, replacing its content with the SVG.
  * On a parse/render error, show the message instead of throwing (a bad diagram
- * shouldn't break the surrounding preview).
+ * shouldn't break the surrounding preview). `parse` is checked first so invalid
+ * input never reaches `render` (which would otherwise leak an error element).
  */
 export async function renderMermaid(container: HTMLElement, code: string): Promise<void> {
   try {
     const mermaid = await loadMermaid();
+    if ((await mermaid.parse(code, { suppressErrors: true })) === false) {
+      throw new Error("invalid diagram syntax");
+    }
     const { svg } = await mermaid.render(`dr-mermaid-${seq++}`, code);
     container.innerHTML = svg;
     container.classList.remove("dr-mermaid--error");
