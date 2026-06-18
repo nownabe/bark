@@ -2,16 +2,29 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
 
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { render, fireEvent, waitFor } from "@testing-library/react";
+import { LoginGate } from "../entrypoints/review/components/LoginGate";
 
-// Mock PAT validation; resolves or rejects per-test via validateImpl.
-let validateImpl: (token: string) => Promise<{ login: string; avatarUrl: string }>;
-mock.module("../lib/pat", () => ({
-  validatePat: (token: string) => validateImpl(token),
-}));
+// Validate the real lib/pat by stubbing global fetch. We deliberately do NOT
+// mock.module("../lib/pat") — bun's module mock is process-global and would
+// strip PatError from the module for pat.test.ts running in the same process.
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
 
-const { LoginGate } = await import("../entrypoints/review/components/LoginGate");
+function stubFetch(impl: () => Promise<Response> | Response) {
+  globalThis.fetch = mock(impl) as unknown as typeof fetch;
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    json: async () => body,
+  } as unknown as Response;
+}
 
 function baseProps() {
   return {
@@ -43,7 +56,7 @@ describe("LoginGate", () => {
   });
 
   test("an invalid token surfaces the error and keeps the entered value", async () => {
-    validateImpl = () => Promise.reject(new Error("Token is invalid or expired."));
+    stubFetch(() => jsonResponse(401, {}));
     const { container } = render(<LoginGate {...baseProps()} />);
     fireEvent.click(container.querySelector<HTMLButtonElement>("[data-test='choose-pat']")!);
     const input = container.querySelector<HTMLInputElement>("input[type='password']")!;
@@ -58,7 +71,7 @@ describe("LoginGate", () => {
   });
 
   test("a valid token calls onAuthenticated with the token and 'pat'", async () => {
-    validateImpl = () => Promise.resolve({ login: "octocat", avatarUrl: "" });
+    stubFetch(() => jsonResponse(200, { login: "octocat", avatar_url: "" }));
     let got: [string, string] | null = null;
     const props = {
       ...baseProps(),
