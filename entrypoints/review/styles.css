@@ -645,28 +645,46 @@ select.input:focus {
   padding: 10px 12px;
 }
 
-/* suggestion in comment card (old -> new) */
-.sugg-old {
-  font-size: 12px;
-  font-family: var(--font-mono);
-  white-space: pre-wrap;
-  text-decoration: line-through;
-  color: #86181d;
-  background: rgba(207, 34, 46, 0.08);
-  border-radius: 6px;
-  padding: 5px 9px;
-  margin-top: 6px;
-}
+/* suggestion in comment card (old -> new). The full line is shown in a calm
+   neutral tone; only the changed substring (.sugg-chg) is emphasized so the
+   surrounding context stays readable (char-level, like a comment anchor). */
+.sugg-old,
 .sugg-new {
   font-size: 12px;
   font-family: var(--font-mono);
   white-space: pre-wrap;
-  color: var(--brand-strong);
-  background: rgba(31, 136, 61, 0.1);
-  border-left: 3px solid rgba(31, 136, 61, 0.7);
+  word-break: break-word;
   border-radius: 6px;
   padding: 5px 9px;
+  color: var(--fg-soft);
+}
+.sugg-old {
+  background: rgba(207, 34, 46, 0.05);
+  margin-top: 6px;
+}
+.sugg-new {
+  background: rgba(31, 136, 61, 0.06);
+  border-left: 3px solid rgba(31, 136, 61, 0.5);
   margin-top: 4px;
+}
+.sugg-eq {
+  color: var(--muted);
+}
+.sugg-old .sugg-chg {
+  text-decoration: line-through;
+  text-decoration-color: rgba(207, 34, 46, 0.85);
+  color: #86181d;
+  background: rgba(207, 34, 46, 0.16);
+  border-radius: 3px;
+}
+.sugg-new .sugg-chg {
+  color: var(--brand-strong);
+  background: rgba(31, 136, 61, 0.16);
+  border-radius: 3px;
+}
+.sugg-note {
+  color: var(--muted);
+  font-style: italic;
 }
 
 /* ---- composer ---- */

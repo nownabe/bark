@@ -14,6 +14,7 @@ import { richMarkdown, richMarkdownTheme } from "./richMarkdown";
 import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from "./suggestMode";
 import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from "./suggestionView";
 import { SelectionComposer } from "./components/SelectionComposer";
+import { SuggestionDiff } from "./components/SuggestionDiff";
 import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import {
@@ -1018,9 +1019,6 @@ export function App() {
   // ---- unified review-list item renderers ----
   // Items never show a review/issue or suggestion tag, nor the filename; a
   // comment item is a body, a suggestion item is an old→new diff.
-  const lineRange = (r: { sl: number; el: number }) =>
-    `L${r.sl}${r.el !== r.sl ? `–L${r.el}` : ""}`;
-
   const jumpToThread = (t: ReviewThread) => {
     if (t.rootComment?.meta) jumpTo(t.rootComment);
     else if (t.rootDraft) jumpToDraft(t.rootDraft);
@@ -1052,10 +1050,8 @@ export function App() {
       >
         <div className="comment__meta">
           <span className="badge badge--pending">pending</span>
-          <span>{lineRange(s.range)}</span>
         </div>
-        <div className="sugg-old">{s.quote}</div>
-        <div className="sugg-new">{s.replacement || "(delete)"}</div>
+        <SuggestionDiff before={s.quote} after={s.replacement} />
         {emphasized ? (
           <div onClick={(e) => e.stopPropagation()}>
             <textarea
@@ -1100,8 +1096,10 @@ export function App() {
           {stripSuggestionBlock(c.body) ? (
             <div className="comment__body">{stripSuggestionBlock(c.body)}</div>
           ) : null}
-          <div className="sugg-old">{c.meta.quote}</div>
-          <div className="sugg-new">{extractSuggestionBlock(c.body) || "(delete)"}</div>
+          <SuggestionDiff
+            before={c.meta.quote ?? ""}
+            after={extractSuggestionBlock(c.body) ?? ""}
+          />
         </>
       ) : (
         <div className="comment__body">{c.body || "(no body)"}</div>
@@ -1128,10 +1126,7 @@ export function App() {
         </button>
       </div>
       {d.kind === "suggestion" ? (
-        <>
-          <div className="sugg-old">{d.quote}</div>
-          <div className="sugg-new">{d.suggestion || "(delete)"}</div>
-        </>
+        <SuggestionDiff before={d.quote} after={d.suggestion ?? ""} />
       ) : (
         <div className="comment__body">{d.body || "(no body)"}</div>
       )}

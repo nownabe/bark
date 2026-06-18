@@ -55,6 +55,17 @@ describe("SubmitConfirmModal", () => {
     expect(text).toContain("2");
   });
 
+  test("renders suggestions char-level (full text shown, change emphasized)", () => {
+    const { container } = render(
+      <SubmitConfirmModal items={pendingEntries()} onConfirm={() => {}} onCancel={() => {}} />,
+    );
+    // both old and new text are shown in full...
+    expect(container.querySelector(".sugg-old")?.textContent).toBe("teh");
+    expect(container.querySelector(".sugg-new")?.textContent).toBe("the");
+    // ...with only the changed substring emphasized (char-level)
+    expect(container.querySelector(".sugg-chg")).not.toBeNull();
+  });
+
   test("groups items by file with a filename heading (submit spans all files)", () => {
     const { container } = render(
       <SubmitConfirmModal items={pendingEntries()} onConfirm={() => {}} onCancel={() => {}} />,
