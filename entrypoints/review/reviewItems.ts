@@ -225,6 +225,40 @@ export function buildPendingItems(
   ];
 }
 
+/** Counts of comments vs suggestions in a group of pending items. */
+export interface SubmitGroup {
+  comments: number;
+  suggestions: number;
+  total: number;
+}
+
+/**
+ * Summarize what "Submit review" will actually post, mirroring submitReview's
+ * routing: in-diff items go out as a single GitHub review with inline comments;
+ * out-of-diff items are posted directly as separate PR (issue) comments.
+ */
+export interface SubmitSummary {
+  total: number;
+  /** In-diff items — sent as one review with inline comments. */
+  review: SubmitGroup;
+  /** Out-of-diff items — posted directly on the PR as separate comments. */
+  direct: SubmitGroup;
+}
+
+export function summarizePending(items: PendingItem[]): SubmitSummary {
+  const empty = (): SubmitGroup => ({ comments: 0, suggestions: 0, total: 0 });
+  const summary: SubmitSummary = { total: items.length, review: empty(), direct: empty() };
+  for (const item of items) {
+    const isSuggestion = item.kind === "suggestion" ? true : item.draft.kind === "suggestion";
+    const inDiff = item.kind === "suggestion" ? item.suggestion.inDiff : item.draft.inDiff;
+    const group = inDiff ? summary.review : summary.direct;
+    group.total++;
+    if (isSuggestion) group.suggestions++;
+    else group.comments++;
+  }
+  return summary;
+}
+
 export function reviewCounts(args: {
   drafts: PendingDraft[];
   pendingSuggestions: PendingSuggestion[];

@@ -847,6 +847,20 @@ select.input:focus {
   font-size: 16px;
   letter-spacing: -0.01em;
 }
+.submit-summary {
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+.submit-summary p {
+  margin: 0 0 8px;
+}
+.submit-summary ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+.submit-summary li {
+  margin: 3px 0;
+}
 .modal__list {
   overflow: auto;
   margin: 0 -4px;

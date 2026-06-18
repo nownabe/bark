@@ -12,6 +12,7 @@ import {
   buildPendingSuggestions,
   filterReviewEntries,
   reviewCounts,
+  summarizePending,
   threadRangeAt,
   type PendingSuggestion,
   type ThreadRange,
@@ -65,6 +66,31 @@ const liveSuggestion: PendingSuggestion = {
   replacement: "new",
   body: "",
 };
+
+describe("summarizePending", () => {
+  test("empty", () => {
+    expect(summarizePending([])).toEqual({
+      total: 0,
+      review: { comments: 0, suggestions: 0, total: 0 },
+      direct: { comments: 0, suggestions: 0, total: 0 },
+    });
+  });
+
+  test("splits in-diff (review) from out-of-diff (direct), and comments from suggestions", () => {
+    const items = buildPendingItems(
+      [
+        draft({ cid: "c1", inDiff: true, kind: "comment" }),
+        draft({ cid: "c2", inDiff: true, kind: "suggestion", suggestion: "x" }),
+        draft({ cid: "c3", inDiff: false, kind: "comment" }),
+      ],
+      [liveSuggestion], // inDiff suggestion
+    );
+    const s = summarizePending(items);
+    expect(s.total).toBe(4);
+    expect(s.review).toEqual({ comments: 1, suggestions: 2, total: 3 });
+    expect(s.direct).toEqual({ comments: 1, suggestions: 0, total: 1 });
+  });
+});
 
 describe("buildThreads", () => {
   test("merges a submitted comment and a pending reply with the same thread id", () => {
