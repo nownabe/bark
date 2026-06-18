@@ -32,19 +32,27 @@ describe("suggestion-edit persistence", () => {
     expect(await listSuggestionEdits(ref)).toEqual({});
   });
 
-  test("round-trips edited source and per-suggestion comments by path", async () => {
+  test("round-trips edited source, base, and per-suggestion comments by path", async () => {
     await saveSuggestionEdits(ref, {
-      "docs/a.md": { source: "edited A", comments: { "live:2:2": "why this change" } },
-      "docs/b.md": { source: "edited B", comments: {} },
+      "docs/a.md": {
+        source: "edited A",
+        base: "base A",
+        comments: { "live:2:2": "why this change" },
+      },
+      "docs/b.md": { source: "edited B", base: "base B", comments: {} },
     });
     expect(await listSuggestionEdits(ref)).toEqual({
-      "docs/a.md": { source: "edited A", comments: { "live:2:2": "why this change" } },
-      "docs/b.md": { source: "edited B", comments: {} },
+      "docs/a.md": {
+        source: "edited A",
+        base: "base A",
+        comments: { "live:2:2": "why this change" },
+      },
+      "docs/b.md": { source: "edited B", base: "base B", comments: {} },
     });
   });
 
   test("is scoped per PR", async () => {
-    await saveSuggestionEdits(ref, { "a.md": { source: "x", comments: {} } });
+    await saveSuggestionEdits(ref, { "a.md": { source: "x", base: "x0", comments: {} } });
     expect(await listSuggestionEdits({ owner: "o", repo: "r", number: 2 })).toEqual({});
   });
 });

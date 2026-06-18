@@ -18,6 +18,7 @@ import { SuggestionDiff } from "./components/SuggestionDiff";
 import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import {
+  buildAllPendingSuggestions,
   buildPendingItems,
   buildPendingSuggestions,
   buildReviewEntries,
@@ -147,6 +148,12 @@ export function App() {
   const [replyText, setReplyText] = useState("");
   // Per-suggestion attached comment, keyed by live suggestion cid (`live:sl:el`).
   const [suggestionComments, setSuggestionComments] = useState<Record<string, string>>({});
+  // Every file's persisted suggestion edit (base→source + attached comments),
+  // keyed by path. Pending suggestions for the submit scope are recomputed from
+  // this map so they span ALL files, not just the one open in the editor — the
+  // way pending comment drafts already do. The open file's entry is kept in sync
+  // synchronously by persistSuggestionEdit.
+  const [suggestionEdits, setSuggestionEdits] = useState<Record<string, SuggestionEdit>>({});
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [emphasizedThreadId, setEmphasizedThreadId] = useState<string | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
@@ -213,6 +220,16 @@ export function App() {
     });
   }, [role, suggestionHunks, curPath, suggestionComments, diffRanges]);
 
+  // Pending suggestions across ALL files (every persisted edit), for the submit
+  // scope — the button count, the confirm modal, and submit itself span all
+  // files, unlike the per-file `pendingSuggestions` used by the sidebar.
+  const allPendingSuggestions = useMemo<PendingSuggestion[]>(() => {
+    if (role !== "reviewer") return [];
+    return buildAllPendingSuggestions(suggestionEdits, (path, sl, el) =>
+      isRangeInDiff(parseRightRanges(files.find((f) => f.path === path)?.patch), sl, el),
+    );
+  }, [role, suggestionEdits, files]);
+
   // Threads (submitted comments + pending replies merged) + live suggestions,
   // in one sorted list.
   const threads = useMemo(
@@ -225,7 +242,7 @@ export function App() {
   );
   const counts = reviewEntryCounts(entries);
   const prStatus = pull ? pullStatus(pull) : null;
-  const pendingItems = buildPendingItems(drafts, pendingSuggestions);
+  const pendingItems = buildPendingItems(drafts, allPendingSuggestions);
   const visibleEntries = filterReviewEntries(entries, reviewFilter);
 
   // Highlighted span of each thread on the current file, so clicking commented
@@ -396,6 +413,15 @@ export function App() {
           setBaseSource(text);
           setSource(edit?.source ?? text);
           setSuggestionComments(edit?.comments ?? {});
+          // Normalize this file's map entry against the freshly fetched base so it
+          // stays in sync with the editor and so legacy edits stored before `base`
+          // existed become submittable (the submit scope reads the map).
+          if (edit && edit.source !== text) {
+            setSuggestionEdits((prev) => ({
+              ...prev,
+              [selectedPath]: { source: edit.source, base: text, comments: edit.comments ?? {} },
+            }));
+          }
         }
       } catch (e) {
         if (!cancelled) setError(errMessage(e));
@@ -434,6 +460,13 @@ export function App() {
 
   useEffect(() => {
     if (ref) listDrafts(ref).then(setDrafts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref?.owner, ref?.repo, ref?.number]);
+
+  // All files' persisted suggestion edits, so the submit scope spans every file.
+  useEffect(() => {
+    if (ref) listSuggestionEdits(ref).then(setSuggestionEdits);
+    else setSuggestionEdits({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref?.owner, ref?.repo, ref?.number]);
 
@@ -665,7 +698,7 @@ export function App() {
   // Materialize the reviewer's live suggestion edits into real drafts at submit
   // time (they are kept "live" in the editor until then; task 4).
   const suggestionsToDrafts = (): PendingDraft[] =>
-    pendingSuggestions.map((s) => {
+    allPendingSuggestions.map((s) => {
       const id = crypto.randomUUID();
       return {
         cid: id,
@@ -743,8 +776,15 @@ export function App() {
       await saveDrafts(ref, []);
       setSource(baseSource); // live suggestion edits are now submitted
       setSuggestionComments({});
-      pendingEditWrites.current[curPath] = null; // submitted → drop the persisted edit
-      await flushSuggestionEdits();
+      // All files' suggestions just went out, so drop every persisted edit (not
+      // only the open file's) and cancel any debounced write that would revive them.
+      setSuggestionEdits({});
+      pendingEditWrites.current = {};
+      if (editSaveTimer.current) {
+        clearTimeout(editSaveTimer.current);
+        editSaveTimer.current = null;
+      }
+      await saveSuggestionEdits(ref, {});
       const [reviews, issues] = await Promise.all([
         client.listReviewComments(ref),
         client.listIssueComments(ref),
@@ -780,7 +820,14 @@ export function App() {
       const newText = await client.getFileContent(ref, selectedPath, sha);
       setSource(newText);
       setBaseSource(newText);
-      pendingEditWrites.current[selectedPath] = null; // committed → drop the persisted edit
+      // Committed → drop the persisted edit for this file (storage + in-memory map).
+      setSuggestionEdits((prev) => {
+        if (!(selectedPath in prev)) return prev;
+        const next = { ...prev };
+        delete next[selectedPath];
+        return next;
+      });
+      pendingEditWrites.current[selectedPath] = null;
       await flushSuggestionEdits();
       const [reviews, issues] = await Promise.all([
         client.listReviewComments(ref),
@@ -850,7 +897,17 @@ export function App() {
     comments: Record<string, string>,
   ) => {
     if (!ref || role !== "reviewer") return;
-    pendingEditWrites.current[path] = src !== base ? { source: src, comments } : null;
+    const edit: SuggestionEdit | null = src !== base ? { source: src, base, comments } : null;
+    // Keep the in-memory all-files map fresh immediately (storage write is
+    // debounced below) so the submit count/modal reflect the latest edit.
+    setSuggestionEdits((prev) => {
+      if (!edit && !(path in prev)) return prev;
+      const next = { ...prev };
+      if (edit) next[path] = edit;
+      else delete next[path];
+      return next;
+    });
+    pendingEditWrites.current[path] = edit;
     if (editSaveTimer.current) clearTimeout(editSaveTimer.current);
     editSaveTimer.current = setTimeout(() => void flushSuggestionEdits(), 400);
   };

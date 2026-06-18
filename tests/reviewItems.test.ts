@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildThreads,
   buildReviewEntries,
+  buildAllPendingSuggestions,
   buildPendingItems,
   groupPendingByFile,
   buildPendingSuggestions,
@@ -19,6 +20,7 @@ import {
   type PendingSuggestion,
   type ThreadRange,
 } from "../entrypoints/review/reviewItems";
+import type { SuggestionEdit } from "../lib/drafts";
 import { buildLineIndex } from "../lib/anchor";
 import type { ExistingComment } from "../lib/comments";
 import type { PendingDraft } from "../lib/drafts";
@@ -313,6 +315,62 @@ describe("threadRangeAt", () => {
 
   test("returns null when no range contains the offset", () => {
     expect(threadRangeAt(ranges, 25)).toBeNull();
+  });
+});
+
+describe("buildAllPendingSuggestions", () => {
+  // Submit scope spans ALL files, so pending suggestions must be gathered from
+  // every file's persisted edit — not just the file open in the editor (the bug:
+  // comments came from all files but suggestions only from the current one).
+  const edits: Record<string, SuggestionEdit> = {
+    "docs/b.md": { base: "b1\nb2\nb3\nb4\n", source: "b1\nb2\nb3\nB4\n", comments: {} },
+    "docs/a.md": {
+      base: "a1\na2\na3\n",
+      source: "a1\nA2\na3\n",
+      comments: { "live:2:2": "fix a2" },
+    },
+  };
+
+  test("gathers pending suggestions across every edited file, path-sorted", () => {
+    const out = buildAllPendingSuggestions(edits, (path) => path === "docs/a.md");
+    expect(out.map((s) => s.path)).toEqual(["docs/a.md", "docs/b.md"]);
+
+    const a = out[0];
+    expect(a.cid).toBe("live:2:2");
+    expect(a.replacement).toBe("A2");
+    expect(a.quote).toBe("a2");
+    expect(a.body).toBe("fix a2");
+    expect(a.inDiff).toBe(true); // a.md routed in-diff
+    expect(a.range).toEqual({ sl: 2, sc: 1, el: 2, ec: 1 });
+
+    const b = out[1];
+    expect(b.cid).toBe("live:4:4");
+    expect(b.replacement).toBe("B4");
+    expect(b.body).toBe(""); // no attached comment
+    expect(b.inDiff).toBe(false); // b.md routed out-of-diff
+  });
+
+  test("ignores files whose edited source matches the base (no live suggestion)", () => {
+    const out = buildAllPendingSuggestions(
+      { "docs/a.md": { base: "x\ny\n", source: "x\ny\n", comments: {} } },
+      () => true,
+    );
+    expect(out).toEqual([]);
+  });
+
+  test("empty edits map yields no suggestions", () => {
+    expect(buildAllPendingSuggestions({}, () => true)).toEqual([]);
+  });
+
+  test("skips legacy edits stored before `base` existed (no crash)", () => {
+    // Edits persisted by an older build have no `base` field; recomputing their
+    // hunks is impossible, so they must be skipped rather than throw.
+    const legacy = {
+      "docs/a.md": { source: "a1\nA2\na3\n", comments: {} } as unknown as SuggestionEdit,
+      "docs/b.md": { base: "b1\nb2\n", source: "b1\nB2\n", comments: {} },
+    };
+    const out = buildAllPendingSuggestions(legacy, () => true);
+    expect(out.map((s) => s.path)).toEqual(["docs/b.md"]);
   });
 });
 
