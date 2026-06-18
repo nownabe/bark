@@ -14,6 +14,7 @@ import {
   buildPendingSuggestions,
   buildSuggestionMarks,
   filterReviewEntries,
+  revealSubmittedFacets,
   reviewEntryCounts,
   summarizePending,
   threadRangeAt,
@@ -245,6 +246,29 @@ describe("buildReviewEntries / filter", () => {
     expect(scoped).toHaveLength(2); // thread ta + a.md live suggestion
     const paths = scoped.map((e) => (e.kind === "thread" ? e.thread.path : e.suggestion.path));
     expect(paths.every((p) => p === "a.md")).toBe(true);
+  });
+});
+
+describe("revealSubmittedFacets", () => {
+  test("adds 'submitted' so just-submitted items stay visible", () => {
+    expect(revealSubmittedFacets(new Set(["pending"]))).toEqual(new Set(["pending", "submitted"]));
+  });
+
+  test("preserves the user's 'resolved' preference when it was off", () => {
+    const next = revealSubmittedFacets(new Set(["pending", "submitted"]));
+    expect(next.has("resolved")).toBe(false);
+  });
+
+  test("keeps 'resolved' on when the user already had it on", () => {
+    const next = revealSubmittedFacets(new Set(["pending", "submitted", "resolved"]));
+    expect(next.has("resolved")).toBe(true);
+  });
+
+  test("returns a new set without mutating the input", () => {
+    const prev = new Set(["pending"] as const);
+    const next = revealSubmittedFacets(prev);
+    expect(next).not.toBe(prev);
+    expect(prev).toEqual(new Set(["pending"]));
   });
 });
 
