@@ -9,6 +9,7 @@ import {
   type PendingItem,
   type SubmitGroup,
 } from "../reviewItems";
+import { SuggestionDiff } from "./SuggestionDiff";
 
 interface Props {
   items: PendingItem[];
@@ -115,8 +116,7 @@ export function SubmitConfirmModal({ items, target, onConfirm, onCancel, loading
                         </div>
                         {v.isSuggestion ? (
                           <>
-                            <div className="sugg-old">{v.quote}</div>
-                            <div className="sugg-new">{v.replacement || "(delete)"}</div>
+                            <SuggestionDiff before={v.quote ?? ""} after={v.replacement} />
                             {v.body ? <div className="comment__body">{v.body}</div> : null}
                           </>
                         ) : (
