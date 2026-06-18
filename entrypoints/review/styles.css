@@ -141,13 +141,20 @@ select:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 .topbar__pr {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
   color: var(--fg-soft);
-  font-weight: 600;
   text-decoration: none;
   transition: color var(--dur) var(--ease);
 }
 .topbar__pr:hover {
   color: var(--accent);
+}
+.topbar__pr-ref {
+  font-weight: 600;
+  flex: none;
 }
 .topbar__spacer {
   flex: 1;
@@ -561,21 +568,15 @@ select.input:focus {
   color: var(--red);
 }
 
-/* PR title in the top bar — opens the PR details popover */
+/* PR title shown after the repo/#n ref inside the same link (secondary text) */
 .topbar__pr-title {
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
+  font-weight: 400;
+  color: var(--muted);
   max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--fg);
-  text-decoration: none;
-  cursor: pointer;
-}
-.topbar__pr-title:hover {
-  color: var(--accent);
+  min-width: 0;
 }
 
 /* PR details popover */

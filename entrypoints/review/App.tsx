@@ -1155,21 +1155,13 @@ export function App() {
                 href={`https://github.com/${owner}/${repo}/pull/${prNum}`}
                 target="_blank"
                 rel="noreferrer"
-                title="Open this pull request on GitHub"
+                title={pull?.title ?? "Open this pull request on GitHub"}
               >
-                {owner}/{repo} #{prNum}
+                <span className="topbar__pr-ref">
+                  {owner}/{repo} #{prNum}
+                </span>
+                {pull?.title ? <span className="topbar__pr-title">{pull.title}</span> : null}
               </a>
-              {pull?.title ? (
-                <a
-                  className="topbar__pr-title"
-                  href={`https://github.com/${owner}/${repo}/pull/${prNum}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={pull.title}
-                >
-                  {pull.title}
-                </a>
-              ) : null}
               {pull ? (
                 <button
                   type="button"
