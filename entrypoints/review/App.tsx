@@ -28,6 +28,7 @@ import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from "./
 import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from "./suggestionView";
 import { SelectionComposer } from "./components/SelectionComposer";
 import { SelectionBubble } from "./components/SelectionBubble";
+import { LoginGate } from "./components/LoginGate";
 import { SuggestionDiff } from "./components/SuggestionDiff";
 import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
@@ -85,7 +86,14 @@ import {
   type SuggestionDecision,
   type SuggestionEdit,
 } from "../../lib/drafts";
-import { clearToken, getToken, setToken as persistToken } from "../../lib/storage";
+import {
+  clearToken,
+  getToken,
+  setToken as persistToken,
+  getAuthMethod,
+  setAuthMethod as persistAuthMethod,
+  type AuthMethod,
+} from "../../lib/storage";
 import { pollForToken, requestDeviceAuthorization, type DeviceAuthorization } from "../../lib/auth";
 import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/metadata";
 import { sampleDoc } from "./sample";
@@ -135,6 +143,7 @@ export function App() {
   const ref: PrRef | null = owner && repo && prNum ? { owner, repo, number: Number(prNum) } : null;
 
   const [token, setToken] = useState<string | null>(null);
+  const [authMethod, setAuthMethodState] = useState<AuthMethod | null>(null);
   const [tokenLoaded, setTokenLoaded] = useState(false);
   // Device-flow auth state (§7.6): the pending grant + transient UI status.
   const [deviceAuth, setDeviceAuth] = useState<DeviceAuthorization | null>(null);
@@ -371,8 +380,9 @@ export function App() {
   }, [showHelp]);
 
   useEffect(() => {
-    getToken().then((t) => {
+    Promise.all([getToken(), getAuthMethod()]).then(([t, m]) => {
       setToken(t);
+      setAuthMethodState(m);
       setTokenLoaded(true);
     });
   }, []);
@@ -406,7 +416,9 @@ export function App() {
         if (cancelled) return;
         if (r.kind === "authorized") {
           await persistToken(r.token);
+          await persistAuthMethod("app");
           setToken(r.token);
+          setAuthMethodState("app");
           setDeviceAuth(null);
           return;
         }
@@ -1089,9 +1101,19 @@ export function App() {
     }
   };
 
+  // Finalize a PAT login: persist the token + method, then enter the app. The
+  // device flow finalizes itself in its polling effect (with method "app").
+  const completeAuth = async (newToken: string, method: AuthMethod) => {
+    await persistToken(newToken);
+    await persistAuthMethod(method);
+    setToken(newToken);
+    setAuthMethodState(method);
+  };
+
   const handleClearToken = async () => {
     await clearToken();
     setToken(null);
+    setAuthMethodState(null);
     setDeviceAuth(null);
     setAuthError(null);
     setFiles([]);
@@ -1282,66 +1304,16 @@ export function App() {
 
   if (ref && !token) {
     return (
-      <div className="gate">
-        <div className="gate__brand">
-          <img className="gate__logo" src="/icon/128.png" alt="" />
-          <h1>Bark</h1>
-        </div>
-        {deviceAuth ? (
-          <>
-            <p>
-              Authorize Bark for {owner}/{repo} #{prNum}. Enter this code on GitHub:
-            </p>
-            <div className="device-code">{deviceAuth.userCode}</div>
-            <div className="gate__actions">
-              <a
-                className="btn btn--primary"
-                href={deviceAuth.verificationUri}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open GitHub
-              </a>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => void navigator.clipboard?.writeText(deviceAuth.userCode)}
-              >
-                Copy code
-              </button>
-            </div>
-            <p className="notice--muted" style={{ fontSize: 13 }}>
-              Pick the repositories Bark may access, then approve. Keep this tab open — it continues
-              automatically once you authorize.
-            </p>
-          </>
-        ) : (
-          <>
-            <p>
-              Opening {owner}/{repo} #{prNum} requires access to GitHub. Authorize Bark with the
-              device flow — there's no token to copy by hand.
-            </p>
-            <p className="notice--muted" style={{ fontSize: 13 }}>
-              You choose which repositories Bark can access (<code>Contents</code> /{" "}
-              <code>Pull requests</code>, §7.6). The resulting token is stored only in{" "}
-              <code>chrome.storage.local</code> and is never sent anywhere else (§9).
-            </p>
-            {authError && (
-              <p className="notice--error" style={{ fontSize: 13 }}>
-                {authError}
-              </p>
-            )}
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={startDeviceFlow}
-              disabled={authStarting}
-            >
-              {authStarting ? "Starting…" : "Connect GitHub"}
-            </button>
-          </>
-        )}
-      </div>
+      <LoginGate
+        owner={owner!}
+        repo={repo!}
+        prNum={prNum!}
+        deviceAuth={deviceAuth}
+        authStarting={authStarting}
+        authError={authError}
+        onStartDeviceFlow={startDeviceFlow}
+        onAuthenticated={completeAuth}
+      />
     );
   }
 
@@ -1358,26 +1330,51 @@ export function App() {
         <p>
           Bark can't open {owner}/{repo} #{prNum} yet.
         </p>
-        <p className="notice--muted" style={{ fontSize: 13 }}>
-          You're authorized, but Bark isn't installed on this repository (or the repository / PR
-          doesn't exist). Install Bark and select this repository, then retry.
-        </p>
-        <div className="gate__actions">
-          {installUrl ? (
-            <a className="btn btn--primary" href={installUrl} target="_blank" rel="noreferrer">
-              Install on this repository
-            </a>
-          ) : null}
-          <button type="button" className="btn" onClick={retryLoad} disabled={loading}>
-            {loading ? "Checking…" : "Retry"}
-          </button>
-        </div>
-        <p className="notice--muted" style={{ fontSize: 12 }}>
-          Authorized as the wrong account?{" "}
-          <button type="button" className="linkish" onClick={handleClearToken}>
-            Use a different account
-          </button>
-        </p>
+        {authMethod === "pat" ? (
+          <>
+            <p className="notice--muted" style={{ fontSize: 13 }}>
+              This token can't access {owner}/{repo}. Check the token's repository access and its{" "}
+              <code>Contents</code> / <code>Pull requests</code> permissions, then retry — or use a
+              different token.
+            </p>
+            <div className="gate__actions">
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={retryLoad}
+                disabled={loading}
+              >
+                {loading ? "Checking…" : "Retry"}
+              </button>
+              <button type="button" className="btn" onClick={handleClearToken}>
+                Use a different token
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="notice--muted" style={{ fontSize: 13 }}>
+              You're authorized, but Bark isn't installed on this repository (or the repository / PR
+              doesn't exist). Install Bark and select this repository, then retry.
+            </p>
+            <div className="gate__actions">
+              {installUrl ? (
+                <a className="btn btn--primary" href={installUrl} target="_blank" rel="noreferrer">
+                  Install on this repository
+                </a>
+              ) : null}
+              <button type="button" className="btn" onClick={retryLoad} disabled={loading}>
+                {loading ? "Checking…" : "Retry"}
+              </button>
+            </div>
+            <p className="notice--muted" style={{ fontSize: 12 }}>
+              Authorized as the wrong account?{" "}
+              <button type="button" className="linkish" onClick={handleClearToken}>
+                Use a different account
+              </button>
+            </p>
+          </>
+        )}
       </div>
     );
   }
