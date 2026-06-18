@@ -374,6 +374,49 @@ describe("buildAllPendingSuggestions", () => {
   });
 });
 
+describe("buildThreads resolved state", () => {
+  const evt = (id: number, thread: string, event: "resolve" | "unresolve") =>
+    comment({ id, meta: { ...meta(5, "a.md", thread), cid: `e${id}`, event } });
+
+  test("a resolve event marks the thread resolved and is not shown as a message", () => {
+    const [t] = buildThreads(
+      [comment({ id: 1, meta: meta(5, "a.md", "t1") }), evt(2, "t1", "resolve")],
+      [],
+      "a.md",
+    );
+    expect(t.resolved).toBe(true);
+    expect(t.messages).toHaveLength(1); // only the root, not the event
+  });
+
+  test("latest event wins: unresolve after resolve re-opens", () => {
+    const [t] = buildThreads(
+      [
+        comment({ id: 1, meta: meta(5, "a.md", "t1") }),
+        evt(2, "t1", "resolve"),
+        evt(3, "t1", "unresolve"),
+      ],
+      [],
+      "a.md",
+    );
+    expect(t.resolved).toBe(false);
+  });
+
+  test("an accepted suggestion thread is resolved", () => {
+    const [t] = buildThreads(
+      [comment({ id: 1, meta: { ...meta(5, "a.md", "t1"), kind: "suggestion" } })],
+      [],
+      "a.md",
+      { accepted: (id) => id === 1 },
+    );
+    expect(t.resolved).toBe(true);
+  });
+
+  test("threads default to not resolved", () => {
+    const [t] = buildThreads([comment({ id: 1, meta: meta(5, "a.md", "t1") })], [], "a.md");
+    expect(t.resolved).toBe(false);
+  });
+});
+
 describe("buildPendingSuggestions", () => {
   const hunks: SuggestionHunk[] = [
     { sl: 3, el: 3, replacement: "new3", quote: "old3" },
