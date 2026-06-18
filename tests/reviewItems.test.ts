@@ -17,6 +17,8 @@ import {
   reviewEntryCounts,
   summarizePending,
   threadRangeAt,
+  sortPos,
+  composerInsertIndex,
   type PendingSuggestion,
   type ThreadRange,
 } from "../entrypoints/review/reviewItems";
@@ -450,5 +452,42 @@ describe("buildPendingSuggestions", () => {
     expect(out[1].inDiff).toBe(false);
     expect(out[0].replacement).toBe("new3");
     expect(out[1].range).toEqual({ sl: 7, sc: 1, el: 8, ec: 1 });
+  });
+});
+
+describe("sortPos", () => {
+  test("line dominates, column breaks ties", () => {
+    expect(sortPos(2, 1)).toBeGreaterThan(sortPos(1, 9999));
+    expect(sortPos(5, 3)).toBeGreaterThan(sortPos(5, 1));
+    expect(sortPos(5, 1)).toBe(500001);
+  });
+});
+
+describe("composerInsertIndex", () => {
+  const entries = (...positions: number[]) => positions.map((sortPos) => ({ sortPos }));
+
+  test("returns 0 for an empty list", () => {
+    expect(composerInsertIndex([], 12345)).toBe(0);
+  });
+
+  test("inserts before the first entry positioned after it", () => {
+    // entries at lines 1, 5, 9 → a selection on line 5 sorts before the line-9 entry.
+    const list = entries(sortPos(1, 1), sortPos(9, 1));
+    expect(composerInsertIndex(list, sortPos(5, 1))).toBe(1);
+  });
+
+  test("inserts at the front when it precedes every entry", () => {
+    const list = entries(sortPos(4, 1), sortPos(8, 1));
+    expect(composerInsertIndex(list, sortPos(2, 1))).toBe(0);
+  });
+
+  test("appends when it follows every entry", () => {
+    const list = entries(sortPos(1, 1), sortPos(3, 1));
+    expect(composerInsertIndex(list, sortPos(9, 1))).toBe(2);
+  });
+
+  test("an equal-position entry sorts before the composer (stable tie-break)", () => {
+    const list = entries(sortPos(5, 1), sortPos(7, 1));
+    expect(composerInsertIndex(list, sortPos(5, 1))).toBe(1);
   });
 });

@@ -139,9 +139,26 @@ export function threadRangeAt(ranges: ThreadRange[], offset: number): ThreadRang
   return best;
 }
 
-// Position key: line dominates, column breaks ties.
+// Position key: line dominates, column breaks ties. Shared so the selection
+// composer can be spliced into the (already position-sorted) entry list at the
+// spot matching the selection's own line/column.
+export function sortPos(line: number, col: number): number {
+  return line * 100000 + col;
+}
+
 function posOf(range: AnchorRange): number {
-  return range.sl * 100000 + range.sc;
+  return sortPos(range.sl, range.sc);
+}
+
+/**
+ * Index at which to splice the selection composer into the position-sorted
+ * review entries so it appears in document order (not pinned at the top). The
+ * composer sorts *after* an entry at the same position, so a comment already on
+ * the selected line stays above the new composer.
+ */
+export function composerInsertIndex(entries: { sortPos: number }[], pos: number): number {
+  const i = entries.findIndex((e) => e.sortPos > pos);
+  return i === -1 ? entries.length : i;
 }
 
 function rank(path: string | undefined, currentPath: string): number {

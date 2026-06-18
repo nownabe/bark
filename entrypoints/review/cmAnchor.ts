@@ -6,16 +6,37 @@ import type { EditorState } from "@codemirror/state";
 import type { ViewUpdate } from "@codemirror/view";
 import type { SourceAnchor } from "../../lib/anchor";
 
-// CM update handler for the comment composer. Whenever the selection changes we
-// recompute the anchor — including resetting it to null when the selection
-// collapses, so the composer closes once the selection is released (task 5).
-// (The previous handler only set non-null anchors, leaving the composer stuck.)
+/** Viewport coords (px) at which to anchor the selection bubble button. */
+export interface BubblePos {
+  top: number;
+  left: number;
+}
+
+// Gap (px) between the selection's bottom-right corner and the bubble.
+const BUBBLE_GAP = 6;
+
+// CM update handler. Selecting text no longer opens the composer; it just tracks
+// the pending selection (anchor, or null when the selection collapses). The
+// bubble button's visibility/position is driven separately in App.tsx — it
+// appears when the mouse is released, not while dragging.
 export function handleSelectionUpdate(
   vu: ViewUpdate,
-  setAnchor: (a: SourceAnchor | null) => void,
+  setSelection: (a: SourceAnchor | null) => void,
 ): void {
   if (!vu.selectionSet) return;
-  setAnchor(cmSelectionToAnchor(vu.state));
+  setSelection(cmSelectionToAnchor(vu.state));
+}
+
+// The point just below-right of a selection's end, where the bubble is anchored.
+// Kept pure (no DOM) so it can be unit-tested. `coords` is a CodeMirror caret
+// rect at the selection end; we drop the bubble below its bottom and a touch to
+// the right.
+export function bubbleAnchorPoint(
+  coords: { bottom: number; left: number },
+  opts: { gap?: number } = {},
+): BubblePos {
+  const gap = opts.gap ?? BUBBLE_GAP;
+  return { top: coords.bottom + gap, left: coords.left + gap };
 }
 
 export function cmSelectionToAnchor(state: EditorState): SourceAnchor | null {
