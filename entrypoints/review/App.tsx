@@ -20,6 +20,7 @@ import {
   buildPendingItems,
   buildPendingSuggestions,
   buildReviewEntries,
+  buildSuggestionMarks,
   buildThreads,
   filterReviewEntries,
   reviewCounts,
@@ -377,7 +378,9 @@ export function App() {
     const clip = (r: { from: number; to: number; pending?: boolean }) =>
       r.from >= 0 && r.to <= docLen && r.from < r.to;
     const existing = comments
-      .filter((c) => c.meta && c.meta.path === curPath)
+      // Suggestions render via their own strikethrough/insert view, not the plain
+      // comment highlight — don't double up.
+      .filter((c) => c.meta && c.meta.path === curPath && c.meta.kind !== "suggestion")
       .map((c) => reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? ""))
       .filter((r) => r.status !== "outdated")
       .map((r) => ({ from: r.startOffset, to: r.endOffset }))
@@ -397,20 +400,14 @@ export function App() {
   useEffect(() => {
     const view = cmRef.current?.view;
     if (!view) return;
-    const docLen = view.state.doc.length;
-    const marks = comments
-      .filter((c) => c.meta?.kind === "suggestion" && c.meta.path === curPath && !dismissed[c.id])
-      .map((c) => {
-        const r = reanchorComment(source, lineStarts, c.meta as CommentMetadata, headSha ?? "");
-        return {
-          from: r.startOffset,
-          to: r.endOffset,
-          status: r.status,
-          replacement: extractSuggestionBlock(c.body) ?? "",
-        };
-      })
-      .filter((m) => m.status !== "outdated" && m.from >= 0 && m.to <= docLen && m.from < m.to)
-      .map(({ from, to, replacement }) => ({ from, to, replacement }));
+    const marks = buildSuggestionMarks({
+      comments,
+      source,
+      lineStarts,
+      headSha: headSha ?? "",
+      currentPath: curPath,
+      dismissed,
+    });
     view.dispatch({ effects: setSuggestionMarks.of(marks) });
   }, [comments, source, lineStarts, headSha, selectedPath, dismissed]);
 
