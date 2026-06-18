@@ -1,6 +1,15 @@
 # AGENTS.md
 
-Guidance for AI agents working in this repository. This file describes the **local development environment policy**. For the full setup plan and acceptance criteria, see issue [#1](https://github.com/nownabe/mkprev/issues/1).
+Guidance for AI agents working in this repository. It introduces the project, then describes the **local development environment policy**. For the full setup plan and acceptance criteria, see issue [#1](https://github.com/nownabe/mkprev/issues/1).
+
+## Project overview
+
+**Bark is a Chrome MV3 browser extension that brings a Google Docs–like reviewing experience to Markdown documents in GitHub Pull Requests.** Instead of GitHub's line-based "Files changed" diff, it renders the changed `.md` files in full and lets reviewers drag-select any text range to attach comments and Suggestions, while authors can edit the document in-place and commit back to the PR branch.
+
+- **Serverless, two-layer persistence.** There is no backend. State lives in a local **draft layer** (comments/Suggestions drafted in the browser) and is reflected to **GitHub via its API** (the shared source of truth), mirroring GitHub's "Start a review → Submit" flow. The extension fully reconstructs comment positions, threads, and history on top of that.
+- **Scope.** v1 targets `github.com` only (no GHES) and is asynchronous review — no real-time collaboration. See [`docreview-design-doc.md`](docreview-design-doc.md) for the full design and goals/non-goals, and [`design.md`](design.md) for the UI design system.
+- **Tech stack.** Built with [WXT](https://wxt.dev) (MV3 framework), React 18, and CodeMirror 6 for the editor; `react-markdown` + `rehype-sanitize` for rendering and `mermaid` for diagrams. Tooling is `bun` (runtime + test runner), `oxlint`, and `oxfmt`; tests use `@testing-library/react` on `happy-dom`.
+- **Layout.** `entrypoints/` holds the extension surfaces — `background.ts`, `content.ts`, and the `review/` page (the React review UI: `App.tsx`, CodeMirror anchoring, suggestion rendering, components). `lib/` holds the shared, surface-agnostic logic — GitHub API (`github.ts`), auth (`auth.ts`), draft/comment storage (`drafts.ts`, `comments.ts`, `storage.ts`), text anchoring/re-anchoring (`anchor.ts`, `reanchor.ts`), Suggestions (`suggest.ts`), and Markdown/diff helpers. `tests/` mirrors these modules.
 
 ## Core principle
 
