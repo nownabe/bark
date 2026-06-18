@@ -442,6 +442,14 @@ select.input:focus {
   color: var(--muted);
   margin-bottom: 5px;
 }
+.comment__avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-inset);
+  object-fit: cover;
+  flex: none;
+}
 .comment__author {
   font-weight: 600;
   color: var(--fg);
