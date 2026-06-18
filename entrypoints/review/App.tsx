@@ -57,7 +57,7 @@ import {
   suggestionEditRanges,
 } from "../../lib/suggest";
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
-import { normalizeComments, type ExistingComment } from "../../lib/comments";
+import { normalizeComments, reloadCommentsUntil, type ExistingComment } from "../../lib/comments";
 import { reanchorComment, type AnchorStatus } from "../../lib/reanchor";
 import {
   avatarUrl,
@@ -1020,11 +1020,19 @@ export function App() {
         editSaveTimer.current = null;
       }
       await saveSuggestionEdits(ref, {});
-      const [reviews, issues] = await Promise.all([
-        client.listReviewComments(ref),
-        client.listIssueComments(ref),
-      ]);
-      setComments(normalizeComments(reviews, issues));
+      // GitHub's GET .../comments can momentarily omit comments a just-completed
+      // POST .../reviews created (read-after-write lag), which left the
+      // just-submitted items invisible until the next reload. Poll until every
+      // submitted cid is back before rebuilding the list.
+      const submittedCids = toSubmit.map((d) => d.cid);
+      const comments = await reloadCommentsUntil(async () => {
+        const [reviews, issues] = await Promise.all([
+          client.listReviewComments(ref),
+          client.listIssueComments(ref),
+        ]);
+        return normalizeComments(reviews, issues);
+      }, submittedCids);
+      setComments(comments);
       // The pending items just became submitted; if the list was filtered to
       // "Pending" it would now look empty, so make sure "submitted" is on —
       // without forcing the user's "resolved" preference on.
