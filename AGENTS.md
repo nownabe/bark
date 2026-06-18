@@ -22,6 +22,7 @@ in English.
 
 ## Development workflow
 
+- **Develop with TDD (test-driven development).** For any feature or bugfix, follow the red-green-refactor cycle: write a failing test that captures the desired behavior, run it to confirm it fails for the right reason, write the minimum code to make it pass, then refactor with the test as a safety net. Don't write implementation code before the test exists. For a bugfix, first write a test that reproduces the bug (it should fail), then fix it. Tests run via `bun run test` (see below).
 - **When a change needs the user to verify it, build first, then tell the user exactly what to check.** Don't ask the user to confirm against stale output. Produce the artifact with `bun run build`, then give concrete verification steps (e.g. "reload the extension and confirm the cursor line is no longer highlighted"). `wxt build` is configured to run outside the sandbox (the sandbox denies read access to some `node_modules` paths like `strip-literal/node_modules/js-tokens`, which breaks module resolution); if it ever lands sandboxed it fails with `Cannot find package 'js-tokens'`, so re-run it as a clean standalone command.
 - **Run tests, lint, and format locally before committing.** Use the `package.json` scripts via `bun run <script>` so everyone runs the same command the CI does — don't invoke the underlying tools by hand. Don't commit changes you haven't checked.
   - `bun run test` — tests (`bun test`).
