@@ -2,7 +2,15 @@
 // The document surface is CodeMirror 6 (always editable, source canonical §13),
 // Obsidian-style Raw/Preview. Controls live in a sticky header; comments are
 // position-sorted and threaded; debug info is collapsible.
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
@@ -29,7 +37,7 @@ import {
   reviewEntryCounts,
   threadRangeAt,
   type PendingSuggestion,
-  type ReviewFilter,
+  type ReviewFacet,
   type ReviewThread,
   type ThreadRange,
 } from "./reviewItems";
@@ -46,6 +54,7 @@ import {
   avatarUrl,
   buildBlobPermalink,
   buildSuggestionBlock,
+  findThreadNodeId,
   GitHubApiError,
   GitHubClient,
   pullStatus,
@@ -161,8 +170,12 @@ export function App() {
   // way pending comment drafts already do. The open file's entry is kept in sync
   // synchronously by persistSuggestionEdit.
   const [suggestionEdits, setSuggestionEdits] = useState<Record<string, SuggestionEdit>>({});
-  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
+  const [reviewFilter, setReviewFilter] = useState<Set<ReviewFacet>>(
+    () => new Set<ReviewFacet>(["pending", "submitted"]),
+  );
   const [emphasizedThreadId, setEmphasizedThreadId] = useState<string | null>(null);
+  // The thread whose resolve/reopen request is in flight, for in-place button feedback.
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [showPrInfo, setShowPrInfo] = useState(false);
@@ -241,8 +254,9 @@ export function App() {
   // Threads (submitted comments + pending replies merged) + live suggestions,
   // in one sorted list.
   const threads = useMemo(
-    () => buildThreads(comments, drafts, curPath),
-    [comments, drafts, curPath],
+    () =>
+      buildThreads(comments, drafts, curPath, { accepted: (id) => dismissed[id] === "accepted" }),
+    [comments, drafts, curPath, dismissed],
   );
   const entries = useMemo(
     () => buildReviewEntries({ threads, pendingSuggestions, currentPath: curPath }),
@@ -252,6 +266,14 @@ export function App() {
   const prStatus = pull ? pullStatus(pull) : null;
   const pendingItems = buildPendingItems(drafts, allPendingSuggestions);
   const visibleEntries = filterReviewEntries(entries, reviewFilter);
+  // Threads currently shown in the sidebar (per the active filter). The editor
+  // highlights and clickable anchors track this set, so resolved threads are
+  // highlighted exactly when the Resolved facet is selected.
+  const visibleThreadIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of visibleEntries) if (e.kind === "thread") ids.add(e.thread.id);
+    return ids;
+  }, [visibleEntries]);
 
   // The createdAtSha source for a comment, if we've fetched it — feeds the
   // diff-based re-anchoring path (undefined → quote-search fallback).
@@ -265,6 +287,9 @@ export function App() {
     const res: ThreadRange[] = [];
     for (const t of threads) {
       if (t.path !== curPath) continue;
+      // Only threads visible in the sidebar (per the active filter) are clickable
+      // in the document — resolved threads become clickable when Resolved is on.
+      if (!visibleThreadIds.has(t.id)) continue;
       let from: number;
       let to: number;
       if (t.rootComment?.meta) {
@@ -287,7 +312,7 @@ export function App() {
       if (from >= 0 && to <= docLen && from < to) res.push({ id: t.id, from, to });
     }
     return res;
-  }, [threads, source, lineStarts, headSha, curPath, oldSources]);
+  }, [threads, visibleThreadIds, source, lineStarts, headSha, curPath, oldSources]);
 
   // The current-doc char span of each pending suggestion's edited text, so a
   // click on the suggested text in the editor maps back to its review item. The
@@ -457,16 +482,24 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, headSha, selectedPath, ref?.owner, ref?.repo, ref?.number]);
 
-  useEffect(() => {
+  // Fetch the PR's review + issue comments and rebuild local state. Exposed as a
+  // callback so actions that mutate comments on GitHub (resolve / reopen) can
+  // refresh immediately instead of waiting for a full page reload.
+  const reloadComments = useCallback(async () => {
     if (!client || !ref) return;
+    const [reviews, issues] = await Promise.all([
+      client.listReviewComments(ref),
+      client.listIssueComments(ref),
+    ]);
+    setComments(normalizeComments(reviews, issues));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, ref?.owner, ref?.repo, ref?.number]);
+
+  useEffect(() => {
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
-        const [reviews, issues] = await Promise.all([
-          client.listReviewComments(ref),
-          client.listIssueComments(ref),
-        ]);
-        if (!cancelled) setComments(normalizeComments(reviews, issues));
+        if (!cancelled) await reloadComments();
       } catch {
         /* ignore */
       }
@@ -474,8 +507,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, ref?.owner, ref?.repo, ref?.number]);
+  }, [reloadComments]);
 
   // Fetch each commented file as of its createdAtSha so re-anchoring can diff
   // against the exact revision the comment was made on (Design Doc §7.8). Only
@@ -544,10 +576,21 @@ export function App() {
     const docLen = view.state.doc.length;
     const clip = (r: { from: number; to: number; pending?: boolean }) =>
       r.from >= 0 && r.to <= docLen && r.from < r.to;
+    // The document highlights track what the sidebar shows: only comments whose
+    // thread is currently visible (per the filter) are highlighted, so resolved
+    // threads light up exactly when the Resolved facet is selected. Resolution-
+    // event markers carry the root's anchor but aren't real messages → excluded.
     const existing = comments
       // Suggestions render via their own strikethrough/insert view, not the plain
       // comment highlight — don't double up.
-      .filter((c) => c.meta && c.meta.path === curPath && c.meta.kind !== "suggestion")
+      .filter(
+        (c) =>
+          c.meta &&
+          c.meta.path === curPath &&
+          c.meta.kind !== "suggestion" &&
+          !c.meta.event &&
+          visibleThreadIds.has(c.meta.thread),
+      )
       .map((c) =>
         reanchorComment(
           source,
@@ -561,7 +604,7 @@ export function App() {
       .map((r) => ({ from: r.startOffset, to: r.endOffset }))
       .filter(clip);
     const pending = drafts
-      .filter((d) => d.path === curPath)
+      .filter((d) => d.path === curPath && visibleThreadIds.has(d.thread))
       .map((d) => ({
         from: lineColToOffset(d.range.sl, d.range.sc, lineStarts),
         to: lineColToOffset(d.range.el, d.range.ec, lineStarts),
@@ -569,7 +612,7 @@ export function App() {
       }))
       .filter(clip);
     view.dispatch({ effects: setCommentHighlights.of([...existing, ...pending]) });
-  }, [comments, drafts, source, lineStarts, headSha, selectedPath, oldSources]);
+  }, [comments, drafts, visibleThreadIds, source, lineStarts, headSha, selectedPath, oldSources]);
 
   // Render submitted suggestions in the body as tracked changes (old = strikethrough / new = green block).
   useEffect(() => {
@@ -732,6 +775,54 @@ export function App() {
     setReplyTo(null);
   };
 
+  const toggleFacet = (f: ReviewFacet) =>
+    setReviewFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(f)) next.delete(f);
+      else next.add(f);
+      return next;
+    });
+
+  // Post a resolution-event comment (hidden metadata SoT) and, for in-diff
+  // threads, mirror it with GitHub's native resolve. Immediate; then reload.
+  const setThreadResolved = async (t: ReviewThread, resolved: boolean) => {
+    if (!client || !ref || !headSha) return;
+    const root = t.rootComment;
+    if (!root?.meta) return;
+    setResolvingId(t.id);
+    setError(null);
+    try {
+      const evMeta: CommentMetadata = {
+        cid: crypto.randomUUID(),
+        path: root.meta.path,
+        range: root.meta.range,
+        quote: root.meta.quote,
+        sha: headSha,
+        thread: t.id,
+        kind: "comment",
+        event: resolved ? "resolve" : "unresolve",
+      };
+      const body = embedMetadata(resolved ? "Resolved via Bark." : "Reopened via Bark.", evMeta);
+      if (root.source === "review") {
+        await client.replyToReviewComment(ref, root.id, body);
+        const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
+        if (nodeId) {
+          if (resolved) await client.resolveReviewThread(nodeId);
+          else await client.unresolveReviewThread(nodeId);
+        }
+      } else {
+        await client.createIssueComment(ref, body);
+      }
+      // Refresh comments now so the thread's resolved state reflects immediately
+      // (the reloadKey path only reloads PR info/files, not comments).
+      await reloadComments();
+    } catch (e) {
+      setError(errMessage(e));
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
   // author: record an accept/reject decision on a submitted suggestion.
   const setDecision = async (id: number, decision: SuggestionDecision) => {
     const next = { ...dismissed, [id]: decision };
@@ -856,7 +947,7 @@ export function App() {
       setComments(normalizeComments(reviews, issues));
       // The pending items just became submitted; if the list was filtered to
       // "Pending" it would now look empty, so reveal everything.
-      setReviewFilter("all");
+      setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"]));
       setEmphasizedThreadId(null);
     } catch (e) {
       setError(errMessage(e));
@@ -1065,7 +1156,7 @@ export function App() {
     view.dispatch({ selection: { anchor: hit.from, head: hit.to } });
     suppressNextAnchor.current = false; // update listener already ran synchronously
     if (!visibleEntries.some((e) => e.kind === "thread" && e.thread.id === hit.id)) {
-      setReviewFilter("all"); // make sure the emphasized thread is visible
+      setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"])); // make sure the emphasized thread is visible
     }
     setEmphasizedThreadId(hit.id);
     if (replyTo !== hit.id) {
@@ -1084,7 +1175,7 @@ export function App() {
       if (r && r.from < r.to) jumpToOffsets(r.from, r.to);
     }
     if (!visibleEntries.some((e) => e.kind === "liveSuggestion" && e.suggestion.cid === cid)) {
-      setReviewFilter("all"); // make sure the emphasized suggestion is visible
+      setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"])); // make sure the emphasized suggestion is visible
     }
     setEmphasizedThreadId(cid);
     setReplyTo(null);
@@ -1275,7 +1366,12 @@ export function App() {
     );
   };
 
-  const renderSubmittedMessage = (c: ExistingComment, isRoot: boolean, st: AnchorStatus | null) => (
+  const renderSubmittedMessage = (
+    c: ExistingComment,
+    isRoot: boolean,
+    st: AnchorStatus | null,
+    actions?: ReactNode,
+  ) => (
     <div key={`s-${c.source}-${c.id}`} className="comment">
       <div className="comment__meta">
         <img
@@ -1293,6 +1389,7 @@ export function App() {
         {isRoot && !c.meta ? (
           <span className="badge badge--issue">{c.line ? `L${c.line}` : "no anchor"}</span>
         ) : null}
+        {actions ? <span className="comment__meta-actions">{actions}</span> : null}
       </div>
       {c.meta?.kind === "suggestion" ? (
         <>
@@ -1340,11 +1437,36 @@ export function App() {
     const root = t.rootComment;
     const st = root ? statusFor(root) : null;
     const showAuthorActions = root?.meta?.kind === "suggestion" && role === "author";
+    // A thread is event-resolvable when it has a Bark root comment with a
+    // submitted comment. Reopen is offered only when resolution came from an
+    // event, not from accepting a suggestion (which resolves implicitly).
+    const acceptedRoot = root?.meta?.kind === "suggestion" && dismissed[root.id] === "accepted";
+    const canResolve = Boolean(root?.meta) && t.hasSubmitted && !acceptedRoot;
+    // Resolve/Reopen sits at the right end of the root comment's author row.
+    const resolveAction = canResolve ? (
+      <button
+        type="button"
+        className="thread__resolve"
+        disabled={resolvingId === t.id}
+        onClick={(e) => {
+          e.stopPropagation();
+          void setThreadResolved(t, !t.resolved);
+        }}
+      >
+        {resolvingId === t.id
+          ? t.resolved
+            ? "Reopening…"
+            : "Resolving…"
+          : t.resolved
+            ? "Reopen"
+            : "✓ Resolve"}
+      </button>
+    ) : null;
     return (
       <div
         key={t.id}
         data-thread-id={t.id}
-        className={`thread thread--clickable${
+        className={`thread thread--clickable${t.resolved ? " thread--resolved" : ""}${
           emphasizedThreadId === t.id ? " thread--emphasized" : ""
         }`}
         onClick={() => openThread(t)}
@@ -1352,7 +1474,12 @@ export function App() {
         {t.quote ? <div className="thread__quote">{t.quote}</div> : null}
         {t.messages.map((m) =>
           m.kind === "submitted"
-            ? renderSubmittedMessage(m.comment, m.comment === root, st)
+            ? renderSubmittedMessage(
+                m.comment,
+                m.comment === root,
+                st,
+                m.comment === root ? resolveAction : undefined,
+              )
             : renderPendingMessage(m.draft),
         )}
         {showAuthorActions && root ? (
@@ -1670,14 +1797,15 @@ export function App() {
             <div className="panel__head">
               <h2 className="panel__title">Review</h2>
               <div className="seg seg--sm">
-                {(["all", "pending", "submitted"] as const).map((f) => (
+                {(["pending", "submitted", "resolved"] as const).map((f) => (
                   <button
                     key={f}
                     type="button"
-                    aria-pressed={reviewFilter === f}
-                    onClick={() => setReviewFilter(f)}
+                    aria-pressed={reviewFilter.has(f)}
+                    onClick={() => toggleFacet(f)}
                   >
-                    {f === "all" ? "All" : f === "pending" ? "Pending" : "Sent"} ({counts[f]})
+                    {f === "pending" ? "Pending" : f === "submitted" ? "Sent" : "Resolved"} (
+                    {counts[f]})
                   </button>
                 ))}
               </div>

@@ -27,3 +27,11 @@ them; agents do not edit config files directly.
 - **Symptom**: `bun run check:format` fails inside the sandbox with `Failed to read file: .../.mcp.json` / `This may be due to the file being a binary or inaccessible.` The same check passes with a one-off `dangerouslyDisableSandbox` ("All matched files use the correct format", 69 files).
 - **Cause**: `.mcp.json` is on the sandbox `filesystem.read` denylist, so oxfmt (which globs the repo root) cannot read it and aborts the whole format check.
 - **Proposal (narrowest first)**: exclude `.mcp.json` from oxfmt's input rather than loosening the sandbox — e.g. add an oxfmt ignore entry / config for `.mcp.json` (it is local agent config, not project source that needs formatting). Only if oxfmt must format it should an `allowRead` exception for exactly `.mcp.json` be considered. Do **not** broaden the read denylist.
+
+---
+
+## `bun:test` types missing → `bun run typecheck` reports 21 errors in `tests/**` (pre-existing, not sandbox-related)
+
+- **Symptom**: `bun run typecheck` (`tsc --noEmit`) reports 21 identical errors, one per file under `tests/`: `error TS2307: Cannot find module 'bun:test' or its corresponding type declarations.` These persist with `dangerouslyDisableSandbox`, so they are not a sandbox masking issue. App/lib source typechecks cleanly (0 errors).
+- **Cause**: neither `bun-types` nor `@types/bun` is present in `node_modules`, and `tsconfig.json` does not reference Bun's ambient types, so `tsc` cannot resolve the `bun:test` module used by every test file. (Note: CI gates are test/lint/format only — `tsc` is not run in CI — so this never fails CI, only the local `typecheck` script.)
+- **Proposal (narrowest first)**: add `bun-types` as a dev dependency (`bun add -d --ignore-scripts bun-types`) and include it in `tsconfig.json` `compilerOptions.types` (e.g. `"types": ["bun-types", ...]`) or via a `/// <reference types="bun-types" />`. This makes `bun run typecheck` clean for the whole project. No sandbox change is needed.

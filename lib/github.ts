@@ -74,6 +74,21 @@ export interface RawIssueComment {
   user: { login: string } | null;
 }
 
+/** A GitHub review thread (GraphQL) reduced to what resolve needs. */
+export interface ReviewThreadInfo {
+  /** GraphQL node id, the target of resolve/unresolve mutations. */
+  id: string;
+  isResolved: boolean;
+  /** REST databaseId of each comment in the thread. */
+  commentIds: number[];
+}
+
+/** Map a root review comment's REST id to its thread's GraphQL node id (null if none). */
+export function findThreadNodeId(threads: ReviewThreadInfo[], commentId: number): string | null {
+  for (const t of threads) if (t.commentIds.includes(commentId)) return t.id;
+  return null;
+}
+
 /** PR head info + display metadata (title/body/author/status). */
 export interface PullInfo {
   headSha: string;
@@ -194,6 +209,20 @@ export class GitHubClient {
       url = parseNextLink(res.headers.get("Link"));
     }
     return all;
+  }
+
+  private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    const res = await fetch(`${API_BASE}/graphql`, {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ query, variables }),
+    });
+    if (!res.ok) throw this.errorFor(res, "graphql");
+    const json = (await res.json()) as { data?: T; errors?: unknown };
+    if (json.errors) {
+      throw new GitHubApiError(res.status, `GraphQL error: ${JSON.stringify(json.errors)}`);
+    }
+    return json.data as T;
   }
 
   private async post(path: string, payload: unknown): Promise<void> {
@@ -318,6 +347,80 @@ export class GitHubClient {
     return this.getAllPages<RawIssueComment>(
       `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments?per_page=100`,
     );
+  }
+
+  /** Review threads (node id + isResolved + member comment databaseIds), paginated. */
+  async listReviewThreads(ref: PrRef): Promise<ReviewThreadInfo[]> {
+    const query = `query($owner:String!,$repo:String!,$number:Int!,$cursor:String){
+      repository(owner:$owner,name:$repo){
+        pullRequest(number:$number){
+          reviewThreads(first:100,after:$cursor){
+            nodes{ id isResolved comments(first:100){ nodes{ databaseId } } }
+            pageInfo{ hasNextPage endCursor }
+          }
+        }
+      }
+    }`;
+    type Resp = {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: {
+              id: string;
+              isResolved: boolean;
+              comments: { nodes: { databaseId: number | null }[] };
+            }[];
+            pageInfo: { hasNextPage: boolean; endCursor: string | null };
+          };
+        };
+      };
+    };
+    const all: ReviewThreadInfo[] = [];
+    let cursor: string | null = null;
+    do {
+      const data: Resp = await this.graphql<Resp>(query, {
+        owner: ref.owner,
+        repo: ref.repo,
+        number: ref.number,
+        cursor,
+      });
+      const conn = data.repository.pullRequest.reviewThreads;
+      for (const n of conn.nodes) {
+        all.push({
+          id: n.id,
+          isResolved: n.isResolved,
+          commentIds: n.comments.nodes
+            .map((c) => c.databaseId)
+            .filter((id): id is number => id != null),
+        });
+      }
+      cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+    } while (cursor);
+    return all;
+  }
+
+  /** Mark a review thread resolved (native mirror of the metadata SoT). */
+  async resolveReviewThread(threadId: string): Promise<void> {
+    await this.graphql(
+      `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ id } } }`,
+      { id: threadId },
+    );
+  }
+
+  /** Re-open a previously resolved review thread. */
+  async unresolveReviewThread(threadId: string): Promise<void> {
+    await this.graphql(
+      `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread{ id } } }`,
+      { id: threadId },
+    );
+  }
+
+  /** Post a reply inside an existing review thread (carries the resolution marker). */
+  async replyToReviewComment(ref: PrRef, inReplyTo: number, body: string): Promise<void> {
+    await this.post(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments`, {
+      body,
+      in_reply_to: inReplyTo,
+    });
   }
 
   /** File content at the given SHA (raw text = canonical source, §D9). */

@@ -466,12 +466,13 @@ select.input:focus {
 .thread {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 12px;
-  margin-bottom: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
   background: var(--bg);
   transition:
     border-color var(--dur) var(--ease),
     box-shadow var(--dur) var(--ease),
+    opacity var(--dur) var(--ease),
     background var(--dur) var(--ease);
 }
 .thread:hover {
@@ -487,6 +488,16 @@ select.input:focus {
 .thread--emphasized {
   border-color: var(--accent);
   box-shadow: var(--ring);
+}
+/* Resolved threads recede — quiet surface, slightly dimmed — and lift back to
+   full presence on hover or when emphasized. */
+.thread--resolved {
+  background: var(--bg-subtle);
+  opacity: 0.72;
+}
+.thread--resolved:hover,
+.thread--resolved.thread--emphasized {
+  opacity: 1;
 }
 .comment + .comment {
   margin-top: 10px;
@@ -525,9 +536,48 @@ select.input:focus {
   word-break: break-word;
 }
 .comment__actions {
-  margin-top: 10px;
+  margin-top: 8px;
   display: flex;
   gap: 6px;
+}
+/* Pushes the resolve/reopen action to the right end of the root comment's
+   author row, so it costs no extra vertical space. */
+.comment__meta-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+/* Quiet, compact resolve/reopen affordance — a muted text button that tints on
+   hover, not a heavy framed button. Hidden until the thread is hovered or
+   focused (emphasized); the in-flight state (:disabled) stays visible so
+   "Resolving…/Reopening…" doesn't vanish when focus moves away. */
+.thread__resolve {
+  display: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.thread:hover .thread__resolve,
+.thread--emphasized .thread__resolve,
+.thread__resolve:disabled {
+  display: inline-flex;
+}
+.thread__resolve:not(:disabled):hover {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+.thread__resolve:disabled {
+  color: var(--faint);
+  cursor: default;
 }
 /* compact ✕ to remove a pending item, tucked at the end of its meta row */
 .btn-x {

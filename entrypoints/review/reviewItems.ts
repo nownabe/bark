@@ -33,6 +33,8 @@ export interface ReviewThread {
   quote: string | undefined;
   hasPending: boolean;
   hasSubmitted: boolean;
+  /** Resolved via a resolution event, or root is an accepted suggestion. */
+  resolved: boolean;
 }
 
 /** A reviewer's live editor edit, surfaced as a pending suggestion. */
@@ -104,7 +106,7 @@ export function buildAllPendingSuggestions(
     });
 }
 
-export type ReviewFilter = "all" | "pending" | "submitted";
+export type ReviewFacet = "pending" | "submitted" | "resolved";
 
 export type ReviewEntry =
   | { kind: "thread"; sortPath: string; sortPos: number; thread: ReviewThread }
@@ -162,6 +164,7 @@ export function buildThreads(
   comments: ExistingComment[],
   drafts: PendingDraft[],
   currentPath: string,
+  opts?: { accepted?: (commentId: number) => boolean },
 ): ReviewThread[] {
   const order: string[] = [];
   const groups = new Map<string, { submitted: ExistingComment[]; pending: PendingDraft[] }>();
@@ -174,7 +177,18 @@ export function buildThreads(
     }
     return g;
   };
-  for (const c of comments) group(c.meta?.thread || `solo:${c.source}:${c.id}`).submitted.push(c);
+  // Resolution events are hidden markers: collect the latest per thread, but keep
+  // them out of the visible messages/root.
+  const latestEvent = new Map<string, { id: number; event: "resolve" | "unresolve" }>();
+  for (const c of comments) {
+    if (c.meta?.event) {
+      const t = c.meta.thread;
+      const prev = latestEvent.get(t);
+      if (!prev || c.id > prev.id) latestEvent.set(t, { id: c.id, event: c.meta.event });
+      continue;
+    }
+    group(c.meta?.thread || `solo:${c.source}:${c.id}`).submitted.push(c);
+  }
   for (const d of drafts) group(d.thread).pending.push(d);
 
   const list: ReviewThread[] = order.map((id) => {
@@ -187,6 +201,9 @@ export function buildThreads(
       ...submitted.map((comment): ThreadMessage => ({ kind: "submitted", comment })),
       ...pending.map((draft): ThreadMessage => ({ kind: "pending", draft })),
     ];
+    const resolvedByEvent = latestEvent.get(id)?.event === "resolve";
+    const acceptedSuggestion =
+      rootComment?.meta?.kind === "suggestion" && (opts?.accepted?.(rootComment.id) ?? false);
     return {
       id,
       messages,
@@ -197,6 +214,7 @@ export function buildThreads(
       quote: rootComment?.meta?.quote ?? rootDraft?.quote,
       hasPending: pending.length > 0,
       hasSubmitted: submitted.length > 0,
+      resolved: resolvedByEvent || acceptedSuggestion,
     };
   });
   list.sort((a, b) => rank(a.path, currentPath) - rank(b.path, currentPath) || a.pos - b.pos);
@@ -240,11 +258,17 @@ export function buildReviewEntries(args: {
   return entries;
 }
 
-export function filterReviewEntries(entries: ReviewEntry[], filter: ReviewFilter): ReviewEntry[] {
-  if (filter === "all") return entries;
+export function filterReviewEntries(
+  entries: ReviewEntry[],
+  facets: Set<ReviewFacet>,
+): ReviewEntry[] {
   return entries.filter((e) => {
-    if (e.kind === "liveSuggestion") return filter === "pending";
-    return filter === "pending" ? e.thread.hasPending : e.thread.hasSubmitted;
+    if (e.kind === "liveSuggestion") return facets.has("pending");
+    const t = e.thread;
+    if (facets.has("resolved") && t.resolved) return true;
+    if (facets.has("pending") && t.hasPending && !t.resolved) return true;
+    if (facets.has("submitted") && t.hasSubmitted && !t.resolved) return true;
+    return false;
   });
 }
 
@@ -358,17 +382,14 @@ export function buildSuggestionMarks(args: {
 }
 
 /**
- * Counts for the all / pending / submitted filter tabs, derived from the
+ * Counts for the pending / submitted / resolved filter facets, derived from the
  * (already current-file-scoped) entries so the tab numbers match the list.
  */
 export function reviewEntryCounts(entries: ReviewEntry[]): {
-  all: number;
   pending: number;
   submitted: number;
+  resolved: number;
 } {
-  return {
-    all: entries.length,
-    pending: filterReviewEntries(entries, "pending").length,
-    submitted: filterReviewEntries(entries, "submitted").length,
-  };
+  const count = (f: ReviewFacet) => filterReviewEntries(entries, new Set([f])).length;
+  return { pending: count("pending"), submitted: count("submitted"), resolved: count("resolved") };
 }

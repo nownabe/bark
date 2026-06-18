@@ -3,8 +3,10 @@ import {
   avatarUrl,
   buildBlobPermalink,
   buildSuggestionBlock,
+  findThreadNodeId,
   parseNextLink,
   pullStatus,
+  type ReviewThreadInfo,
 } from "../lib/github";
 
 describe("pullStatus", () => {
@@ -61,5 +63,19 @@ describe("buildBlobPermalink", () => {
 describe("buildSuggestionBlock", () => {
   test("wraps replacement in a suggestion fence", () => {
     expect(buildSuggestionBlock("const x = 2;")).toBe("```suggestion\nconst x = 2;\n```");
+  });
+});
+
+describe("findThreadNodeId", () => {
+  const threads: ReviewThreadInfo[] = [
+    { id: "PRRT_1", isResolved: false, commentIds: [10, 11] },
+    { id: "PRRT_2", isResolved: true, commentIds: [20] },
+  ];
+  test("returns the node id of the thread containing the comment", () => {
+    expect(findThreadNodeId(threads, 11)).toBe("PRRT_1");
+    expect(findThreadNodeId(threads, 20)).toBe("PRRT_2");
+  });
+  test("returns null when no thread contains the comment", () => {
+    expect(findThreadNodeId(threads, 99)).toBeNull();
   });
 });
