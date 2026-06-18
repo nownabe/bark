@@ -16,12 +16,13 @@ import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { GFM } from "@lezer/markdown";
 import { EditorView } from "@codemirror/view";
-import { handleSelectionUpdate } from "./cmAnchor";
+import { handleSelectionUpdate, bubbleAnchorPoint, type BubblePos } from "./cmAnchor";
 import { commentHighlightField, commentHighlightTheme, setCommentHighlights } from "./highlight";
 import { richMarkdown, richMarkdownTheme } from "./richMarkdown";
 import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from "./suggestMode";
 import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from "./suggestionView";
 import { SelectionComposer } from "./components/SelectionComposer";
+import { SelectionBubble } from "./components/SelectionBubble";
 import { SuggestionDiff } from "./components/SuggestionDiff";
 import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
@@ -33,8 +34,10 @@ import {
   buildReviewEntries,
   buildSuggestionMarks,
   buildThreads,
+  composerInsertIndex,
   filterReviewEntries,
   reviewEntryCounts,
+  sortPos,
   threadRangeAt,
   type PendingSuggestion,
   type ReviewFacet,
@@ -150,7 +153,13 @@ export function App() {
 
   const [role, setRole] = useState<Role>("reviewer");
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
+  // The open composer's anchor — set only when the selection bubble is clicked.
   const [anchor, setAnchor] = useState<SourceAnchor | null>(null);
+  // The pending text selection (drives the bubble button, not the composer) and
+  // the bubble's viewport position. Cleared when the selection collapses or the
+  // composer opens.
+  const [selection, setSelection] = useState<SourceAnchor | null>(null);
+  const [bubblePos, setBubblePos] = useState<BubblePos | null>(null);
   const [commentBody, setCommentBody] = useState("");
   const [comments, setComments] = useState<ExistingComment[]>([]);
   // Source of each commented file as of its createdAtSha, keyed `${sha}:${path}`,
@@ -729,6 +738,35 @@ export function App() {
     setAnchor(null);
   };
 
+  // Clicking the selection bubble opens the composer on the pending selection
+  // and dismisses the bubble. The composer then drives the rest of the flow via
+  // `anchor`, unchanged. The editor selection is left intact (quote captured).
+  const openComposer = () => {
+    if (!selection) return;
+    setAnchor(selection);
+    setSelection(null);
+    setBubblePos(null);
+  };
+
+  // Keep the bubble pinned above the selection as the editor scrolls or the
+  // window resizes; hide it if the selection start scrolls out of view.
+  useEffect(() => {
+    if (!selection) return;
+    const view = cmRef.current?.view;
+    const scroller = view?.scrollDOM;
+    if (!view || !scroller) return;
+    const reposition = () => {
+      const coords = view.coordsAtPos(selection.startOffset);
+      setBubblePos(coords ? bubbleAnchorPoint(coords) : null);
+    };
+    scroller.addEventListener("scroll", reposition, { passive: true });
+    window.addEventListener("resize", reposition);
+    return () => {
+      scroller.removeEventListener("scroll", reposition);
+      window.removeEventListener("resize", reposition);
+    };
+  }, [selection]);
+
   // Thread reply: inherit the thread's anchor (from its first submitted comment,
   // else its first pending draft) and add a draft with the same thread id.
   const addReply = async (thread: ReviewThread) => {
@@ -1021,6 +1059,8 @@ export function App() {
     setSource(ref ? "" : sampleDoc);
     setBaseSource(ref ? "" : sampleDoc);
     setAnchor(null);
+    setSelection(null);
+    setBubblePos(null);
   };
 
   // Read-modify-write the accumulated per-path edits to storage, so a path edited
@@ -1599,6 +1639,8 @@ export function App() {
                 onChange={(e) => {
                   setSelectedPath(e.target.value);
                   setAnchor(null);
+                  setSelection(null);
+                  setBubblePos(null);
                 }}
               >
                 {files.map((f) => (
@@ -1783,7 +1825,7 @@ export function App() {
               onChange={onSourceChange}
               onUpdate={(vu) => {
                 if (suppressNextAnchor.current) return;
-                handleSelectionUpdate(vu, setAnchor);
+                handleSelectionUpdate(vu, { setSelection, setBubblePos });
               }}
             />
           </div>
@@ -1810,27 +1852,41 @@ export function App() {
                 ))}
               </div>
             </div>
-            {anchor ? (
-              <SelectionComposer
-                anchor={anchor}
-                value={commentBody}
-                onChange={setCommentBody}
-                onAdd={addDraft}
-                onDiscard={discardComposer}
-              />
-            ) : null}
             {visibleEntries.length === 0 && !anchor ? (
               <p className="empty">No items.</p>
             ) : (
-              visibleEntries.map((e) =>
-                e.kind === "liveSuggestion"
-                  ? renderLiveSuggestion(e.suggestion)
-                  : renderThread(e.thread),
-              )
+              (() => {
+                const items = visibleEntries.map((e) =>
+                  e.kind === "liveSuggestion"
+                    ? renderLiveSuggestion(e.suggestion)
+                    : renderThread(e.thread),
+                );
+                if (anchor) {
+                  const idx = composerInsertIndex(
+                    visibleEntries,
+                    sortPos(anchor.startLine, anchor.startCol),
+                  );
+                  items.splice(
+                    idx,
+                    0,
+                    <SelectionComposer
+                      key="__composer"
+                      anchor={anchor}
+                      value={commentBody}
+                      onChange={setCommentBody}
+                      onAdd={addDraft}
+                      onDiscard={discardComposer}
+                    />,
+                  );
+                }
+                return items;
+              })()
             )}
           </section>
         </aside>
       </div>
+
+      <SelectionBubble pos={bubblePos} onClick={openComposer} />
 
       {showSubmitConfirm ? (
         <SubmitConfirmModal

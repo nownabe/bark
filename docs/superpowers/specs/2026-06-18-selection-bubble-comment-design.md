@@ -2,7 +2,7 @@
 
 ## Problem
 
-Today, selecting any text in the review editor *immediately* renders
+Today, selecting any text in the review editor _immediately_ renders
 `SelectionComposer` at the top of the sidebar list (`App.tsx`, driven by the
 `anchor` state). There is no intermediate step: a stray selection opens a
 comment box. This is noisy and unlike the Google-Docs-style flow Bark is after.

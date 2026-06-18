@@ -6,16 +6,46 @@ import type { EditorState } from "@codemirror/state";
 import type { ViewUpdate } from "@codemirror/view";
 import type { SourceAnchor } from "../../lib/anchor";
 
-// CM update handler for the comment composer. Whenever the selection changes we
-// recompute the anchor — including resetting it to null when the selection
-// collapses, so the composer closes once the selection is released (task 5).
-// (The previous handler only set non-null anchors, leaving the composer stuck.)
-export function handleSelectionUpdate(
-  vu: ViewUpdate,
-  setAnchor: (a: SourceAnchor | null) => void,
-): void {
+/** Viewport coords (px) at which to anchor the selection bubble button. */
+export interface BubblePos {
+  top: number;
+  left: number;
+}
+
+export interface SelectionHandlers {
+  /** The pending selection that drives the bubble button (null clears it). */
+  setSelection: (a: SourceAnchor | null) => void;
+  /** The bubble button's viewport position (null hides it). */
+  setBubblePos: (p: BubblePos | null) => void;
+}
+
+// Gap (px) between the top of the selection and the bubble's anchor point.
+const BUBBLE_GAP = 8;
+
+// CM update handler. Selecting text no longer opens the composer; it sets a
+// pending selection plus the bubble button position (just above the selection
+// start). The composer only opens when the bubble is clicked (App.tsx). When
+// the selection collapses, both are cleared.
+export function handleSelectionUpdate(vu: ViewUpdate, h: SelectionHandlers): void {
   if (!vu.selectionSet) return;
-  setAnchor(cmSelectionToAnchor(vu.state));
+  const anchor = cmSelectionToAnchor(vu.state);
+  h.setSelection(anchor);
+  if (!anchor) {
+    h.setBubblePos(null);
+    return;
+  }
+  const coords = vu.view?.coordsAtPos(anchor.startOffset);
+  h.setBubblePos(coords ? bubbleAnchorPoint(coords) : null);
+}
+
+// The point just above a selection's top-left, where the bubble is anchored.
+// Kept pure (no DOM) so it can be unit-tested; the button itself sits above
+// this point via CSS (translateY(-100%)).
+export function bubbleAnchorPoint(
+  coords: { top: number; left: number },
+  opts: { gap?: number } = {},
+): BubblePos {
+  return { top: coords.top - (opts.gap ?? BUBBLE_GAP), left: coords.left };
 }
 
 export function cmSelectionToAnchor(state: EditorState): SourceAnchor | null {
