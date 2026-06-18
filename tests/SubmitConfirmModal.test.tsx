@@ -97,6 +97,22 @@ describe("SubmitConfirmModal", () => {
     expect(cancelled).toBe(1);
   });
 
+  test("summarizes what will be posted and the target PR", () => {
+    const { container } = render(
+      <SubmitConfirmModal
+        items={pendingEntries()}
+        target={{ owner: "o", repo: "r", number: 7 }}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    const summary = container.querySelector(".submit-summary")?.textContent ?? "";
+    expect(summary).toContain("o/r #7");
+    // 1 in-diff comment + 1 in-diff suggestion → one review with both
+    expect(summary).toContain("One review");
+    expect(summary).toContain("1 comment and 1 suggestion");
+  });
+
   test("renders a dialog role for accessibility", () => {
     const { container } = render(
       <SubmitConfirmModal items={pendingEntries()} onConfirm={() => {}} onCancel={() => {}} />,

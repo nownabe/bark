@@ -1299,6 +1299,7 @@ export function App() {
       {showSubmitConfirm ? (
         <SubmitConfirmModal
           items={pendingItems}
+          target={ref ?? undefined}
           onConfirm={submitReview}
           onCancel={() => setShowSubmitConfirm(false)}
           loading={loading}
