@@ -68,6 +68,72 @@ function lcsDiff(a: string[], b: string[]): LineOp[] {
   return ops;
 }
 
+/** A suggestion hunk's span in the *edited* (current) document, in char offsets. */
+export interface SuggestionEditRange {
+  /** Base line range (matches the corresponding SuggestionHunk.sl/el → its cid). */
+  sl: number;
+  el: number;
+  /** The inserted (replacement) text's char range in the edited doc. For a pure
+   * deletion (no replacement) this collapses to the point where the text was. */
+  from: number;
+  to: number;
+}
+
+/**
+ * For each suggestion hunk (same grouping/order as {@link diffToSuggestions}),
+ * the char range its replacement text occupies in the *edited* document. Lets a
+ * click on the suggested text in the editor be mapped back to its hunk (the
+ * hunks themselves carry only base-doc line numbers).
+ */
+export function suggestionEditRanges(base: string, edited: string): SuggestionEditRange[] {
+  const ops = lcsDiff(splitLines(base), splitLines(edited));
+  const editedLines = splitLines(edited);
+  const lineStart: number[] = [];
+  let acc = 0;
+  for (const ln of editedLines) {
+    lineStart.push(acc);
+    acc += ln.length + 1; // + the "\n" separator
+  }
+  const startOf = (line1: number) =>
+    line1 - 1 < editedLines.length ? lineStart[line1 - 1] : edited.length;
+
+  const ranges: SuggestionEditRange[] = [];
+  let baseLine = 1;
+  let editedLine = 1; // 1-based index into editedLines
+  let i = 0;
+  while (i < ops.length) {
+    if (ops[i].op === 0) {
+      baseLine++;
+      editedLine++;
+      i++;
+      continue;
+    }
+    const startBase = baseLine;
+    const startEdited = editedLine;
+    let del = 0;
+    let ins = 0;
+    while (i < ops.length && ops[i].op !== 0) {
+      if (ops[i].op === -1) {
+        del++;
+        baseLine++;
+      } else {
+        ins++;
+        editedLine++;
+      }
+      i++;
+    }
+    if (del > 0) {
+      const from = startOf(startEdited);
+      const to =
+        ins > 0
+          ? lineStart[startEdited + ins - 2] + editedLines[startEdited + ins - 2].length
+          : from;
+      ranges.push({ sl: startBase, el: startBase + del - 1, from, to });
+    }
+  }
+  return ranges;
+}
+
 /**
  * Convert the base → edited diff into GitHub suggestion hunks that replace lines.
  * v1 handles "delete or replace" hunks only (pure line insertions are excluded since there's no target line).
