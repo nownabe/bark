@@ -140,25 +140,23 @@ select:focus-visible {
 .topbar__meta span {
   font-variant-numeric: tabular-nums;
 }
-.topbar__pr {
+/* two-line PR header: title (headline) on top, repo/#n · sha muted below */
+.topbar__pr-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.topbar__pr-headline {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-width: 0;
-  color: var(--fg-soft);
-  text-decoration: none;
-  transition: color var(--dur) var(--ease);
 }
-.topbar__pr:hover {
-  color: var(--accent);
-}
-/* the title sets its own color, so tint it on hover too for consistency */
-.topbar__pr:hover .topbar__pr-title {
-  color: var(--accent);
-}
-.topbar__pr-ref {
-  font-weight: 600;
-  flex: none;
+.topbar__pr-sub {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 .topbar__spacer {
   flex: 1;
@@ -572,16 +570,21 @@ select.input:focus {
   color: var(--red);
 }
 
-/* PR title shown after the repo/#n ref inside the same link — the headline */
+/* PR title — the headline link (the only link in the header) */
 .topbar__pr-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--fg);
+  text-decoration: none;
   max-width: 420px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  transition: color var(--dur) var(--ease);
+}
+.topbar__pr-title:hover {
+  color: var(--accent);
 }
 
 /* PR details popover */

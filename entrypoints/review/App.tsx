@@ -1144,38 +1144,40 @@ export function App() {
         </span>
         {ref ? (
           <>
-            <span className="topbar__meta">
-              {prStatus ? (
-                <span className={`badge badge--pr badge--pr-${prStatus}`}>
-                  {PR_STATUS_LABEL[prStatus]}
-                </span>
-              ) : null}
-              <a
-                className="topbar__pr"
-                href={`https://github.com/${owner}/${repo}/pull/${prNum}`}
-                target="_blank"
-                rel="noreferrer"
-                title={pull?.title ?? "Open this pull request on GitHub"}
-              >
-                <span className="topbar__pr-ref">
-                  {owner}/{repo} #{prNum}
-                </span>
-                {pull?.title ? <span className="topbar__pr-title">{pull.title}</span> : null}
-              </a>
-              {pull ? (
-                <button
-                  type="button"
-                  ref={prInfoBtnRef}
-                  className="help-btn"
-                  title="Pull request details"
-                  aria-label="Pull request details"
-                  onClick={() => setShowPrInfo((v) => !v)}
+            <div className="topbar__pr-head">
+              <span className="topbar__pr-headline">
+                <a
+                  className="topbar__pr-title"
+                  href={`https://github.com/${owner}/${repo}/pull/${prNum}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={pull?.title ?? "Open this pull request on GitHub"}
                 >
-                  ℹ
-                </button>
-              ) : null}
-              {headSha ? <span>@ {headSha.slice(0, 7)}</span> : null}
-            </span>
+                  {pull?.title ?? `${owner}/${repo} #${prNum}`}
+                </a>
+                {prStatus ? (
+                  <span className={`badge badge--pr badge--pr-${prStatus}`}>
+                    {PR_STATUS_LABEL[prStatus]}
+                  </span>
+                ) : null}
+                {pull ? (
+                  <button
+                    type="button"
+                    ref={prInfoBtnRef}
+                    className="help-btn"
+                    title="Pull request details"
+                    aria-label="Pull request details"
+                    onClick={() => setShowPrInfo((v) => !v)}
+                  >
+                    ℹ
+                  </button>
+                ) : null}
+              </span>
+              <span className="topbar__pr-sub">
+                {owner}/{repo} #{prNum}
+                {headSha ? <> · @{headSha.slice(0, 7)}</> : null}
+              </span>
+            </div>
             {files.length > 0 ? (
               <select
                 className="input"
