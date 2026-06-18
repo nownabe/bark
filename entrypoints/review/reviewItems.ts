@@ -12,8 +12,9 @@
 // Everything here is pure so it can be unit-tested without React/CodeMirror.
 import type { ExistingComment } from "../../lib/comments";
 import type { PendingDraft } from "../../lib/drafts";
-import type { AnchorRange } from "../../lib/metadata";
-import type { SuggestionHunk } from "../../lib/suggest";
+import type { AnchorRange, CommentMetadata } from "../../lib/metadata";
+import { extractSuggestionBlock, type SuggestionHunk } from "../../lib/suggest";
+import { reanchorComment } from "../../lib/reanchor";
 
 /** One message in a thread: either already submitted, or a pending local draft. */
 export type ThreadMessage =
@@ -257,6 +258,45 @@ export function summarizePending(items: PendingItem[]): SubmitSummary {
     else group.comments++;
   }
   return summary;
+}
+
+/** A submitted suggestion's span + replacement, for rendering over the body. */
+export interface SuggestionRender {
+  from: number;
+  to: number;
+  replacement: string;
+}
+
+/**
+ * Build the spans for submitted suggestions to render over the editor body.
+ *
+ * Suggestions store a *line-based* anchor (column 1 → column 1), so when the
+ * comment's sha matches the head, the stored start/end offsets collapse to zero
+ * width for a single-line replacement and the suggestion would silently vanish.
+ * Size the span by the quoted old text instead (it covers exactly the replaced
+ * lines), which is also correct after re-anchoring to a moved position.
+ */
+export function buildSuggestionMarks(args: {
+  comments: ExistingComment[];
+  source: string;
+  lineStarts: number[];
+  headSha: string;
+  currentPath: string;
+  dismissed: Record<string, unknown>;
+}): SuggestionRender[] {
+  const { comments, source, lineStarts, headSha, currentPath, dismissed } = args;
+  const docLen = source.length;
+  return comments
+    .filter((c) => c.meta?.kind === "suggestion" && c.meta.path === currentPath && !dismissed[c.id])
+    .map((c) => {
+      const meta = c.meta as CommentMetadata;
+      const r = reanchorComment(source, lineStarts, meta, headSha);
+      const from = r.startOffset;
+      const to = r.startOffset + (meta.quote?.length ?? 0);
+      return { from, to, status: r.status, replacement: extractSuggestionBlock(c.body) ?? "" };
+    })
+    .filter((m) => m.status !== "outdated" && m.from >= 0 && m.to <= docLen && m.from < m.to)
+    .map(({ from, to, replacement }): SuggestionRender => ({ from, to, replacement }));
 }
 
 export function reviewCounts(args: {

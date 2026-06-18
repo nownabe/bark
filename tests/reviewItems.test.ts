@@ -10,6 +10,7 @@ import {
   buildReviewEntries,
   buildPendingItems,
   buildPendingSuggestions,
+  buildSuggestionMarks,
   filterReviewEntries,
   reviewCounts,
   summarizePending,
@@ -17,8 +18,10 @@ import {
   type PendingSuggestion,
   type ThreadRange,
 } from "../entrypoints/review/reviewItems";
+import { buildLineIndex } from "../lib/anchor";
 import type { ExistingComment } from "../lib/comments";
 import type { PendingDraft } from "../lib/drafts";
+import type { CommentMetadata } from "../lib/metadata";
 import type { SuggestionHunk } from "../lib/suggest";
 
 function comment(over: Partial<ExistingComment> & { id: number }): ExistingComment {
@@ -89,6 +92,56 @@ describe("summarizePending", () => {
     expect(s.total).toBe(4);
     expect(s.review).toEqual({ comments: 1, suggestions: 2, total: 3 });
     expect(s.direct).toEqual({ comments: 1, suggestions: 0, total: 1 });
+  });
+});
+
+describe("buildSuggestionMarks", () => {
+  const source = "line one\nline two\nline three\n";
+  const lineStarts = buildLineIndex(source);
+  function suggestionComment(over: Partial<CommentMetadata> = {}): ExistingComment {
+    return {
+      id: 1,
+      source: "review",
+      author: "x",
+      body: "please apply\n\n```suggestion\nLINE TWO\n```",
+      meta: {
+        cid: "c1",
+        path: "a.md",
+        range: { sl: 2, sc: 1, el: 2, ec: 1 }, // line-based: collapses to zero width
+        quote: "line two",
+        sha: "HEAD",
+        thread: "t1",
+        kind: "suggestion",
+        ...over,
+      },
+    };
+  }
+
+  test("renders a single-line submitted suggestion (regression: was zero-width)", () => {
+    const marks = buildSuggestionMarks({
+      comments: [suggestionComment()],
+      source,
+      lineStarts,
+      headSha: "HEAD", // sha matches → previously used the collapsed line range
+      currentPath: "a.md",
+      dismissed: {},
+    });
+    expect(marks).toHaveLength(1);
+    expect(marks[0].to).toBeGreaterThan(marks[0].from);
+    expect(source.slice(marks[0].from, marks[0].to)).toBe("line two");
+    expect(marks[0].replacement).toBe("LINE TWO");
+  });
+
+  test("skips non-suggestion comments, other files, and dismissed suggestions", () => {
+    const marks = buildSuggestionMarks({
+      comments: [suggestionComment({ path: "other.md" }), suggestionComment()],
+      source,
+      lineStarts,
+      headSha: "HEAD",
+      currentPath: "a.md",
+      dismissed: { "1": "accepted" },
+    });
+    expect(marks).toHaveLength(0);
   });
 });
 
