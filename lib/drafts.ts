@@ -49,7 +49,11 @@ export async function saveDrafts(ref: PrRef, drafts: PendingDraft[]): Promise<vo
  * state and vanish when the file is re-fetched).
  */
 export interface SuggestionEdit {
+  /** The reviewer's edited document text. */
   source: string;
+  /** The unedited base text the edit is diffed against, so the live suggestion
+   * hunks can be recomputed for any file — not only the one open in the editor. */
+  base: string;
   comments: Record<string, string>;
 }
 

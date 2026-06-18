@@ -11,9 +11,9 @@
 //
 // Everything here is pure so it can be unit-tested without React/CodeMirror.
 import type { ExistingComment } from "../../lib/comments";
-import type { PendingDraft } from "../../lib/drafts";
+import type { PendingDraft, SuggestionEdit } from "../../lib/drafts";
 import type { AnchorRange, CommentMetadata } from "../../lib/metadata";
-import { extractSuggestionBlock, type SuggestionHunk } from "../../lib/suggest";
+import { diffToSuggestions, extractSuggestionBlock, type SuggestionHunk } from "../../lib/suggest";
 import { reanchorComment } from "../../lib/reanchor";
 
 /** One message in a thread: either already submitted, or a pending local draft. */
@@ -76,6 +76,32 @@ export function buildPendingSuggestions(
       body: opts.commentFor(cid),
     };
   });
+}
+
+/**
+ * Gather pending suggestions across ALL files from their persisted edits, for the
+ * submit-review scope (button count, confirm modal, submit). Unlike the sidebar
+ * — which shows only the open file — submit spans every file, so suggestions must
+ * be recomputed from each file's stored base→source edit, mirroring how pending
+ * comment drafts already span all files. Groups are emitted path-sorted.
+ */
+export function buildAllPendingSuggestions(
+  edits: Record<string, SuggestionEdit>,
+  isInDiff: (path: string, sl: number, el: number) => boolean,
+): PendingSuggestion[] {
+  return Object.keys(edits)
+    .sort((a, b) => a.localeCompare(b))
+    .flatMap((path) => {
+      const edit = edits[path];
+      // Edits persisted before `base` existed can't be diffed — skip them rather
+      // than crash diffToSuggestions on an undefined source/base.
+      if (typeof edit.base !== "string" || typeof edit.source !== "string") return [];
+      return buildPendingSuggestions(diffToSuggestions(edit.base, edit.source), {
+        path,
+        isInDiff: (sl, el) => isInDiff(path, sl, el),
+        commentFor: (cid) => edit.comments[cid] ?? "",
+      });
+    });
 }
 
 export type ReviewFilter = "all" | "pending" | "submitted";
