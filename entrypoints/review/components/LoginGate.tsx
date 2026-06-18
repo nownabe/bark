@@ -38,12 +38,12 @@ export function LoginGate({
   const [patSubmitting, setPatSubmitting] = useState(false);
 
   const submitPat = async () => {
-    const token = patRef.current?.value ?? "";
+    const token = (patRef.current?.value ?? "").trim();
     setPatError(null);
     setPatSubmitting(true);
     try {
       await validatePat(token);
-      await onAuthenticated(token.trim(), "pat");
+      await onAuthenticated(token, "pat");
     } catch (e) {
       setPatError(e instanceof Error ? e.message : "Could not validate the token.");
     } finally {

@@ -68,6 +68,9 @@ describe("LoginGate", () => {
     expect(container.querySelector<HTMLInputElement>("input[type='password']")!.value).toBe(
       "ghp_bad",
     );
+    expect(container.querySelector<HTMLButtonElement>("[data-test='pat-save']")!.disabled).toBe(
+      false,
+    );
   });
 
   test("a valid token calls onAuthenticated with the token and 'pat'", async () => {
