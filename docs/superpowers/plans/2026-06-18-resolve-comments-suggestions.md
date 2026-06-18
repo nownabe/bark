@@ -23,10 +23,12 @@
 ### Task 1: Metadata `event` field
 
 **Files:**
+
 - Modify: `lib/metadata.ts` (the `CommentMetadata` interface)
 - Test: `tests/metadata.test.ts`
 
 **Interfaces:**
+
 - Produces: `CommentMetadata.event?: "resolve" | "unresolve"` — present only on resolution-marker comments.
 
 - [ ] **Step 1: Write the failing test**
@@ -74,10 +76,12 @@ git commit -m "feat(metadata): add resolution event field to CommentMetadata"
 ### Task 2: Derive `resolved` in the review-items model
 
 **Files:**
+
 - Modify: `entrypoints/review/reviewItems.ts` (`ReviewThread`, `buildThreads`)
 - Test: `tests/reviewItems.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CommentMetadata.event` (Task 1).
 - Produces:
   - `ReviewThread.resolved: boolean`
@@ -144,9 +148,9 @@ In `entrypoints/review/reviewItems.ts`:
 Add `resolved` to the interface (after `hasSubmitted: boolean;`):
 
 ```typescript
-  hasSubmitted: boolean;
-  /** Resolved via a resolution event, or root is an accepted suggestion. */
-  resolved: boolean;
+hasSubmitted: boolean;
+/** Resolved via a resolution event, or root is an accepted suggestion. */
+resolved: boolean;
 ```
 
 Replace the `buildThreads` function with:
@@ -232,10 +236,12 @@ git commit -m "feat(review): derive thread resolved state from events and accept
 ### Task 3: Multi-select facet filter
 
 **Files:**
+
 - Modify: `entrypoints/review/reviewItems.ts` (`ReviewFilter` → `ReviewFacet`, `filterReviewEntries`, `reviewEntryCounts`)
 - Test: `tests/reviewItems.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ReviewThread.resolved` (Task 2).
 - Produces:
   - `type ReviewFacet = "pending" | "submitted" | "resolved"` (replaces `ReviewFilter`; `"all"` removed)
@@ -247,20 +253,20 @@ git commit -m "feat(review): derive thread resolved state from events and accept
 In `tests/reviewItems.test.ts`, replace the three filter tests (the `'pending'`, `'submitted'`, `'all'` tests around lines 209-223) with:
 
 ```typescript
-  test("'pending' shows threads with pending content + live suggestions", () => {
-    const pending = filterReviewEntries(entries, new Set(["pending"] as const));
-    expect(pending).toHaveLength(3); // t1 (pending reply) + new (pending) + live
-  });
+test("'pending' shows threads with pending content + live suggestions", () => {
+  const pending = filterReviewEntries(entries, new Set(["pending"] as const));
+  expect(pending).toHaveLength(3); // t1 (pending reply) + new (pending) + live
+});
 
-  test("'submitted' shows only threads that have submitted comments", () => {
-    const submitted = filterReviewEntries(entries, new Set(["submitted"] as const));
-    expect(submitted).toHaveLength(1);
-    expect(submitted[0].kind === "thread" && submitted[0].thread.id).toBe("t1");
-  });
+test("'submitted' shows only threads that have submitted comments", () => {
+  const submitted = filterReviewEntries(entries, new Set(["submitted"] as const));
+  expect(submitted).toHaveLength(1);
+  expect(submitted[0].kind === "thread" && submitted[0].thread.id).toBe("t1");
+});
 
-  test("pending+submitted is the union of the two facets", () => {
-    expect(filterReviewEntries(entries, new Set(["pending", "submitted"] as const))).toHaveLength(3);
-  });
+test("pending+submitted is the union of the two facets", () => {
+  expect(filterReviewEntries(entries, new Set(["pending", "submitted"] as const))).toHaveLength(3);
+});
 ```
 
 Replace the `reviewEntryCounts` test (around lines 248-262) with:
@@ -357,10 +363,12 @@ git commit -m "feat(review): make the sidebar filter a multi-select facet set"
 ### Task 4: GitHub client — resolve API + thread lookup
 
 **Files:**
+
 - Modify: `lib/github.ts` (add `ReviewThreadInfo`, `findThreadNodeId`, and `GitHubClient` methods)
 - Test: `tests/github.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `interface ReviewThreadInfo { id: string; isResolved: boolean; commentIds: number[] }`
   - `findThreadNodeId(threads: ReviewThreadInfo[], commentId: number): string | null` (pure)
@@ -532,11 +540,13 @@ git commit -m "feat(github): add review-thread resolve API and thread lookup"
 ### Task 5: Wire resolve/reopen into the review UI
 
 **Files:**
+
 - Modify: `entrypoints/review/App.tsx`
 - Modify: `entrypoints/review/styles.css` (multi-select chip + resolved badge)
 - Reference: `design.md` (read before the chip restyle; keep tokens/classes consistent)
 
 **Interfaces:**
+
 - Consumes: `ReviewFacet`, `filterReviewEntries`, `reviewEntryCounts` (Task 3); `buildThreads` accepted option (Task 2); `embedMetadata`/`CommentMetadata` (Task 1); `findThreadNodeId`, `listReviewThreads`, `resolveReviewThread`, `unresolveReviewThread`, `replyToReviewComment` (Task 4).
 
 > No unit tests: App.tsx is not unit-tested in this project (CI gates are test/lint/format). Verify with `typecheck`, `build`, and the manual steps below.
@@ -548,6 +558,7 @@ Run: `Read entrypoints/review/styles.css` `:root` block and `design.md` to find 
 - [ ] **Step 2: Imports**
 
 In `entrypoints/review/App.tsx`:
+
 - In the `reviewItems` import block, change `type ReviewFilter,` to `type ReviewFacet,`.
 - Ensure these are imported from `../../lib/github`: `findThreadNodeId`. (Add to the existing github import.)
 - Ensure `embedMetadata` is imported from `../../lib/metadata` and `type CommentMetadata` is available (add `embedMetadata` to the metadata import).
@@ -557,21 +568,21 @@ In `entrypoints/review/App.tsx`:
 Replace the filter state declaration (line ~164):
 
 ```typescript
-  const [reviewFilter, setReviewFilter] = useState<Set<ReviewFacet>>(
-    () => new Set<ReviewFacet>(["pending", "submitted"]),
-  );
+const [reviewFilter, setReviewFilter] = useState<Set<ReviewFacet>>(
+  () => new Set<ReviewFacet>(["pending", "submitted"]),
+);
 ```
 
 Add a toggle helper near the other handlers:
 
 ```typescript
-  const toggleFacet = (f: ReviewFacet) =>
-    setReviewFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(f)) next.delete(f);
-      else next.add(f);
-      return next;
-    });
+const toggleFacet = (f: ReviewFacet) =>
+  setReviewFilter((prev) => {
+    const next = new Set(prev);
+    if (next.has(f)) next.delete(f);
+    else next.add(f);
+    return next;
+  });
 ```
 
 - [ ] **Step 4: Pass accepted into buildThreads**
@@ -579,10 +590,10 @@ Add a toggle helper near the other handlers:
 Replace the `threads` memo (lines ~243-246):
 
 ```typescript
-  const threads = useMemo(
-    () => buildThreads(comments, drafts, curPath, { accepted: (id) => dismissed[id] === "accepted" }),
-    [comments, drafts, curPath, dismissed],
-  );
+const threads = useMemo(
+  () => buildThreads(comments, drafts, curPath, { accepted: (id) => dismissed[id] === "accepted" }),
+  [comments, drafts, curPath, dismissed],
+);
 ```
 
 - [ ] **Step 5: Fix the two "make emphasized item visible" calls**
@@ -590,7 +601,7 @@ Replace the `threads` memo (lines ~243-246):
 Replace both `setReviewFilter("all");` calls (lines ~1068 and ~1087) with:
 
 ```typescript
-      setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"]));
+setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"]));
 ```
 
 - [ ] **Step 6: Resolve / reopen handlers**
@@ -598,35 +609,35 @@ Replace both `setReviewFilter("all");` calls (lines ~1068 and ~1087) with:
 Add near `addReply` (it has `ref`, `client`, `headSha`, `setReloadKey` in scope):
 
 ```typescript
-  // Post a resolution-event comment (hidden metadata SoT) and, for in-diff
-  // threads, mirror it with GitHub's native resolve. Immediate; then reload.
-  const setThreadResolved = async (t: ReviewThread, resolved: boolean) => {
-    if (!ref || !headSha) return;
-    const root = t.rootComment;
-    if (!root?.meta) return;
-    const evMeta: CommentMetadata = {
-      cid: crypto.randomUUID(),
-      path: root.meta.path,
-      range: root.meta.range,
-      quote: root.meta.quote,
-      sha: headSha,
-      thread: t.id,
-      kind: "comment",
-      event: resolved ? "resolve" : "unresolve",
-    };
-    const body = embedMetadata(resolved ? "Resolved via Bark." : "Reopened via Bark.", evMeta);
-    if (root.source === "review") {
-      await client.replyToReviewComment(ref, root.id, body);
-      const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
-      if (nodeId) {
-        if (resolved) await client.resolveReviewThread(nodeId);
-        else await client.unresolveReviewThread(nodeId);
-      }
-    } else {
-      await client.createIssueComment(ref, body);
-    }
-    setReloadKey((k) => k + 1);
+// Post a resolution-event comment (hidden metadata SoT) and, for in-diff
+// threads, mirror it with GitHub's native resolve. Immediate; then reload.
+const setThreadResolved = async (t: ReviewThread, resolved: boolean) => {
+  if (!ref || !headSha) return;
+  const root = t.rootComment;
+  if (!root?.meta) return;
+  const evMeta: CommentMetadata = {
+    cid: crypto.randomUUID(),
+    path: root.meta.path,
+    range: root.meta.range,
+    quote: root.meta.quote,
+    sha: headSha,
+    thread: t.id,
+    kind: "comment",
+    event: resolved ? "resolve" : "unresolve",
   };
+  const body = embedMetadata(resolved ? "Resolved via Bark." : "Reopened via Bark.", evMeta);
+  if (root.source === "review") {
+    await client.replyToReviewComment(ref, root.id, body);
+    const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
+    if (nodeId) {
+      if (resolved) await client.resolveReviewThread(nodeId);
+      else await client.unresolveReviewThread(nodeId);
+    }
+  } else {
+    await client.createIssueComment(ref, body);
+  }
+  setReloadKey((k) => k + 1);
+};
 ```
 
 - [ ] **Step 7: Resolve / Reopen button in `renderThread`**
@@ -634,40 +645,42 @@ Add near `addReply` (it has `ref`, `client`, `headSha`, `setReloadKey` in scope)
 In `renderThread` (near the `showAuthorActions` block, ~line 1356), compute eligibility and render a control. A thread is event-resolvable when it has a Bark root comment with a submitted comment. Reopen is shown only when resolution came from an event (not from accepting a suggestion):
 
 ```typescript
-    const acceptedRoot = root?.meta?.kind === "suggestion" && dismissed[root.id] === "accepted";
-    const canResolve = Boolean(root?.meta) && t.hasSubmitted && !acceptedRoot;
+const acceptedRoot = root?.meta?.kind === "suggestion" && dismissed[root.id] === "accepted";
+const canResolve = Boolean(root?.meta) && t.hasSubmitted && !acceptedRoot;
 ```
 
 Then, inside the thread's actions area, add:
 
 ```tsx
-        {canResolve ? (
-          <div className="comment__actions">
-            {t.resolved ? (
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void setThreadResolved(t, false);
-                }}
-              >
-                Reopen
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void setThreadResolved(t, true);
-                }}
-              >
-                Resolve
-              </button>
-            )}
-          </div>
-        ) : null}
+{
+  canResolve ? (
+    <div className="comment__actions">
+      {t.resolved ? (
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            void setThreadResolved(t, false);
+          }}
+        >
+          Reopen
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            void setThreadResolved(t, true);
+          }}
+        >
+          Resolve
+        </button>
+      )}
+    </div>
+  ) : null;
+}
 ```
 
 (Use the button classes that already exist in `styles.css`; if `btn--ghost`/`btn--sm` don't exist, reuse the classes the Accept/Reject buttons use.)
@@ -677,18 +690,13 @@ Then, inside the thread's actions area, add:
 Replace the filter `seg` block (lines ~1672-1683) with:
 
 ```tsx
-              <div className="seg seg--sm">
-                {(["pending", "submitted", "resolved"] as const).map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    aria-pressed={reviewFilter.has(f)}
-                    onClick={() => toggleFacet(f)}
-                  >
-                    {f === "pending" ? "Pending" : f === "submitted" ? "Sent" : "Resolved"} ({counts[f]})
-                  </button>
-                ))}
-              </div>
+<div className="seg seg--sm">
+  {(["pending", "submitted", "resolved"] as const).map((f) => (
+    <button key={f} type="button" aria-pressed={reviewFilter.has(f)} onClick={() => toggleFacet(f)}>
+      {f === "pending" ? "Pending" : f === "submitted" ? "Sent" : "Resolved"} ({counts[f]})
+    </button>
+  ))}
+</div>
 ```
 
 - [ ] **Step 9: Pass the facet set to the filter**
@@ -713,6 +721,7 @@ Expected: all pass; `build` produces the extension (run outside the sandbox).
 - [ ] **Step 12: Manual verification**
 
 Tell the user to reload the unpacked extension and, on a PR review page:
+
 1. On a submitted comment thread, click **Resolve** → the thread leaves the default (Pending/Sent) view; selecting the **Resolved** chip shows it; on GitHub the in-diff thread is collapsed/resolved with a "Resolved via Bark." reply.
 2. Click **Reopen** on a resolved thread → it returns to the Sent view; GitHub thread is un-resolved.
 3. Accept a suggestion → it appears under **Resolved** (no Reopen button).

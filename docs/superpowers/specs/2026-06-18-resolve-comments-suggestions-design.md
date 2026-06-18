@@ -24,8 +24,8 @@ across comment authors (unlike editing someone else's root comment, which the
 GitHub API forbids).
 
 - **Metadata** (`lib/metadata.ts`): add `event?: "resolve" | "unresolve"` to
-  `CommentMetadata`. A comment whose metadata has `event` set is a *resolution
-  marker*: it is consumed during reconstruction and **never rendered as a thread
+  `CommentMetadata`. A comment whose metadata has `event` set is a _resolution
+  marker_: it is consumed during reconstruction and **never rendered as a thread
   message**. It still carries the normal anchor fields (`thread`, `path`,
   `range`, `quote`, `sha`, fresh `cid`) so it groups under the right thread.
 - **Posting**:
@@ -63,7 +63,7 @@ pending-only threads show no resolve control.
 
 - `graphql(query, variables)` — POST to `https://api.github.com/graphql`.
 - `listReviewThreads(ref)` — returns `{ id: string; isResolved: boolean;
-  commentIds: number[] }[]` (node id + each comment's `databaseId`).
+commentIds: number[] }[]` (node id + each comment's `databaseId`).
 - `resolveReviewThread(nodeId)` / `unresolveReviewThread(nodeId)` — GraphQL
   mutations.
 - `replyToReviewComment(ref, inReplyTo, body)` — REST reply within a review
@@ -98,8 +98,8 @@ pending-only threads show no resolve control.
   for Pending / Sent / Resolved. Default selection = `{pending, submitted}`
   (resolved hidden by default). Toggling a chip adds/removes its facet.
 - Thread rendering: add a **Resolve** button on eligible threads (Bark thread id
-  + has submitted comment) when not resolved, and a **Reopen** button when
-  resolved. Resolved threads may show a `resolved` badge.
+  - has submitted comment) when not resolved, and a **Reopen** button when
+    resolved. Resolved threads may show a `resolved` badge.
 - Handlers: `resolveThread(thread)` / `reopenThread(thread)` build the resolution
   metadata, post the event comment via the right route, run the native mirror for
   in-diff, and reload.
