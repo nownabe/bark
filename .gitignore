@@ -8,5 +8,7 @@ node_modules/
 .DS_Store
 .local
 
+.claude/settings.local.json
+
 # credentials
 .envrc.local
