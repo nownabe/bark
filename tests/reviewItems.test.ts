@@ -13,6 +13,7 @@ import {
   groupPendingByFile,
   buildPendingSuggestions,
   buildSuggestionMarks,
+  deriveRole,
   filterReviewEntries,
   revealSubmittedFacets,
   reviewEntryCounts,
@@ -513,5 +514,23 @@ describe("composerInsertIndex", () => {
   test("an equal-position entry sorts before the composer (stable tie-break)", () => {
     const list = entries(sortPos(5, 1), sortPos(7, 1));
     expect(composerInsertIndex(list, sortPos(5, 1))).toBe(1);
+  });
+});
+
+describe("deriveRole", () => {
+  test("author when the viewer login equals the PR author", () => {
+    expect(deriveRole("nownabe", "nownabe")).toBe("author");
+  });
+  test("case-insensitive match still yields author", () => {
+    expect(deriveRole("NowNabe", "nownabe")).toBe("author");
+  });
+  test("reviewer when logins differ", () => {
+    expect(deriveRole("octocat", "nownabe")).toBe("reviewer");
+  });
+  test("reviewer when either side is null/empty/undefined", () => {
+    expect(deriveRole(null, "nownabe")).toBe("reviewer");
+    expect(deriveRole("nownabe", null)).toBe("reviewer");
+    expect(deriveRole("", "")).toBe("reviewer");
+    expect(deriveRole(undefined, undefined)).toBe("reviewer");
   });
 });
