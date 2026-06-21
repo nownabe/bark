@@ -277,7 +277,7 @@ Round 2  @ def456  (reviewer: 1 comment)
 ## 10. Manifest V3 / 権限
 
 - `host_permissions`: `https://github.com/*`, `https://api.github.com/*`
-- `permissions`: `storage`, `scripting`（content script 注入）
+- `permissions`: `storage`（content script はマニフェストに静的登録するため `scripting` は不要）
 - Background は service worker。長時間処理は分割し、終了に備えて状態を IndexedDB に永続化
 - レート制限: 認証時 5,000 req/h。ETag による条件付きリクエストでキャッシュし、バッチ送信で節約
 
