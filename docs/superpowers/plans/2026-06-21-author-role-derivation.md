@@ -21,10 +21,12 @@
 ### Task 1: `deriveRole` pure helper + `Role` type
 
 **Files:**
+
 - Modify: `entrypoints/review/reviewItems.ts` (add `Role` type + `deriveRole`)
 - Test: `tests/reviewItems.test.ts` (add a `deriveRole` describe block)
 
 **Interfaces:**
+
 - Produces: `export type Role = "author" | "reviewer"` and
   `export function deriveRole(viewerLogin: string | null | undefined, prAuthor: string | null | undefined): Role`
 
@@ -97,10 +99,12 @@ git commit -m "feat: add deriveRole identity helper (#83)"
 ### Task 2: `getAuthenticatedUser` on `GitHubClient`
 
 **Files:**
+
 - Modify: `lib/github.ts` (add method on `GitHubClient`)
 - Test: `tests/github.test.ts` (add fetch-mock helpers + a `getAuthenticatedUser` describe block)
 
 **Interfaces:**
+
 - Consumes: the existing private `request(path)` helper (`lib/github.ts:195`) and `GitHubClient` constructor `new GitHubClient(token)` (`lib/github.ts:173`).
 - Produces: `getAuthenticatedUser(): Promise<{ login: string }>` on `GitHubClient`.
 
@@ -197,9 +201,11 @@ git commit -m "feat: add getAuthenticatedUser to GitHubClient (#83)"
 ### Task 3: Wire role derivation into `App.tsx`
 
 **Files:**
+
 - Modify: `entrypoints/review/App.tsx` (import `Role`/`deriveRole`, remove the local `Role` type, fetch the viewer in the load effect, set the role)
 
 **Interfaces:**
+
 - Consumes: `deriveRole` and `Role` from `./reviewItems` (Task 1); `client.getAuthenticatedUser()` (Task 2); the existing load effect at `App.tsx:443-469`.
 
 - [ ] **Step 1: Import `Role` and `deriveRole`; drop the local `Role` type**
@@ -219,16 +225,16 @@ type Role = "author" | "reviewer";
 In the load effect's `try` block (`App.tsx:449-464`), after `setSelectedPath(...)` (line 458), add a nested guarded lookup so a `/user` failure cannot break the reviewer load:
 
 ```ts
-        setSelectedPath((prev) => prev ?? md[0]?.path ?? null);
-        try {
-          const viewer = await client.getAuthenticatedUser();
-          if (!cancelled) setRole(deriveRole(viewer.login, info.author));
-        } catch (identityError) {
-          // Identity lookup failed (network / missing scope). Stay reviewer:
-          // only the author-only commit affordance is withheld; the reviewer
-          // flow is unaffected. (#83)
-          console.warn("Bark: author-role lookup failed", identityError);
-        }
+setSelectedPath((prev) => prev ?? md[0]?.path ?? null);
+try {
+  const viewer = await client.getAuthenticatedUser();
+  if (!cancelled) setRole(deriveRole(viewer.login, info.author));
+} catch (identityError) {
+  // Identity lookup failed (network / missing scope). Stay reviewer:
+  // only the author-only commit affordance is withheld; the reviewer
+  // flow is unaffected. (#83)
+  console.warn("Bark: author-role lookup failed", identityError);
+}
 ```
 
 - [ ] **Step 3: Typecheck, lint, format, test**
