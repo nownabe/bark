@@ -27,6 +27,7 @@ const {
   listDismissedSuggestions,
   saveDismissedSuggestions,
   discardAllDrafts,
+  clearAcceptedDecisions,
 } = await import("../lib/drafts");
 
 const ref = { owner: "o", repo: "r", number: 1 };
@@ -106,5 +107,43 @@ describe("discardAllDrafts", () => {
 
     expect(await listDrafts(ref)).toEqual([]);
     expect(await listDrafts(other)).toEqual([draft]);
+  });
+});
+
+describe("clearAcceptedDecisions", () => {
+  test("removes only 'accepted' entries whose id is in the given list", async () => {
+    await saveDismissedSuggestions(ref, {
+      "1": "accepted",
+      "2": "accepted",
+      "3": "rejected",
+    });
+    await clearAcceptedDecisions(ref, [1, 2]);
+    expect(await listDismissedSuggestions(ref)).toEqual({ "3": "rejected" });
+  });
+
+  test("leaves 'rejected' entries alone even when their id is in the list", async () => {
+    await saveDismissedSuggestions(ref, { "1": "rejected" });
+    await clearAcceptedDecisions(ref, [1]);
+    expect(await listDismissedSuggestions(ref)).toEqual({ "1": "rejected" });
+  });
+
+  test("only removes the requested ids — other 'accepted' entries stay", async () => {
+    await saveDismissedSuggestions(ref, {
+      "1": "accepted",
+      "2": "accepted",
+    });
+    await clearAcceptedDecisions(ref, [1]);
+    expect(await listDismissedSuggestions(ref)).toEqual({ "2": "accepted" });
+  });
+
+  test("is idempotent on missing ids (no throw, no change)", async () => {
+    await saveDismissedSuggestions(ref, { "1": "accepted" });
+    await clearAcceptedDecisions(ref, [99]);
+    expect(await listDismissedSuggestions(ref)).toEqual({ "1": "accepted" });
+  });
+
+  test("handles an empty store gracefully", async () => {
+    await clearAcceptedDecisions(ref, [1, 2, 3]);
+    expect(await listDismissedSuggestions(ref)).toEqual({});
   });
 });

@@ -97,6 +97,23 @@ export async function saveDismissedSuggestions(
 }
 
 /**
+ * Clear the author's "accepted" decisions for the given comment ids — used
+ * after a Submit successfully commits + resolves those threads, so the queue
+ * empties. "rejected" entries are left intact (they keep the suggestion
+ * hidden in future sessions) even when their id appears in the list.
+ */
+export async function clearAcceptedDecisions(ref: PrRef, commentIds: number[]): Promise<void> {
+  const current = await listDismissedSuggestions(ref);
+  const drop = new Set(commentIds.map((id) => String(id)));
+  const next: Record<string, SuggestionDecision> = {};
+  for (const [id, decision] of Object.entries(current)) {
+    if (decision === "accepted" && drop.has(id)) continue;
+    next[id] = decision;
+  }
+  await saveDismissedSuggestions(ref, next);
+}
+
+/**
  * Discard every pending review item for a PR: the reviewer's comment/suggestion
  * drafts and their in-progress suggestion edits. The author's accept/reject
  * decisions (dismissed suggestions) are deliberately left intact — they reflect

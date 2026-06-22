@@ -35,6 +35,7 @@ import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import { DiscardAllConfirmModal } from "./components/DiscardAllConfirmModal";
 import {
   buildAllPendingSuggestions,
+  buildAuthorPendingItems,
   buildPendingItems,
   buildPendingSuggestions,
   buildReviewEntries,
@@ -47,6 +48,7 @@ import {
   reviewEntryCounts,
   sortPos,
   threadRangeAt,
+  type AcceptedSuggestionInfo,
   type PendingSuggestion,
   type ReviewFacet,
   type ReviewThread,
@@ -78,6 +80,7 @@ import {
 } from "../../lib/github";
 import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
 import {
+  clearAcceptedDecisions,
   discardAllDrafts,
   listDismissedSuggestions,
   listDrafts,
@@ -89,6 +92,7 @@ import {
   type SuggestionDecision,
   type SuggestionEdit,
 } from "../../lib/drafts";
+import { AuthorSubmitError, executeAuthorSubmit } from "../../lib/authorSubmit";
 import {
   clearToken,
   getToken,
@@ -290,6 +294,29 @@ export function App() {
   const counts = reviewEntryCounts(entries);
   const prStatus = pull ? pullStatus(pull) : null;
   const pendingItems = buildPendingItems(drafts, allPendingSuggestions);
+  // Author-side pending list: the accepted-suggestion infos are derived from
+  // submitted suggestion comments × the author's `dismissed` map. They drive
+  // the post-commit auto-resolve.
+  const acceptedSuggestionInfos = useMemo<AcceptedSuggestionInfo[]>(
+    () =>
+      comments
+        .filter((c) => c.meta?.kind === "suggestion" && dismissed[c.id] === "accepted")
+        .map((c) => ({
+          commentId: c.id,
+          path: c.meta?.path ?? "",
+          quote: c.meta?.quote ?? "",
+          replacement: extractSuggestionBlock(c.body) ?? "",
+          line: c.meta?.range?.sl ?? 1,
+        })),
+    [comments, dismissed],
+  );
+  const pendingAuthorItems = useMemo(
+    () => buildAuthorPendingItems(drafts, suggestionEdits, acceptedSuggestionInfos),
+    [drafts, suggestionEdits, acceptedSuggestionInfos],
+  );
+  // The active pending-items list for the topbar count + Submit confirm modal —
+  // author mode shows author-shaped items, reviewer keeps the existing flow.
+  const activePendingItems = role === "author" ? pendingAuthorItems : pendingItems;
   const visibleEntries = filterReviewEntries(entries, reviewFilter);
   // Threads currently shown in the sidebar (per the active filter). The editor
   // highlights and clickable anchors track this set, so resolved threads are
@@ -490,7 +517,10 @@ export function App() {
         // suggestions survive a reload (read fresh to avoid a load/mount race).
         const edits = await listSuggestionEdits(ref);
         if (!cancelled) {
-          const edit = role === "reviewer" ? edits[selectedPath] : undefined;
+          // Per-file edits persist for both roles: reviewer's live suggestions
+          // AND author's pending edits (incl. accepted suggestions) come back
+          // through the same map after a reload.
+          const edit = edits[selectedPath];
           setBaseSource(text);
           setSource(edit?.source ?? text);
           setSuggestionComments(edit?.comments ?? {});
@@ -932,13 +962,19 @@ export function App() {
     if (ref) await saveDismissedSuggestions(ref, next);
   };
 
-  // author: accept a suggestion by applying its replacement to the source (then Commit).
+  // author: accept a suggestion. Stage two things:
+  //   - apply the replacement to the editor source so the author sees the change
+  //   - record "accepted" in the dismissed map (queue for thread resolve on Submit)
+  // Both survive reload via the per-file edit store, so accepts compose with
+  // manual edits and other accepts in a single batched commit on Submit.
   const acceptSuggestion = async (c: ExistingComment) => {
     if (!c.meta) return;
     const replacement = extractSuggestionBlock(c.body) ?? "";
     const r = reanchorComment(source, lineStarts, c.meta, headSha ?? "", oldSourceFor(c.meta));
     if (r.status === "outdated") return; // can't locate the target text anymore
-    setSource(source.slice(0, r.startOffset) + replacement + source.slice(r.endOffset));
+    const newSource = source.slice(0, r.startOffset) + replacement + source.slice(r.endOffset);
+    setSource(newSource);
+    persistSuggestionEdit(curPath, newSource, baseSource, suggestionComments);
     await setDecision(c.id, "accepted");
   };
 
@@ -1068,42 +1104,210 @@ export function App() {
     }
   };
 
-  const commitEdit = async () => {
-    if (!client || !ref || !selectedPath || !headRef) return;
+  // Build a commit message for the author Submit. The summary states the
+  // aggregate; the body lists each accepted suggestion (path:line) and edited
+  // path so a reader of `git log` can see exactly what landed.
+  const buildAuthorCommitMessage = (
+    editedPaths: string[],
+    accepted: AcceptedSuggestionInfo[],
+  ): string => {
+    const fileWord = editedPaths.length === 1 ? "file" : "files";
+    const acceptWord = accepted.length === 1 ? "accepted suggestion" : "accepted suggestions";
+    const summary =
+      accepted.length > 0
+        ? `docs: update ${editedPaths.length} ${fileWord} via Bark (${accepted.length} ${acceptWord})`
+        : `docs: update ${editedPaths.length} ${fileWord} via Bark`;
+    const acceptLines = accepted.map((a) => `- accept suggestion at ${a.path}:L${a.line}`);
+    const editLines = editedPaths.map((p) => `- edit ${p}`);
+    const body = [...acceptLines, ...editLines].join("\n");
+    return body ? `${summary}\n\n${body}` : summary;
+  };
+
+  // Author Submit: flush every staged action together.
+  //   1) Post in-diff comments as one review, out-of-diff as PR comments,
+  //      replies into their existing threads (replyToReviewComment).
+  //   2) Make ONE commit on the PR head ref covering every edited file +
+  //      every accepted suggestion's applied source.
+  //   3) Resolve the accepted suggestions' threads.
+  // Errors are stage-aware: a comment-stage failure leaves edits + dismissed
+  // intact; a commit-stage failure (e.g. 422 non-fast-forward) leaves *all*
+  // pending state intact so the author can retry without losing work.
+  const submitAuthor = async () => {
+    if (!client || !ref || !headRef || !headSha) return;
     setLoading(true);
     setError(null);
     try {
-      const blobSha = await client.getFileSha(ref, selectedPath, headRef);
-      await client.putFileContent(ref, {
-        path: selectedPath,
-        content: source,
-        message: `docs: edit ${selectedPath} via Bark`,
-        sha: blobSha,
+      // Drafts → comments / replies. A draft is a reply when its thread id
+      // matches an existing submitted comment's thread (and its own cid !==
+      // thread, i.e. it isn't the new-thread root).
+      const submittedByThread = new Map<string, ExistingComment[]>();
+      for (const c of comments) {
+        if (!c.meta?.thread) continue;
+        const list = submittedByThread.get(c.meta.thread);
+        if (list) list.push(c);
+        else submittedByThread.set(c.meta.thread, [c]);
+      }
+      const reviewComments: ReviewCommentInput[] = [];
+      const issueBodies: string[] = [];
+      const replies: { rootCommentId: number; body: string }[] = [];
+      for (const d of drafts) {
+        const dmeta: CommentMetadata = {
+          cid: d.cid,
+          path: d.path,
+          range: d.range,
+          quote: d.quote,
+          sha: d.sha,
+          thread: d.thread,
+          kind: d.kind,
+        };
+        const existing = submittedByThread.get(d.thread);
+        if (existing && existing.length > 0 && d.cid !== d.thread) {
+          // Reply to an existing thread — post via the Reply API so it nests
+          // natively on GitHub. Embed metadata so Bark's own reconstruction
+          // stays consistent.
+          const root = [...existing].sort((a, b) => a.id - b.id)[0];
+          replies.push({ rootCommentId: root.id, body: embedMetadata(d.body, dmeta) });
+          continue;
+        }
+        const suggestion =
+          d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
+        if (d.inDiff) {
+          reviewComments.push({
+            path: d.path,
+            side: "RIGHT",
+            line: d.range.el,
+            ...(d.range.el !== d.range.sl
+              ? { start_line: d.range.sl, start_side: "RIGHT" as const }
+              : {}),
+            body: embedMetadata(`${d.body}${suggestion}`, dmeta),
+          });
+        } else {
+          const quoted = d.quote
+            .split("\n")
+            .map((l) => `> ${l}`)
+            .join("\n");
+          const note =
+            d.kind === "suggestion"
+              ? "\n\n(Out of diff: this suggestion will not show an Apply button.)"
+              : "";
+          const visible =
+            `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
+          issueBodies.push(embedMetadata(visible, dmeta));
+        }
+      }
+
+      // Files: every persisted edit where source !== base, content sorted by path.
+      const files = Object.entries(suggestionEdits)
+        .filter(
+          ([, e]) =>
+            typeof e?.base === "string" && typeof e?.source === "string" && e.source !== e.base,
+        )
+        .map(([path, e]) => ({ path, content: e.source }))
+        .sort((a, b) => a.path.localeCompare(b.path));
+
+      // Look up thread node ids for the accepted suggestions (one round trip).
+      const acceptedIds = acceptedSuggestionInfos.map((a) => a.commentId);
+      let acceptedThreadIds: string[] = [];
+      let resolvedCommentIds: number[] = [];
+      if (acceptedIds.length > 0) {
+        const threadInfos = await client.listReviewThreads(ref);
+        const pairs = acceptedIds
+          .map((id) => ({ id, nodeId: findThreadNodeId(threadInfos, id) }))
+          .filter((p): p is { id: number; nodeId: string } => p.nodeId !== null);
+        acceptedThreadIds = pairs.map((p) => p.nodeId);
+        resolvedCommentIds = pairs.map((p) => p.id);
+      }
+
+      const commitMessage = buildAuthorCommitMessage(
+        files.map((f) => f.path),
+        acceptedSuggestionInfos,
+      );
+
+      const result = await executeAuthorSubmit({
+        client,
+        ref,
         branch: headRef,
+        baseSha: headSha,
+        reviewComments,
+        issueBodies,
+        replies,
+        files,
+        commitMessage,
+        acceptedThreadIds,
       });
-      const { headSha: sha } = await client.getPull(ref);
-      setHeadSha(sha);
-      const newText = await client.getFileContent(ref, selectedPath, sha);
-      setSource(newText);
-      setBaseSource(newText);
-      // Committed → drop the persisted edit for this file (storage + in-memory map).
-      setSuggestionEdits((prev) => {
-        if (!(selectedPath in prev)) return prev;
-        const next = { ...prev };
-        delete next[selectedPath];
-        return next;
-      });
-      pendingEditWrites.current[selectedPath] = null;
-      await flushSuggestionEdits();
-      const [reviews, issues] = await Promise.all([
-        client.listReviewComments(ref),
-        client.listIssueComments(ref),
-      ]);
-      setComments(normalizeComments(reviews, issues));
+
+      // Cleanup: drop drafts, persisted edits, and the just-applied accepted
+      // decisions (rejected entries persist — they keep the suggestion hidden).
+      setDrafts([]);
+      await saveDrafts(ref, []);
+      setSuggestionEdits({});
+      pendingEditWrites.current = {};
+      if (editSaveTimer.current) {
+        clearTimeout(editSaveTimer.current);
+        editSaveTimer.current = null;
+      }
+      await saveSuggestionEdits(ref, {});
+      if (resolvedCommentIds.length > 0) {
+        await clearAcceptedDecisions(ref, resolvedCommentIds);
+        setDismissed((prev) => {
+          const drop = new Set(resolvedCommentIds.map((id) => String(id)));
+          const next: Record<string, SuggestionDecision> = {};
+          for (const [k, v] of Object.entries(prev)) {
+            if (v === "accepted" && drop.has(k)) continue;
+            next[k] = v;
+          }
+          return next;
+        });
+      }
+
+      // Advance to the new head sha and refetch the open file (anchors shift).
+      if (result.newHeadSha !== headSha) {
+        setHeadSha(result.newHeadSha);
+        if (selectedPath) {
+          const newText = await client.getFileContent(ref, selectedPath, result.newHeadSha);
+          setSource(newText);
+          setBaseSource(newText);
+          setSuggestionComments({});
+        }
+      }
+
+      // Refresh comments so just-posted threads + resolves are visible. Poll
+      // until any submitted cids re-appear (GitHub read-after-write lag).
+      const submittedCids = [
+        ...reviewComments.map((c) => extractMetadata(c.body).meta?.cid),
+        ...issueBodies.map((b) => extractMetadata(b).meta?.cid),
+      ].filter((id): id is string => Boolean(id));
+      const fresh = await reloadCommentsUntil(async () => {
+        const [reviews, issues] = await Promise.all([
+          client.listReviewComments(ref),
+          client.listIssueComments(ref),
+        ]);
+        return normalizeComments(reviews, issues);
+      }, submittedCids);
+      setComments(fresh);
+      setReviewFilter(revealSubmittedFacets);
+      setEmphasizedThreadId(null);
+
+      if (result.resolveErrors.length > 0) {
+        setError(
+          `Submitted, but failed to resolve ${result.resolveErrors.length} thread(s). Reopen the PR to retry.`,
+        );
+      }
     } catch (e) {
-      setError(errMessage(e));
+      if (e instanceof AuthorSubmitError) {
+        if (e.stage === "commit") {
+          setError(
+            `Commit failed: ${e.message}. The branch may have new commits — refresh and try again. Your pending changes are kept.`,
+          );
+        } else {
+          setError(`${e.stage} failed: ${e.message}`);
+        }
+      } else {
+        setError(errMessage(e));
+      }
     } finally {
       setLoading(false);
+      setShowSubmitConfirm(false);
     }
   };
 
@@ -1165,16 +1369,16 @@ export function App() {
     await saveSuggestionEdits(ref, stored);
   };
 
-  // Persist (debounced) the reviewer's edit for `path`: the edited document and
-  // its attached comments, so pending suggestions survive a reload. A document
-  // matching the base means no edits remain → clear the path.
+  // Persist (debounced) the per-file edit: the edited document and its
+  // attached comments, so pending suggestions / author edits survive a reload.
+  // A document matching the base means no edits remain → clear the path.
   const persistSuggestionEdit = (
     path: string,
     src: string,
     base: string,
     comments: Record<string, string>,
   ) => {
-    if (!ref || role !== "reviewer") return;
+    if (!ref) return;
     const edit: SuggestionEdit | null = src !== base ? { source: src, base, comments } : null;
     // Keep the in-memory all-files map fresh immediately (storage write is
     // debounced below) so the submit count/modal reflect the latest edit.
@@ -1201,10 +1405,12 @@ export function App() {
     persistSuggestionEdit(curPath, baseSource, baseSource, {});
   };
 
-  // Drop every pending review item — comment/suggestion drafts and all files'
-  // in-progress suggestion edits — from both memory and storage. The open editor
-  // is reset to its base so no stale live suggestion lingers, and any debounced
-  // edit write is cancelled so it can't resurrect what we just cleared.
+  // Drop every pending item — comment/reply drafts, all files' in-progress
+  // edits (the reviewer's live suggestions AND the author's edits/accepts), and
+  // (author only) the pending accepted-suggestion decisions. The open editor
+  // is reset to its base so no stale change lingers, and any debounced edit
+  // write is cancelled so it can't resurrect what we just cleared. Rejected
+  // suggestion decisions stay — they keep the suggestion hidden, not pending.
   const discardAllPending = async () => {
     setShowDiscardConfirm(false);
     setDrafts([]);
@@ -1217,6 +1423,21 @@ export function App() {
       editSaveTimer.current = null;
     }
     if (ref) await discardAllDrafts(ref);
+    if (role === "author") {
+      // Clear the "accepted" decisions so the topbar count drops to 0 and the
+      // next Submit wouldn't try to resolve threads the author no longer wants.
+      const acceptedIds = Object.entries(dismissed)
+        .filter(([, v]) => v === "accepted")
+        .map(([k]) => Number(k));
+      if (acceptedIds.length > 0) {
+        setDismissed((prev) => {
+          const next: Record<string, SuggestionDecision> = {};
+          for (const [k, v] of Object.entries(prev)) if (v !== "accepted") next[k] = v;
+          return next;
+        });
+        if (ref) await clearAcceptedDecisions(ref, acceptedIds);
+      }
+    }
   };
 
   const setSuggestionComment = (cid: string, value: string) => {
@@ -1723,55 +1944,53 @@ export function App() {
                 Raw
               </button>
             </div>
-            {role === "author" && selectedPath ? (
+            <>
+              <button
+                type="button"
+                className="btn btn--icon"
+                onClick={() => setShowDiscardConfirm(true)}
+                disabled={loading || activePendingItems.length === 0}
+                aria-label="Discard all pending items"
+                title={
+                  role === "author"
+                    ? "Discard all pending items (comments, replies, accepted suggestions, edits)"
+                    : "Discard all pending review items (comments and suggestions) across every file"
+                }
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                  <line x1="10" x2="10" y1="11" y2="17" />
+                  <line x1="14" x2="14" y1="11" y2="17" />
+                </svg>
+              </button>
               <button
                 type="button"
                 className="btn btn--primary"
-                onClick={commitEdit}
-                disabled={loading}
+                onClick={() => setShowSubmitConfirm(true)}
+                disabled={loading || activePendingItems.length === 0}
+                title={
+                  role === "author"
+                    ? "Review the staged comments, replies, accepted suggestions, and edits before submitting"
+                    : "Review the pending items from all files before submitting"
+                }
               >
-                Commit
+                {role === "author"
+                  ? `Submit (${activePendingItems.length})`
+                  : `Submit review (${activePendingItems.length})`}
               </button>
-            ) : null}
-            {role === "reviewer" ? (
-              <>
-                <button
-                  type="button"
-                  className="btn btn--icon"
-                  onClick={() => setShowDiscardConfirm(true)}
-                  disabled={loading || pendingItems.length === 0}
-                  aria-label="Discard all pending review items"
-                  title="Discard all pending review items (comments and suggestions) across every file"
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M3 6h18" />
-                    <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
-                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                    <line x1="10" x2="10" y1="11" y2="17" />
-                    <line x1="14" x2="14" y1="11" y2="17" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={() => setShowSubmitConfirm(true)}
-                  disabled={loading || pendingItems.length === 0}
-                  title="Review the pending items from all files before submitting"
-                >
-                  Submit review ({pendingItems.length})
-                </button>
-              </>
-            ) : null}
+            </>
             <button
               type="button"
               ref={helpBtnRef}
@@ -1817,8 +2036,9 @@ export function App() {
                 <strong>Preview / Raw</strong>: switch the view (both editable).
               </li>
               <li>
-                <strong>author</strong>: edit the body and <strong>Commit</strong>. Select text to
-                comment.
+                <strong>author</strong>: edit the body, accept reviewer suggestions, comment, and
+                reply — all staged locally. <strong>Submit</strong> posts the comments/replies and
+                creates one commit with every edit and every accepted suggestion in one go.
               </li>
               <li>
                 <strong>reviewer</strong>: select text to comment. Editing the body is queued
@@ -1826,8 +2046,7 @@ export function App() {
               </li>
               <li>
                 Pending and submitted items share one list; filter it from the list header. Send all
-                pending items with <strong>Submit review</strong> in the top bar — you confirm them
-                first.
+                pending items with <strong>Submit</strong> in the top bar — you confirm them first.
               </li>
               <li>
                 Click a side item to jump to and highlight its place in the body. You can reply
@@ -1949,17 +2168,18 @@ export function App() {
 
       {showSubmitConfirm ? (
         <SubmitConfirmModal
-          items={pendingItems}
+          items={activePendingItems}
           target={ref ?? undefined}
-          onConfirm={submitReview}
+          onConfirm={role === "author" ? submitAuthor : submitReview}
           onCancel={() => setShowSubmitConfirm(false)}
           loading={loading}
+          submitLabel={role === "author" ? "Submit" : undefined}
         />
       ) : null}
 
       {showDiscardConfirm ? (
         <DiscardAllConfirmModal
-          count={pendingItems.length}
+          count={activePendingItems.length}
           onConfirm={discardAllPending}
           onCancel={() => setShowDiscardConfirm(false)}
           loading={loading}

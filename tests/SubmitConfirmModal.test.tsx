@@ -143,4 +143,71 @@ describe("SubmitConfirmModal", () => {
     );
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
   });
+
+  test("submitLabel prop overrides the primary button text (author mode)", () => {
+    const { container } = render(
+      <SubmitConfirmModal
+        items={pendingEntries()}
+        submitLabel="Submit"
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    const submit = [...container.querySelectorAll("button")].find((b) =>
+      /^Submit$/.test(b.textContent ?? ""),
+    );
+    expect(submit).not.toBeUndefined();
+    // No leftover "Submit review" button
+    const review = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Submit review",
+    );
+    expect(review).toBeUndefined();
+  });
+
+  test("author items render: acceptedSuggestion uses a SuggestionDiff with an Accept tag", () => {
+    const items = [
+      {
+        kind: "acceptedSuggestion" as const,
+        commentId: 42,
+        path: "docs/a.md",
+        quote: "old line",
+        replacement: "new line",
+        line: 5,
+      },
+    ];
+    const { container } = render(
+      <SubmitConfirmModal items={items} onConfirm={() => {}} onCancel={() => {}} />,
+    );
+    expect(container.querySelector(".sugg-old")?.textContent).toBe("old line");
+    expect(container.querySelector(".sugg-new")?.textContent).toBe("new line");
+    // accept tag is rendered as a badge near the diff
+    expect(container.querySelector(".tag--accept")?.textContent ?? "").toMatch(/accept/i);
+  });
+
+  test("summary line surfaces the single batched commit and acceptances", () => {
+    const items = [
+      { kind: "edit" as const, path: "docs/a.md" },
+      { kind: "edit" as const, path: "docs/b.md" },
+      {
+        kind: "acceptedSuggestion" as const,
+        commentId: 42,
+        path: "docs/a.md",
+        quote: "x",
+        replacement: "y",
+        line: 1,
+      },
+    ];
+    const { container } = render(
+      <SubmitConfirmModal
+        items={items}
+        target={{ owner: "o", repo: "r", number: 7 }}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    const summary = container.querySelector(".submit-summary")?.textContent ?? "";
+    expect(summary).toMatch(/One commit/i);
+    expect(summary).toContain("2 files");
+    expect(summary).toMatch(/1 accepted suggestion/);
+  });
 });

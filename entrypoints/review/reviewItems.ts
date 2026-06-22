@@ -129,10 +129,34 @@ export type ReviewEntry =
   | { kind: "thread"; sortPath: string; sortPos: number; thread: ReviewThread }
   | { kind: "liveSuggestion"; sortPath: string; sortPos: number; suggestion: PendingSuggestion };
 
-/** A flat list of what "Submit review" will send — for the confirm modal & counts. */
+/** Info needed to render an author-accepted suggestion in the pending list. */
+export interface AcceptedSuggestionInfo {
+  /** REST comment id of the submitted suggestion the author accepted. */
+  commentId: number;
+  path: string;
+  quote: string;
+  replacement: string;
+  /** Source line of the accepted suggestion (for sort + display). */
+  line: number;
+}
+
+/**
+ * A flat list of what "Submit" will send. Reviewer-mode items: comment / suggestion.
+ * Author-mode adds acceptedSuggestion (a thread to resolve on commit) and edit (a file
+ * to include in the single batched commit).
+ */
 export type PendingItem =
   | { kind: "comment"; draft: PendingDraft }
-  | { kind: "suggestion"; suggestion: PendingSuggestion };
+  | { kind: "suggestion"; suggestion: PendingSuggestion }
+  | {
+      kind: "acceptedSuggestion";
+      commentId: number;
+      path: string;
+      quote: string;
+      replacement: string;
+      line: number;
+    }
+  | { kind: "edit"; path: string };
 
 /** A thread's highlighted span in the body, used to map an editor click to a thread. */
 export interface ThreadRange {
@@ -326,17 +350,72 @@ export function buildPendingItems(
   ];
 }
 
+/**
+ * Pending items shown in author mode: comment drafts (incl. replies),
+ * file-level edits (one per path with `source !== base`), and accepted
+ * suggestions (one per dismissed-accepted entry). The single batched commit
+ * the author Submit produces is summarized from these — see summarizePending.
+ */
+export function buildAuthorPendingItems(
+  drafts: PendingDraft[],
+  edits: Record<string, SuggestionEdit>,
+  accepted: AcceptedSuggestionInfo[],
+): PendingItem[] {
+  const editItems: PendingItem[] = Object.keys(edits)
+    .sort((a, b) => a.localeCompare(b))
+    .filter((path) => {
+      const e = edits[path];
+      return typeof e?.base === "string" && typeof e?.source === "string" && e.source !== e.base;
+    })
+    .map((path): PendingItem => ({ kind: "edit", path }));
+  const acceptedItems: PendingItem[] = accepted.map(
+    (a): PendingItem => ({
+      kind: "acceptedSuggestion",
+      commentId: a.commentId,
+      path: a.path,
+      quote: a.quote,
+      replacement: a.replacement,
+      line: a.line,
+    }),
+  );
+  return [
+    ...drafts.map((draft): PendingItem => ({ kind: "comment", draft })),
+    ...acceptedItems,
+    ...editItems,
+  ];
+}
+
 export function pendingItemPath(item: PendingItem): string {
-  return item.kind === "suggestion" ? item.suggestion.path : item.draft.path;
+  switch (item.kind) {
+    case "comment":
+      return item.draft.path;
+    case "suggestion":
+      return item.suggestion.path;
+    case "acceptedSuggestion":
+      return item.path;
+    case "edit":
+      return item.path;
+  }
 }
 
 /**
  * Group pending items by file for the submit-review confirmation (which spans all
  * files, unlike the per-file sidebar). Groups are sorted by path, items by line.
+ * Author-mode `edit` items have no line — they sort to the end.
  */
 export function groupPendingByFile(items: PendingItem[]): { path: string; items: PendingItem[] }[] {
-  const lineOf = (i: PendingItem) =>
-    i.kind === "suggestion" ? i.suggestion.range.sl : i.draft.range.sl;
+  const lineOf = (i: PendingItem): number => {
+    switch (i.kind) {
+      case "suggestion":
+        return i.suggestion.range.sl;
+      case "comment":
+        return i.draft.range.sl;
+      case "acceptedSuggestion":
+        return i.line;
+      case "edit":
+        return Number.POSITIVE_INFINITY;
+    }
+  };
   const groups = new Map<string, PendingItem[]>();
   for (const item of items) {
     const p = pendingItemPath(item);
@@ -356,10 +435,22 @@ export interface SubmitGroup {
   total: number;
 }
 
+/** Counts for the single batched commit author Submit produces. */
+export interface SubmitCommitGroup {
+  /** Files with `source !== base` that will be in the commit. */
+  editedFiles: number;
+  /** Reviewer suggestions accepted by the author — their threads will be resolved. */
+  acceptances: number;
+}
+
 /**
- * Summarize what "Submit review" will actually post, mirroring submitReview's
- * routing: in-diff items go out as a single GitHub review with inline comments;
- * out-of-diff items are posted directly as separate PR (issue) comments.
+ * Summarize what "Submit" will actually post.
+ *
+ * Reviewer-mode routing mirrors submitReview: in-diff items become a single
+ * GitHub review with inline comments; out-of-diff items become separate PR
+ * (issue) comments. Author-mode adds a `commit` group covering the single
+ * batched Git commit (one per file edited + the threads to resolve for
+ * accepted suggestions).
  */
 export interface SubmitSummary {
   total: number;
@@ -367,12 +458,27 @@ export interface SubmitSummary {
   review: SubmitGroup;
   /** Out-of-diff items — posted directly on the PR as separate comments. */
   direct: SubmitGroup;
+  /** Author's single batched commit. Always present; zero in reviewer-only flows. */
+  commit: SubmitCommitGroup;
 }
 
 export function summarizePending(items: PendingItem[]): SubmitSummary {
   const empty = (): SubmitGroup => ({ comments: 0, suggestions: 0, total: 0 });
-  const summary: SubmitSummary = { total: items.length, review: empty(), direct: empty() };
+  const summary: SubmitSummary = {
+    total: items.length,
+    review: empty(),
+    direct: empty(),
+    commit: { editedFiles: 0, acceptances: 0 },
+  };
   for (const item of items) {
+    if (item.kind === "edit") {
+      summary.commit.editedFiles++;
+      continue;
+    }
+    if (item.kind === "acceptedSuggestion") {
+      summary.commit.acceptances++;
+      continue;
+    }
     const isSuggestion = item.kind === "suggestion" ? true : item.draft.kind === "suggestion";
     const inDiff = item.kind === "suggestion" ? item.suggestion.inDiff : item.draft.inDiff;
     const group = inDiff ? summary.review : summary.direct;

@@ -239,6 +239,36 @@ export class GitHubClient {
     }
   }
 
+  /** POST returning JSON — used by the Git Data API helpers that need the response sha. */
+  private async postJson<T>(path: string, payload: unknown): Promise<T> {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      throw new GitHubApiError(
+        res.status,
+        `GitHub API ${res.status} for ${path}: ${await res.text()}`,
+      );
+    }
+    return (await res.json()) as T;
+  }
+
+  private async patch(path: string, payload: unknown): Promise<void> {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "PATCH",
+      headers: this.headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      throw new GitHubApiError(
+        res.status,
+        `GitHub API ${res.status} for ${path}: ${await res.text()}`,
+      );
+    }
+  }
+
   /** Submit all in-diff comments as a single review (§7.2, R4). event defaults to COMMENT. */
   async submitReview(
     ref: PrRef,
@@ -428,6 +458,57 @@ export class GitHubClient {
     await this.post(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments`, {
       body,
       in_reply_to: inReplyTo,
+    });
+  }
+
+  /**
+   * Create a Git blob from UTF-8 text. Returns the new blob SHA.
+   * Building block for multi-file batched commits (author-mode Submit).
+   */
+  async createBlob(ref: PrRef, content: string): Promise<string> {
+    const json = await this.postJson<{ sha: string }>(`/repos/${ref.owner}/${ref.repo}/git/blobs`, {
+      content: utf8ToBase64(content),
+      encoding: "base64",
+    });
+    return json.sha;
+  }
+
+  /** Create a Git tree from a base tree + entries. Returns the tree SHA. */
+  async createTree(
+    ref: PrRef,
+    input: {
+      baseTree: string;
+      entries: { path: string; mode: "100644"; type: "blob"; sha: string }[];
+    },
+  ): Promise<string> {
+    const json = await this.postJson<{ sha: string }>(`/repos/${ref.owner}/${ref.repo}/git/trees`, {
+      base_tree: input.baseTree,
+      tree: input.entries,
+    });
+    return json.sha;
+  }
+
+  /** Create a Git commit object. Returns the commit SHA. */
+  async createCommit(
+    ref: PrRef,
+    input: { message: string; tree: string; parents: string[] },
+  ): Promise<string> {
+    const json = await this.postJson<{ sha: string }>(
+      `/repos/${ref.owner}/${ref.repo}/git/commits`,
+      { message: input.message, tree: input.tree, parents: input.parents },
+    );
+    return json.sha;
+  }
+
+  /**
+   * Fast-forward a branch ref to the given commit SHA. Throws 422 GitHubApiError
+   * on non-fast-forward (someone else pushed in between).
+   */
+  async updateRef(ref: PrRef, branch: string, sha: string): Promise<void> {
+    const encoded = branch.split("/").map(encodeURIComponent).join("/");
+    await this.patch(`/repos/${ref.owner}/${ref.repo}/git/refs/heads/${encoded}`, {
+      sha,
+      force: false,
     });
   }
 

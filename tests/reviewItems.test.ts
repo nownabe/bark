@@ -6,6 +6,7 @@
 // pending entries. A header filter narrows to all / pending / submitted.
 import { describe, expect, test } from "bun:test";
 import {
+  buildAuthorPendingItems,
   buildThreads,
   buildReviewEntries,
   buildAllPendingSuggestions,
@@ -21,6 +22,7 @@ import {
   threadRangeAt,
   sortPos,
   composerInsertIndex,
+  type AcceptedSuggestionInfo,
   type PendingSuggestion,
   type ThreadRange,
 } from "../entrypoints/review/reviewItems";
@@ -83,6 +85,7 @@ describe("summarizePending", () => {
       total: 0,
       review: { comments: 0, suggestions: 0, total: 0 },
       direct: { comments: 0, suggestions: 0, total: 0 },
+      commit: { editedFiles: 0, acceptances: 0 },
     });
   });
 
@@ -485,6 +488,91 @@ describe("sortPos", () => {
     expect(sortPos(2, 1)).toBeGreaterThan(sortPos(1, 9999));
     expect(sortPos(5, 3)).toBeGreaterThan(sortPos(5, 1));
     expect(sortPos(5, 1)).toBe(500001);
+  });
+});
+
+describe("buildAuthorPendingItems", () => {
+  const accepted: AcceptedSuggestionInfo[] = [
+    { commentId: 42, path: "docs/a.md", quote: "old", replacement: "new", line: 3 },
+  ];
+
+  test("emits an 'edit' item for each file whose source differs from base", () => {
+    const edits: Record<string, SuggestionEdit> = {
+      "docs/a.md": { source: "x", base: "y", comments: {} },
+      "docs/b.md": { source: "z", base: "z", comments: {} }, // no diff
+    };
+    const items = buildAuthorPendingItems([], edits, []);
+    const edit = items.filter((i) => i.kind === "edit");
+    expect(edit.map((i) => (i.kind === "edit" ? i.path : ""))).toEqual(["docs/a.md"]);
+  });
+
+  test("emits one 'acceptedSuggestion' item per accepted comment", () => {
+    const items = buildAuthorPendingItems([], {}, accepted);
+    const acc = items.filter((i) => i.kind === "acceptedSuggestion");
+    expect(acc).toHaveLength(1);
+    expect(acc[0].kind === "acceptedSuggestion" && acc[0].commentId).toBe(42);
+    expect(acc[0].kind === "acceptedSuggestion" && acc[0].path).toBe("docs/a.md");
+    expect(acc[0].kind === "acceptedSuggestion" && acc[0].replacement).toBe("new");
+  });
+
+  test("includes comment/reply drafts unchanged", () => {
+    const drafts = [draft({ cid: "d1", body: "hi" })];
+    const items = buildAuthorPendingItems(drafts, {}, []);
+    expect(items.filter((i) => i.kind === "comment")).toHaveLength(1);
+  });
+
+  test("combines drafts, edits, and accepted suggestions", () => {
+    const drafts = [draft({ cid: "d1" })];
+    const edits: Record<string, SuggestionEdit> = {
+      "docs/a.md": { source: "x", base: "y", comments: {} },
+    };
+    const items = buildAuthorPendingItems(drafts, edits, accepted);
+    expect(items).toHaveLength(3);
+    const kinds = new Set(items.map((i) => i.kind));
+    expect(kinds).toEqual(new Set(["comment", "edit", "acceptedSuggestion"]));
+  });
+});
+
+describe("summarizePending — author variants", () => {
+  test("counts edits and acceptances in a 'commit' group", () => {
+    const items = buildAuthorPendingItems(
+      [],
+      {
+        "docs/a.md": { source: "x", base: "y", comments: {} },
+        "docs/b.md": { source: "z", base: "w", comments: {} },
+      },
+      [
+        { commentId: 1, path: "docs/a.md", quote: "old", replacement: "new", line: 1 },
+        { commentId: 2, path: "docs/b.md", quote: "p", replacement: "q", line: 2 },
+        { commentId: 3, path: "docs/a.md", quote: "r", replacement: "s", line: 3 },
+      ],
+    );
+    const s = summarizePending(items);
+    expect(s.commit).toEqual({ editedFiles: 2, acceptances: 3 });
+    expect(s.total).toBe(5);
+  });
+
+  test("commit group is zero when there are no author items", () => {
+    const items = buildPendingItems([draft({ cid: "d1" })], []);
+    const s = summarizePending(items);
+    expect(s.commit).toEqual({ editedFiles: 0, acceptances: 0 });
+  });
+});
+
+describe("groupPendingByFile — author variants", () => {
+  test("groups acceptedSuggestion and edit items by path", () => {
+    const items = buildAuthorPendingItems(
+      [draft({ cid: "d1", path: "docs/a.md", range: { sl: 5, sc: 1, el: 5, ec: 5 } })],
+      { "docs/a.md": { source: "x", base: "y", comments: {} } },
+      [{ commentId: 1, path: "docs/a.md", quote: "old", replacement: "new", line: 2 }],
+    );
+    const groups = groupPendingByFile(items);
+    expect(groups.map((g) => g.path)).toEqual(["docs/a.md"]);
+    // Per-file group includes comment + acceptedSuggestion + edit (3 items).
+    expect(groups[0].items).toHaveLength(3);
+    // Sort puts accepted suggestion (line 2) before comment (line 5); edit (no line) goes last.
+    const order = groups[0].items.map((i) => i.kind);
+    expect(order).toEqual(["acceptedSuggestion", "comment", "edit"]);
   });
 });
 

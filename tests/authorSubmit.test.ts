@@ -1,0 +1,294 @@
+// Author-mode Submit orchestration — keystone test for the call order and
+// error semantics defined in the design doc:
+//   comments → replies → commit (blob/tree/commit/updateRef) → resolves
+// Errors stop the stage they originate in; later stages don't run. Resolve
+// errors are non-fatal — collected and returned so the caller can surface them.
+import { describe, expect, test } from "bun:test";
+import { executeAuthorSubmit, type AuthorSubmitInput } from "../lib/authorSubmit";
+
+type Call =
+  | { method: "submitReview"; commitId: string | undefined; comments: unknown[] }
+  | { method: "createIssueComment"; body: string }
+  | { method: "replyToReviewComment"; inReplyTo: number; body: string }
+  | { method: "createBlob"; content: string }
+  | { method: "createTree"; baseTree: string; entries: unknown[] }
+  | { method: "createCommit"; message: string; tree: string; parents: string[] }
+  | { method: "updateRef"; branch: string; sha: string }
+  | { method: "resolveReviewThread"; threadId: string };
+
+interface MockSetup {
+  blobSha?: (content: string) => string;
+  treeSha?: string;
+  commitSha?: string;
+  failAt?: Call["method"];
+  failResolveFor?: string[]; // threadIds whose resolve should throw
+}
+
+function makeMockClient(setup: MockSetup = {}) {
+  const calls: Call[] = [];
+  const maybeFail = (method: Call["method"]) => {
+    if (setup.failAt === method) throw new Error(`${method} failed`);
+  };
+  const client = {
+    async submitReview(_ref: unknown, input: { commitId?: string; comments: unknown[] }) {
+      maybeFail("submitReview");
+      calls.push({ method: "submitReview", commitId: input.commitId, comments: input.comments });
+    },
+    async createIssueComment(_ref: unknown, body: string) {
+      maybeFail("createIssueComment");
+      calls.push({ method: "createIssueComment", body });
+    },
+    async replyToReviewComment(_ref: unknown, inReplyTo: number, body: string) {
+      maybeFail("replyToReviewComment");
+      calls.push({ method: "replyToReviewComment", inReplyTo, body });
+    },
+    async createBlob(_ref: unknown, content: string) {
+      maybeFail("createBlob");
+      calls.push({ method: "createBlob", content });
+      return setup.blobSha?.(content) ?? `blob-of:${content.slice(0, 10)}`;
+    },
+    async createTree(
+      _ref: unknown,
+      input: { baseTree: string; entries: { path: string; sha: string }[] },
+    ) {
+      maybeFail("createTree");
+      calls.push({ method: "createTree", baseTree: input.baseTree, entries: input.entries });
+      return setup.treeSha ?? "tree-sha";
+    },
+    async createCommit(_ref: unknown, input: { message: string; tree: string; parents: string[] }) {
+      maybeFail("createCommit");
+      calls.push({
+        method: "createCommit",
+        message: input.message,
+        tree: input.tree,
+        parents: input.parents,
+      });
+      return setup.commitSha ?? "commit-sha";
+    },
+    async updateRef(_ref: unknown, branch: string, sha: string) {
+      maybeFail("updateRef");
+      calls.push({ method: "updateRef", branch, sha });
+    },
+    async resolveReviewThread(threadId: string) {
+      // Record the attempt first so failed resolves still show up in the call
+      // log — useful for asserting that the orchestrator keeps going past a
+      // resolve failure instead of bailing on the whole stage.
+      calls.push({ method: "resolveReviewThread", threadId });
+      if (setup.failResolveFor?.includes(threadId)) {
+        throw new Error(`resolve failed for ${threadId}`);
+      }
+      maybeFail("resolveReviewThread");
+    },
+  };
+  return { client, calls };
+}
+
+const ref = { owner: "o", repo: "r", number: 1 };
+
+function baseInput(over: Partial<AuthorSubmitInput> = {}): AuthorSubmitInput {
+  return {
+    client: makeMockClient().client as never,
+    ref,
+    branch: "feat",
+    baseSha: "head-sha",
+    reviewComments: [],
+    issueBodies: [],
+    replies: [],
+    files: [],
+    commitMessage: "docs: update via Bark",
+    acceptedThreadIds: [],
+    ...over,
+  };
+}
+
+describe("executeAuthorSubmit — happy path call order", () => {
+  test("comments → replies → blobs → tree → commit → updateRef → resolves", async () => {
+    const { client, calls } = makeMockClient();
+    const result = await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      reviewComments: [{ path: "a.md", side: "RIGHT", line: 3, body: "comment-a" }],
+      issueBodies: ["outside the diff"],
+      replies: [{ rootCommentId: 99, body: "reply!" }],
+      files: [
+        { path: "a.md", content: "edited A" },
+        { path: "docs/b.md", content: "edited B" },
+      ],
+      acceptedThreadIds: ["PRRT_1", "PRRT_2"],
+    });
+
+    const order = calls.map((c) => c.method);
+    expect(order).toEqual([
+      "submitReview",
+      "createIssueComment",
+      "replyToReviewComment",
+      "createBlob",
+      "createBlob",
+      "createTree",
+      "createCommit",
+      "updateRef",
+      "resolveReviewThread",
+      "resolveReviewThread",
+    ]);
+
+    // submitReview carries the pre-commit head sha and the in-diff drafts
+    expect(calls[0]).toMatchObject({
+      method: "submitReview",
+      commitId: "head-sha",
+    });
+    expect((calls[0] as { comments: unknown[] }).comments).toHaveLength(1);
+
+    // createTree has base_tree = pre-commit head and one entry per file
+    expect(calls[5].method).toBe("createTree");
+    expect((calls[5] as { baseTree: string; entries: unknown[] }).baseTree).toBe("head-sha");
+    expect((calls[5] as { entries: unknown[] }).entries).toHaveLength(2);
+
+    // createCommit parents = [old head]
+    expect((calls[6] as { parents: string[] }).parents).toEqual(["head-sha"]);
+    expect((calls[6] as { message: string }).message).toBe("docs: update via Bark");
+
+    // updateRef pushes the new commit on the branch
+    expect(calls[7]).toMatchObject({
+      method: "updateRef",
+      branch: "feat",
+      sha: "commit-sha",
+    });
+
+    // resolved both threads, returns the new head
+    expect(result.newHeadSha).toBe("commit-sha");
+    expect(result.resolveErrors).toEqual([]);
+  });
+
+  test("returns baseSha when no files were committed", async () => {
+    const { client, calls } = makeMockClient();
+    const result = await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      reviewComments: [{ path: "a.md", side: "RIGHT", line: 1, body: "x" }],
+    });
+    expect(calls.map((c) => c.method)).toEqual(["submitReview"]);
+    expect(result.newHeadSha).toBe("head-sha");
+  });
+});
+
+describe("executeAuthorSubmit — skips empty stages", () => {
+  test("comments-only: no Git Data API calls", async () => {
+    const { client, calls } = makeMockClient();
+    await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      reviewComments: [{ path: "a.md", side: "RIGHT", line: 1, body: "hi" }],
+    });
+    expect(calls.map((c) => c.method)).toEqual(["submitReview"]);
+  });
+
+  test("edits-only: no comment/reply/resolve calls", async () => {
+    const { client, calls } = makeMockClient();
+    await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      files: [{ path: "a.md", content: "edited" }],
+    });
+    expect(calls.map((c) => c.method)).toEqual([
+      "createBlob",
+      "createTree",
+      "createCommit",
+      "updateRef",
+    ]);
+  });
+
+  test("accepted threads with no edits: skip commit, still call resolve", async () => {
+    // The author may accept a suggestion that's effectively a no-op (source === base),
+    // e.g. they accepted and undid by editing. Resolves still run.
+    const { client, calls } = makeMockClient();
+    await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      acceptedThreadIds: ["PRRT_X"],
+    });
+    expect(calls.map((c) => c.method)).toEqual(["resolveReviewThread"]);
+  });
+
+  test("empty input is a no-op", async () => {
+    const { client, calls } = makeMockClient();
+    const result = await executeAuthorSubmit({ ...baseInput(), client: client as never });
+    expect(calls).toHaveLength(0);
+    expect(result.newHeadSha).toBe("head-sha");
+  });
+});
+
+describe("executeAuthorSubmit — error semantics", () => {
+  test("submitReview failure: nothing else runs", async () => {
+    const { client, calls } = makeMockClient({ failAt: "submitReview" });
+    const err = await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      reviewComments: [{ path: "a.md", side: "RIGHT", line: 1, body: "x" }],
+      files: [{ path: "a.md", content: "edited" }],
+      acceptedThreadIds: ["t"],
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(calls).toHaveLength(0); // failed before recording
+  });
+
+  test("updateRef failure: comments already posted, but no resolves; reports the stage", async () => {
+    const { client, calls } = makeMockClient({ failAt: "updateRef" });
+    const err = (await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      reviewComments: [{ path: "a.md", side: "RIGHT", line: 1, body: "x" }],
+      files: [{ path: "a.md", content: "edited" }],
+      acceptedThreadIds: ["t"],
+    }).catch((e) => e)) as Error & { stage?: string };
+    expect(err.message).toMatch(/updateRef/);
+    expect(err.stage).toBe("commit");
+    // submitReview, createBlob, createTree, createCommit ran; updateRef threw → no resolve.
+    expect(calls.map((c) => c.method)).toEqual([
+      "submitReview",
+      "createBlob",
+      "createTree",
+      "createCommit",
+    ]);
+  });
+
+  test("resolve failures are non-fatal and surface in resolveErrors", async () => {
+    const { client, calls } = makeMockClient({ failResolveFor: ["t2"] });
+    const result = await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      files: [{ path: "a.md", content: "edited" }],
+      acceptedThreadIds: ["t1", "t2", "t3"],
+    });
+    expect(result.resolveErrors).toHaveLength(1);
+    expect(result.resolveErrors[0].threadId).toBe("t2");
+    // all three threads were attempted, one failed, the others succeeded
+    expect(
+      calls
+        .filter((c) => c.method === "resolveReviewThread")
+        .map((c) => (c as { threadId: string }).threadId),
+    ).toEqual(["t1", "t2", "t3"]);
+  });
+});
+
+describe("executeAuthorSubmit — multi-file commit details", () => {
+  test("tree entries are sorted by path and use the new blob shas", async () => {
+    const { client, calls } = makeMockClient({
+      blobSha: (c) => `blob-${c}`,
+    });
+    await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      files: [
+        { path: "docs/b.md", content: "B" },
+        { path: "a.md", content: "A" },
+      ],
+    });
+    const treeCall = calls.find((c) => c.method === "createTree") as {
+      entries: { path: string; mode: string; type: string; sha: string }[];
+    };
+    expect(treeCall.entries).toEqual([
+      { path: "a.md", mode: "100644", type: "blob", sha: "blob-A" },
+      { path: "docs/b.md", mode: "100644", type: "blob", sha: "blob-B" },
+    ]);
+  });
+});
