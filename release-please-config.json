@@ -4,7 +4,7 @@
   "packages": {
     ".": {
       "package-name": "bark",
-      "bootstrap-sha": "cbb7e8629859996948aceec4d6b2c96e5b667a56"
+      "bootstrap-sha": "d766897e4d9495b8be792610175c50adee41abb6"
     }
   }
 }
