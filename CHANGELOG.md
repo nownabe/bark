@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/nownabe/bark/compare/bark-v0.2.0...bark-v0.2.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* remove unused scripting permission rejected by Chrome Web Store ([#95](https://github.com/nownabe/bark/issues/95)) ([2807e7a](https://github.com/nownabe/bark/commit/2807e7af12e9aa9c80133600f41d04fae3380b64))
+
 ## [0.2.0](https://github.com/nownabe/bark/compare/bark-v0.1.0...bark-v0.2.0) (2026-06-22)
 
 
