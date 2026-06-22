@@ -582,20 +582,59 @@ describe("buildAuthorPendingItems", () => {
     expect(items.filter((i) => i.kind === "comment")).toHaveLength(1);
   });
 
-  test("combines drafts, edits, and accepted suggestions", () => {
+  test("combines drafts, edits, and accepted suggestions on disjoint files", () => {
     const drafts = [draft({ cid: "d1" })];
     const edits: Record<string, SuggestionEdit> = {
-      "docs/a.md": { source: "x", base: "y", comments: {} },
+      "docs/c.md": { source: "x", base: "y", comments: {} }, // manual edit, no accept
     };
     const items = buildAuthorPendingItems(drafts, edits, accepted);
     expect(items).toHaveLength(3);
     const kinds = new Set(items.map((i) => i.kind));
     expect(kinds).toEqual(new Set(["comment", "edit", "acceptedSuggestion"]));
   });
+
+  test("regression: one accept yields one item (was double-counted as 2)", () => {
+    // Accepting a suggestion in author mode applies the replacement to the
+    // source AND records the dismissed entry. Before the fix, that produced
+    // both an `acceptedSuggestion` item AND a separate `edit` item for the
+    // same file, so the topbar Submit (n) counter showed 2 for a single
+    // logical action. The accept already implies the file is in the commit,
+    // so the `edit` item is redundant.
+    const items = buildAuthorPendingItems(
+      [],
+      { "docs/a.md": { source: "new line", base: "old line", comments: {} } },
+      [{ commentId: 42, path: "docs/a.md", quote: "old line", replacement: "new line", line: 3 }],
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe("acceptedSuggestion");
+  });
+
+  test("keeps the 'edit' item when the file has manual edits and no accepts", () => {
+    const items = buildAuthorPendingItems(
+      [],
+      { "docs/c.md": { source: "edited", base: "orig", comments: {} } },
+      [],
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe("edit");
+  });
+
+  test("multiple accepts on the same file emit one item per accept (no edit)", () => {
+    const items = buildAuthorPendingItems(
+      [],
+      { "docs/a.md": { source: "post-accepts", base: "before", comments: {} } },
+      [
+        { commentId: 1, path: "docs/a.md", quote: "a", replacement: "A", line: 1 },
+        { commentId: 2, path: "docs/a.md", quote: "b", replacement: "B", line: 3 },
+      ],
+    );
+    expect(items).toHaveLength(2);
+    expect(items.every((i) => i.kind === "acceptedSuggestion")).toBe(true);
+  });
 });
 
 describe("summarizePending — author variants", () => {
-  test("counts edits and acceptances in a 'commit' group", () => {
+  test("counts editedFiles by union of accepted-suggestion + edit paths", () => {
     const items = buildAuthorPendingItems(
       [],
       {
@@ -608,9 +647,24 @@ describe("summarizePending — author variants", () => {
         { commentId: 3, path: "docs/a.md", quote: "r", replacement: "s", line: 3 },
       ],
     );
+    // Both files have accepts → no `edit` items emitted; commit covers both.
     const s = summarizePending(items);
     expect(s.commit).toEqual({ editedFiles: 2, acceptances: 3 });
-    expect(s.total).toBe(5);
+    expect(s.total).toBe(3);
+  });
+
+  test("counts edit-only files too (no accept on that file)", () => {
+    const items = buildAuthorPendingItems(
+      [],
+      {
+        "docs/a.md": { source: "x", base: "y", comments: {} }, // accept
+        "docs/c.md": { source: "z", base: "w", comments: {} }, // manual only
+      },
+      [{ commentId: 1, path: "docs/a.md", quote: "old", replacement: "new", line: 1 }],
+    );
+    const s = summarizePending(items);
+    expect(s.commit).toEqual({ editedFiles: 2, acceptances: 1 });
+    expect(s.total).toBe(2);
   });
 
   test("commit group is zero when there are no author items", () => {
@@ -621,7 +675,7 @@ describe("summarizePending — author variants", () => {
 });
 
 describe("groupPendingByFile — author variants", () => {
-  test("groups acceptedSuggestion and edit items by path", () => {
+  test("groups acceptedSuggestion + comment by path (edit suppressed by accept)", () => {
     const items = buildAuthorPendingItems(
       [draft({ cid: "d1", path: "docs/a.md", range: { sl: 5, sc: 1, el: 5, ec: 5 } })],
       { "docs/a.md": { source: "x", base: "y", comments: {} } },
@@ -629,11 +683,21 @@ describe("groupPendingByFile — author variants", () => {
     );
     const groups = groupPendingByFile(items);
     expect(groups.map((g) => g.path)).toEqual(["docs/a.md"]);
-    // Per-file group includes comment + acceptedSuggestion + edit (3 items).
-    expect(groups[0].items).toHaveLength(3);
-    // Sort puts accepted suggestion (line 2) before comment (line 5); edit (no line) goes last.
+    expect(groups[0].items).toHaveLength(2);
+    // Sort puts accepted suggestion (line 2) before comment (line 5).
     const order = groups[0].items.map((i) => i.kind);
-    expect(order).toEqual(["acceptedSuggestion", "comment", "edit"]);
+    expect(order).toEqual(["acceptedSuggestion", "comment"]);
+  });
+
+  test("'edit' items show up for files that have manual edits and no accept", () => {
+    const items = buildAuthorPendingItems(
+      [],
+      { "docs/c.md": { source: "z", base: "w", comments: {} } },
+      [],
+    );
+    const groups = groupPendingByFile(items);
+    expect(groups.map((g) => g.path)).toEqual(["docs/c.md"]);
+    expect(groups[0].items[0].kind).toBe("edit");
   });
 });
 
