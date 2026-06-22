@@ -375,17 +375,28 @@ export function buildPendingItems(
  * file-level edits (one per path with `source !== base`), and accepted
  * suggestions (one per dismissed-accepted entry). The single batched commit
  * the author Submit produces is summarized from these — see summarizePending.
+ *
+ * An `edit` item is NOT emitted for a file that has any accepted suggestion:
+ * accepting a suggestion mutates the source (so the file IS in the commit) but
+ * is already represented by its own `acceptedSuggestion` item. Emitting both
+ * double-counted a single user action in the Submit (n) counter.
  */
 export function buildAuthorPendingItems(
   drafts: PendingDraft[],
   edits: Record<string, SuggestionEdit>,
   accepted: AcceptedSuggestionInfo[],
 ): PendingItem[] {
+  const acceptedPaths = new Set(accepted.map((a) => a.path));
   const editItems: PendingItem[] = Object.keys(edits)
     .sort((a, b) => a.localeCompare(b))
     .filter((path) => {
       const e = edits[path];
-      return typeof e?.base === "string" && typeof e?.source === "string" && e.source !== e.base;
+      return (
+        typeof e?.base === "string" &&
+        typeof e?.source === "string" &&
+        e.source !== e.base &&
+        !acceptedPaths.has(path)
+      );
     })
     .map((path): PendingItem => ({ kind: "edit", path }));
   const acceptedItems: PendingItem[] = accepted.map(
@@ -490,12 +501,18 @@ export function summarizePending(items: PendingItem[]): SubmitSummary {
     direct: empty(),
     commit: { editedFiles: 0, acceptances: 0 },
   };
+  // editedFiles is the count of unique paths in the commit — every
+  // acceptedSuggestion implies its file is in the commit too (the accept
+  // mutated the source), so unite the path sets to avoid undercounting after
+  // `buildAuthorPendingItems` suppresses redundant `edit` items.
+  const commitPaths = new Set<string>();
   for (const item of items) {
     if (item.kind === "edit") {
-      summary.commit.editedFiles++;
+      commitPaths.add(item.path);
       continue;
     }
     if (item.kind === "acceptedSuggestion") {
+      commitPaths.add(item.path);
       summary.commit.acceptances++;
       continue;
     }
@@ -506,6 +523,7 @@ export function summarizePending(items: PendingItem[]): SubmitSummary {
     if (isSuggestion) group.suggestions++;
     else group.comments++;
   }
+  summary.commit.editedFiles = commitPaths.size;
   return summary;
 }
 
