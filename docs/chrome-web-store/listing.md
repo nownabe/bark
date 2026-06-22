@@ -84,13 +84,6 @@ Paste one justification per requested permission.
   locally so a review can be resumed later. Nothing is stored remotely.
   ```
 
-- **scripting**
-
-  ```
-  Injects a small "Open in Bark" entry point into GitHub Pull Request pages so
-  the user can launch the Bark review view for that PR.
-  ```
-
 - **Host permission: `https://github.com/*`**
 
   ```

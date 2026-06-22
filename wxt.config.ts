@@ -18,8 +18,10 @@ export default defineConfig({
       48: "icon/48.png",
       128: "icon/128.png",
     },
-    // §10: content script injection + storage. API calls run in the browser.
-    permissions: ["storage", "scripting"],
+    // §10: storage for the draft layer. The content script is statically
+    // declared (defineContentScript matches), so no "scripting" permission is
+    // needed — Chrome Web Store rejects it as declared-but-unused.
+    permissions: ["storage"],
     host_permissions: ["https://github.com/*", "https://api.github.com/*"],
     // The "Open in Bark" button (content script) renders the icon, so the
     // file must be reachable from the github.com origin.
