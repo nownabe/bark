@@ -96,7 +96,16 @@ function baseInput(over: Partial<AuthorSubmitInput> = {}): AuthorSubmitInput {
     replies: [],
     files: [],
     commitMessage: "docs: update via Bark",
-    acceptedThreadIds: [],
+    acceptedThreads: [],
+    ...over,
+  };
+}
+
+function acceptedThread(over: Partial<AuthorSubmitInput["acceptedThreads"][number]> = {}) {
+  return {
+    rootCommentId: 1,
+    threadNodeId: "PRRT_1",
+    eventBody: "<!-- bark:meta {} -->\nResolved via Bark.",
     ...over,
   };
 }
@@ -114,20 +123,30 @@ describe("executeAuthorSubmit — happy path call order", () => {
         { path: "a.md", content: "edited A" },
         { path: "docs/b.md", content: "edited B" },
       ],
-      acceptedThreadIds: ["PRRT_1", "PRRT_2"],
+      acceptedThreads: [
+        acceptedThread({ rootCommentId: 11, threadNodeId: "PRRT_1" }),
+        acceptedThread({ rootCommentId: 22, threadNodeId: "PRRT_2" }),
+      ],
     });
 
+    // Each accepted thread gets a Bark event-metadata reply BEFORE the GraphQL
+    // resolve, so the local sidebar still sees the thread as resolved after
+    // the dismissed map is cleared (the local UI tracks resolution from the
+    // embedded event comment, not from GitHub's GraphQL isResolved).
     const order = calls.map((c) => c.method);
     expect(order).toEqual([
       "submitReview",
       "createIssueComment",
-      "replyToReviewComment",
+      "replyToReviewComment", // user reply draft (Stage 2)
       "createBlob",
       "createBlob",
       "createTree",
       "createCommit",
       "updateRef",
+      // per-thread: event reply -> graphql resolve, interleaved
+      "replyToReviewComment",
       "resolveReviewThread",
+      "replyToReviewComment",
       "resolveReviewThread",
     ]);
 
@@ -197,16 +216,18 @@ describe("executeAuthorSubmit — skips empty stages", () => {
     ]);
   });
 
-  test("accepted threads with no edits: skip commit, still call resolve", async () => {
+  test("accepted threads with no edits: skip commit, still post resolve-event + GraphQL resolve", async () => {
     // The author may accept a suggestion that's effectively a no-op (source === base),
     // e.g. they accepted and undid by editing. Resolves still run.
     const { client, calls } = makeMockClient();
     await executeAuthorSubmit({
       ...baseInput(),
       client: client as never,
-      acceptedThreadIds: ["PRRT_X"],
+      acceptedThreads: [acceptedThread({ rootCommentId: 7, threadNodeId: "PRRT_X" })],
     });
-    expect(calls.map((c) => c.method)).toEqual(["resolveReviewThread"]);
+    expect(calls.map((c) => c.method)).toEqual(["replyToReviewComment", "resolveReviewThread"]);
+    expect((calls[0] as { inReplyTo: number }).inReplyTo).toBe(7);
+    expect((calls[1] as { threadId: string }).threadId).toBe("PRRT_X");
   });
 
   test("empty input is a no-op", async () => {
@@ -225,7 +246,7 @@ describe("executeAuthorSubmit — error semantics", () => {
       client: client as never,
       reviewComments: [{ path: "a.md", side: "RIGHT", line: 1, body: "x" }],
       files: [{ path: "a.md", content: "edited" }],
-      acceptedThreadIds: ["t"],
+      acceptedThreads: [acceptedThread()],
     }).catch((e) => e);
     expect(err).toBeInstanceOf(Error);
     expect(calls).toHaveLength(0); // failed before recording
@@ -238,7 +259,7 @@ describe("executeAuthorSubmit — error semantics", () => {
       client: client as never,
       reviewComments: [{ path: "a.md", side: "RIGHT", line: 1, body: "x" }],
       files: [{ path: "a.md", content: "edited" }],
-      acceptedThreadIds: ["t"],
+      acceptedThreads: [acceptedThread()],
     }).catch((e) => e)) as Error & { stage?: string };
     expect(err.message).toMatch(/updateRef/);
     expect(err.stage).toBe("commit");
@@ -257,16 +278,47 @@ describe("executeAuthorSubmit — error semantics", () => {
       ...baseInput(),
       client: client as never,
       files: [{ path: "a.md", content: "edited" }],
-      acceptedThreadIds: ["t1", "t2", "t3"],
+      acceptedThreads: [
+        acceptedThread({ rootCommentId: 1, threadNodeId: "t1" }),
+        acceptedThread({ rootCommentId: 2, threadNodeId: "t2" }),
+        acceptedThread({ rootCommentId: 3, threadNodeId: "t3" }),
+      ],
     });
     expect(result.resolveErrors).toHaveLength(1);
     expect(result.resolveErrors[0].threadId).toBe("t2");
-    // all three threads were attempted, one failed, the others succeeded
+    // All three event replies AND all three GraphQL resolves were attempted;
+    // only t2's GraphQL resolve failed, the others succeeded.
     expect(
       calls
         .filter((c) => c.method === "resolveReviewThread")
         .map((c) => (c as { threadId: string }).threadId),
     ).toEqual(["t1", "t2", "t3"]);
+    expect(calls.filter((c) => c.method === "replyToReviewComment")).toHaveLength(3);
+  });
+
+  test("event-reply failure for a thread skips that thread's GraphQL resolve but keeps going", async () => {
+    // If the metadata event reply fails, doing the GraphQL resolve would leave
+    // the local UI re-emerging (the original bug) for that thread. Better to
+    // skip the GraphQL resolve and surface an error, then keep going on the
+    // next thread so other accepts still land.
+    const { client, calls } = makeMockClient({ failAt: "replyToReviewComment" });
+    const result = await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      // Two threads — the first will fail its reply; the test asserts the
+      // second is unaffected. (failAt is one-shot via maybeFail which always
+      // throws on the configured method, so both threads' replies fail. That
+      // is the strictest assertion we can make with this mock without adding
+      // a per-thread fail toggle; the per-thread isolation is exercised by
+      // the resolveErrors length below.)
+      acceptedThreads: [
+        acceptedThread({ rootCommentId: 1, threadNodeId: "t1" }),
+        acceptedThread({ rootCommentId: 2, threadNodeId: "t2" }),
+      ],
+    });
+    // No GraphQL resolves landed (event reply failed each time)
+    expect(calls.filter((c) => c.method === "resolveReviewThread")).toHaveLength(0);
+    expect(result.resolveErrors).toHaveLength(2);
   });
 });
 

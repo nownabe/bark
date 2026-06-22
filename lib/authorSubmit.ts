@@ -50,8 +50,14 @@ export interface AuthorSubmitInput {
   files: { path: string; content: string }[];
   /** Commit message (the caller composes an aggregated body if useful). */
   commitMessage: string;
-  /** GraphQL thread node ids for accepted suggestions, resolved after the commit. */
-  acceptedThreadIds: string[];
+  /**
+   * Threads to resolve after the commit. For each: post a Bark resolve-event
+   * metadata reply (so the local sidebar still treats the thread as resolved
+   * after the dismissed map is cleared) THEN call the GraphQL resolve so the
+   * native GitHub UI matches. The caller composes `eventBody` with embedded
+   * `event: "resolve"` metadata — mirrors setThreadResolved's flow.
+   */
+  acceptedThreads: { rootCommentId: number; threadNodeId: string; eventBody: string }[];
 }
 
 export interface AuthorSubmitResult {
@@ -124,13 +130,25 @@ export async function executeAuthorSubmit(input: AuthorSubmitInput): Promise<Aut
     }
   }
 
-  // 4) Resolve (non-fatal: collect and return)
+  // 4) Resolve (non-fatal: collect and return).
+  // Per accepted thread: post the Bark resolve-event metadata reply FIRST so
+  // the local sidebar survives the dismissed-map cleanup, then call the
+  // GraphQL resolve so GitHub's native UI matches. If the event reply fails,
+  // skip the GraphQL resolve for that thread — doing it would leave the local
+  // UI re-emerging (the bug this stage exists to prevent) — but keep going on
+  // remaining threads so partial progress lands.
   const resolveErrors: { threadId: string; error: unknown }[] = [];
-  for (const threadId of input.acceptedThreadIds) {
+  for (const t of input.acceptedThreads) {
     try {
-      await client.resolveReviewThread(threadId);
+      await client.replyToReviewComment(ref, t.rootCommentId, t.eventBody);
     } catch (e) {
-      resolveErrors.push({ threadId, error: e });
+      resolveErrors.push({ threadId: t.threadNodeId, error: e });
+      continue;
+    }
+    try {
+      await client.resolveReviewThread(t.threadNodeId);
+    } catch (e) {
+      resolveErrors.push({ threadId: t.threadNodeId, error: e });
     }
   }
 

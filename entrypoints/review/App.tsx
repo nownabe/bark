@@ -1211,17 +1211,40 @@ export function App() {
         .map(([path, e]) => ({ path, content: e.source }))
         .sort((a, b) => a.path.localeCompare(b.path));
 
-      // Look up thread node ids for the accepted suggestions (one round trip).
-      const acceptedIds = acceptedSuggestionInfos.map((a) => a.commentId);
-      let acceptedThreadIds: string[] = [];
-      let resolvedCommentIds: number[] = [];
-      if (acceptedIds.length > 0) {
+      // Look up thread node ids for the accepted suggestions (one round trip)
+      // and compose the Bark resolve-event metadata reply for each. The reply
+      // mirrors setThreadResolved's body so the local sidebar still treats the
+      // thread as resolved after Submit clears the dismissed map.
+      const acceptedCommentsById = new Map(comments.map((c) => [c.id, c]));
+      const acceptedThreads: {
+        rootCommentId: number;
+        threadNodeId: string;
+        eventBody: string;
+      }[] = [];
+      const resolvedCommentIds: number[] = [];
+      if (acceptedSuggestionInfos.length > 0) {
         const threadInfos = await client.listReviewThreads(ref);
-        const pairs = acceptedIds
-          .map((id) => ({ id, nodeId: findThreadNodeId(threadInfos, id) }))
-          .filter((p): p is { id: number; nodeId: string } => p.nodeId !== null);
-        acceptedThreadIds = pairs.map((p) => p.nodeId);
-        resolvedCommentIds = pairs.map((p) => p.id);
+        for (const info of acceptedSuggestionInfos) {
+          const nodeId = findThreadNodeId(threadInfos, info.commentId);
+          const root = acceptedCommentsById.get(info.commentId);
+          if (!nodeId || !root?.meta) continue;
+          const evMeta: CommentMetadata = {
+            cid: crypto.randomUUID(),
+            path: root.meta.path,
+            range: root.meta.range,
+            quote: root.meta.quote,
+            sha: headSha,
+            thread: root.meta.thread,
+            kind: "comment",
+            event: "resolve",
+          };
+          acceptedThreads.push({
+            rootCommentId: info.commentId,
+            threadNodeId: nodeId,
+            eventBody: embedMetadata("Resolved via Bark.", evMeta),
+          });
+          resolvedCommentIds.push(info.commentId);
+        }
       }
 
       const commitMessage = buildAuthorCommitMessage(
@@ -1239,7 +1262,7 @@ export function App() {
         replies,
         files,
         commitMessage,
-        acceptedThreadIds,
+        acceptedThreads,
       });
 
       // Cleanup: drop drafts, persisted edits, and the just-applied accepted
@@ -1807,7 +1830,7 @@ export function App() {
           <div className="comment__actions" onClick={(e) => e.stopPropagation()}>
             {dismissed[root.id] ? (
               <span className="notice--muted" style={{ fontSize: 11 }}>
-                {dismissed[root.id] === "accepted" ? "accepted — Commit to apply" : "rejected"}
+                {dismissed[root.id] === "accepted" ? "accepted — Submit to apply" : "rejected"}
               </span>
             ) : (
               <>
