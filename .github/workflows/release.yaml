@@ -1,0 +1,47 @@
+name: Release
+
+# On every push to main (i.e. a merged pull request), release-please keeps a
+# "release PR" up to date. Merging that release PR creates the tag and the
+# GitHub Release from the accumulated Conventional Commits.
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    # The GitHub App credentials are stored as secrets on the "release"
+    # environment so they're only readable from this workflow / branch
+    # combination.
+    environment: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # A GitHub App token is used instead of the default GITHUB_TOKEN so that
+      # the release PR triggers downstream events (pull_request checks,
+      # release: published for publish.yaml). contents / pull-requests write
+      # come from the app token, not the workflow's GITHUB_TOKEN.
+      - name: Generate token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.GH_APP_CLIENT_ID_RELEASE_PLEASE }}
+          private-key: ${{ secrets.GH_APP_PKEY_RELEASE_PLEASE }}
+          # Scope the token to exactly what release-please needs.
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Run release-please
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
