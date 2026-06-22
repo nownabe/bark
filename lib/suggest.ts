@@ -2,11 +2,42 @@
 //  - charDiffs: char-level diff (for inline decoration: insert=underline / delete=strikethrough widget)
 //  - diffToSuggestions: split into hunks via line-level LCS and convert to GitHub suggestions (line replacement)
 import { diff_match_patch } from "diff-match-patch";
+import { reanchorComment } from "./reanchor";
+import type { CommentMetadata } from "./metadata";
 
 /** Extract the replacement text of a ```suggestion block from a comment body (null if absent). */
 export function extractSuggestionBlock(body: string): string | null {
   const m = body.match(/```suggestion\n?([\s\S]*?)```/);
   return m ? m[1].replace(/\n$/, "") : null;
+}
+
+/**
+ * Apply an accepted suggestion to the current source, returning the new text
+ * (or null when the target text is no longer locatable).
+ *
+ * Suggestion anchors are stored line-based (sc=1, ec=1), so when the comment's
+ * createdAtSha matches the current head, `reanchorComment` returns
+ * `startOffset === endOffset` (zero width for a single-line replacement).
+ * Slicing with that range would *insert* the replacement next to the original
+ * instead of overwriting it, producing concatenated old+new text on commit.
+ * Size the replaced span from `meta.quote.length` instead — the same
+ * approach `buildSuggestionMarks` already uses for rendering.
+ */
+export function applyAcceptedSuggestion(args: {
+  source: string;
+  lineStarts: number[];
+  meta: CommentMetadata;
+  replacement: string;
+  headSha: string;
+  /** createdAtSha source per `${sha}:${path}` if available, for diff-based re-anchoring. */
+  oldSource?: string;
+}): string | null {
+  const { source, lineStarts, meta, replacement, headSha, oldSource } = args;
+  const r = reanchorComment(source, lineStarts, meta, headSha, oldSource);
+  if (r.status === "outdated") return null;
+  const from = r.startOffset;
+  const to = from + (meta.quote?.length ?? 0);
+  return source.slice(0, from) + replacement + source.slice(to);
 }
 
 /** The visible text of a comment body with the suggestion block removed. */

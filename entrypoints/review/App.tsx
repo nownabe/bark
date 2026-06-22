@@ -56,6 +56,7 @@ import {
   type ThreadRange,
 } from "./reviewItems";
 import {
+  applyAcceptedSuggestion,
   diffToSuggestions,
   extractSuggestionBlock,
   stripSuggestionBlock,
@@ -969,10 +970,15 @@ export function App() {
   // manual edits and other accepts in a single batched commit on Submit.
   const acceptSuggestion = async (c: ExistingComment) => {
     if (!c.meta) return;
-    const replacement = extractSuggestionBlock(c.body) ?? "";
-    const r = reanchorComment(source, lineStarts, c.meta, headSha ?? "", oldSourceFor(c.meta));
-    if (r.status === "outdated") return; // can't locate the target text anymore
-    const newSource = source.slice(0, r.startOffset) + replacement + source.slice(r.endOffset);
+    const newSource = applyAcceptedSuggestion({
+      source,
+      lineStarts,
+      meta: c.meta,
+      replacement: extractSuggestionBlock(c.body) ?? "",
+      headSha: headSha ?? "",
+      oldSource: oldSourceFor(c.meta),
+    });
+    if (newSource === null) return; // can't locate the target text anymore
     setSource(newSource);
     persistSuggestionEdit(curPath, newSource, baseSource, suggestionComments);
     await setDecision(c.id, "accepted");
