@@ -117,7 +117,8 @@ export interface SuggestionEditRange {
  * hunks themselves carry only base-doc line numbers).
  */
 export function suggestionEditRanges(base: string, edited: string): SuggestionEditRange[] {
-  const ops = lcsDiff(splitLines(base), splitLines(edited));
+  const baseLines = splitLines(base);
+  const ops = lcsDiff(baseLines, splitLines(edited));
   const editedLines = splitLines(edited);
   const lineStart: number[] = [];
   let acc = 0;
@@ -127,6 +128,10 @@ export function suggestionEditRanges(base: string, edited: string): SuggestionEd
   }
   const startOf = (line1: number) =>
     line1 - 1 < editedLines.length ? lineStart[line1 - 1] : edited.length;
+  const endOf = (line1: number) =>
+    line1 - 1 < editedLines.length
+      ? lineStart[line1 - 1] + editedLines[line1 - 1].length
+      : edited.length;
 
   const ranges: SuggestionEditRange[] = [];
   let baseLine = 1;
@@ -160,17 +165,44 @@ export function suggestionEditRanges(base: string, edited: string): SuggestionEd
           ? lineStart[startEdited + ins - 2] + editedLines[startEdited + ins - 2].length
           : from;
       ranges.push({ sl: startBase, el: startBase + del - 1, from, to });
+    } else if (ins > 0) {
+      // Pure insertion mirror of diffToSuggestions: the hunk absorbs an
+      // adjacent base line so the edit range covers the inserted block plus
+      // that anchor line in the edited doc.
+      if (startBase - 1 < baseLines.length) {
+        // Next base line exists; the anchor sits at editedLine `startEdited + ins`.
+        ranges.push({
+          sl: startBase,
+          el: startBase,
+          from: startOf(startEdited),
+          to: endOf(startEdited + ins),
+        });
+      } else if (startBase >= 2) {
+        // EOF insertion: the anchor is the previous edited line (at startEdited - 1).
+        const anchorEdited = startEdited - 1;
+        const lastInserted = startEdited + ins - 1;
+        ranges.push({
+          sl: startBase - 1,
+          el: startBase - 1,
+          from: startOf(anchorEdited),
+          to: endOf(lastInserted),
+        });
+      }
     }
   }
   return ranges;
 }
 
 /**
- * Convert the base → edited diff into GitHub suggestion hunks that replace lines.
- * v1 handles "delete or replace" hunks only (pure line insertions are excluded since there's no target line).
+ * Convert the base → edited diff into GitHub suggestion hunks that replace
+ * lines. Pure line insertions (no deleted line) are absorbed into an adjacent
+ * base line so the hunk has a target line for GitHub's line-replacement model:
+ * prefer the NEXT base line (semantically "insert before this line"); fall
+ * back to the PREVIOUS base line at EOF.
  */
 export function diffToSuggestions(base: string, edited: string): SuggestionHunk[] {
-  const ops = lcsDiff(splitLines(base), splitLines(edited));
+  const baseLines = splitLines(base);
+  const ops = lcsDiff(baseLines, splitLines(edited));
   const hunks: SuggestionHunk[] = [];
   let baseLine = 1;
   let i = 0;
@@ -199,8 +231,32 @@ export function diffToSuggestions(base: string, edited: string): SuggestionHunk[
         replacement: ins.join("\n"),
         quote: del.join("\n"),
       });
+    } else if (ins.length > 0) {
+      // Pure insertion — anchor to an adjacent base line so GitHub's line-
+      // replacement suggestion model has a target. The outer loop will still
+      // advance the anchor when it processes the next keep op (we don't
+      // consume it here).
+      if (startLine - 1 < baseLines.length) {
+        // The next base line exists (insertion in middle or at start).
+        const nextLine = baseLines[startLine - 1];
+        hunks.push({
+          sl: startLine,
+          el: startLine,
+          replacement: `${ins.join("\n")}\n${nextLine}`,
+          quote: nextLine,
+        });
+      } else if (startLine >= 2) {
+        // EOF insertion — anchor to the previous (last) base line.
+        const prevLine = startLine - 1;
+        const prevLineText = baseLines[prevLine - 1];
+        hunks.push({
+          sl: prevLine,
+          el: prevLine,
+          replacement: `${prevLineText}\n${ins.join("\n")}`,
+          quote: prevLineText,
+        });
+      }
     }
-    // Pure insertion (del.length===0) is unsupported in v1 since there's no target line
   }
   return hunks;
 }

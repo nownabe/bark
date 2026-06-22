@@ -29,6 +29,41 @@ describe("diffToSuggestions", () => {
   test("no change yields no hunks", () => {
     expect(diffToSuggestions("a\nb\n", "a\nb\n")).toEqual([]);
   });
+
+  // Pure insertions (no surrounding line was modified) used to be silently
+  // dropped because GitHub suggestions need a target line. We now absorb the
+  // adjacent base line into the hunk so the insertion still surfaces as a
+  // pending suggestion in the sidebar.
+  describe("pure insertion (no deleted line)", () => {
+    test("inserting between two unchanged lines anchors to the next line", () => {
+      const h = diffToSuggestions("a\nb\n", "a\nX\nb\n");
+      expect(h).toEqual([{ sl: 2, el: 2, replacement: "X\nb", quote: "b" }]);
+    });
+
+    test("inserting at the beginning anchors to the first base line", () => {
+      const h = diffToSuggestions("a\n", "X\na\n");
+      expect(h).toEqual([{ sl: 1, el: 1, replacement: "X\na", quote: "a" }]);
+    });
+
+    test("inserting at EOF (no next line) anchors to the previous base line", () => {
+      const h = diffToSuggestions("a\n", "a\nX\n");
+      expect(h).toEqual([{ sl: 1, el: 1, replacement: "a\nX", quote: "a" }]);
+    });
+
+    test("multi-line insertion picks up the next line once", () => {
+      const h = diffToSuggestions("a\nb\n", "a\nX\nY\nb\n");
+      expect(h).toEqual([{ sl: 2, el: 2, replacement: "X\nY\nb", quote: "b" }]);
+    });
+
+    test("inserting text between empty lines (the bug scenario)", () => {
+      // base: 3 empty lines. user types "hello" on a new line between two of
+      // them. Previously this produced 0 hunks (pure-insertion was skipped),
+      // so the pending suggestion never appeared in the sidebar.
+      const h = diffToSuggestions("\n\n\n", "\n\nhello\n\n");
+      expect(h).toHaveLength(1);
+      expect(h[0].replacement).toContain("hello");
+    });
+  });
 });
 
 describe("suggestionEditRanges", () => {
@@ -58,6 +93,38 @@ describe("suggestionEditRanges", () => {
     const ranges = suggestionEditRanges(base, edited);
     expect(ranges).toHaveLength(hunks.length);
     expect(ranges.map((x) => [x.sl, x.el])).toEqual(hunks.map((h) => [h.sl, h.el]));
+  });
+
+  // suggestionEditRanges must stay aligned by index with diffToSuggestions; if
+  // one emits a hunk for a pure insertion the other must too, otherwise the
+  // App.tsx index mapping (`pendingSuggestions[k]?.cid`) breaks.
+  describe("pure insertion ranges align with hunks", () => {
+    test("middle insertion: range covers inserted block + anchor line", () => {
+      const base = "a\nb\n";
+      const edited = "a\nX\nb\n";
+      const ranges = suggestionEditRanges(base, edited);
+      const hunks = diffToSuggestions(base, edited);
+      expect(ranges).toHaveLength(hunks.length);
+      expect(ranges).toEqual([{ sl: 2, el: 2, from: 2, to: 5 }]);
+      // Covers "X\nb" in the edited doc.
+      expect(edited.slice(ranges[0].from, ranges[0].to)).toBe("X\nb");
+    });
+
+    test("beginning insertion: range starts at offset 0", () => {
+      const base = "a\n";
+      const edited = "X\na\n";
+      const ranges = suggestionEditRanges(base, edited);
+      expect(ranges).toEqual([{ sl: 1, el: 1, from: 0, to: 3 }]);
+      expect(edited.slice(ranges[0].from, ranges[0].to)).toBe("X\na");
+    });
+
+    test("EOF insertion: range covers previous line + inserted block", () => {
+      const base = "a\n";
+      const edited = "a\nX\n";
+      const ranges = suggestionEditRanges(base, edited);
+      expect(ranges).toEqual([{ sl: 1, el: 1, from: 0, to: 3 }]);
+      expect(edited.slice(ranges[0].from, ranges[0].to)).toBe("a\nX");
+    });
   });
 });
 
