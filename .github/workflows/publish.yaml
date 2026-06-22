@@ -1,0 +1,73 @@
+name: Publish
+
+# Publishes Bark to the Chrome Web Store. See docs/release.md for the full flow.
+#
+# Triggered when a GitHub Release is published. release-please (release.yaml)
+# bumps package.json and creates the tag + Release from the accumulated
+# Conventional Commits; publishing that Release fires this workflow, which
+# checks out the tag, builds the production extension, and uploads + publishes
+# it to the Chrome Web Store via the Web Store API (wxt submit).
+#
+# `workflow_dispatch` is kept for manual re-submission: the upload overwrites
+# the in-review draft and republishing the same version is a no-op, so retrying
+# a failed publish is safe.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions: {}
+
+# Never run two submissions at once: the Chrome Web Store rejects a new upload
+# while a previous one for the same item is still being processed.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    name: Submit to Chrome Web Store
+    # The "publish" environment scopes the Web Store API credentials and the
+    # production build inputs to this workflow. Configure it once:
+    #   Variables (public — shipped in the bundle):
+    #     BARK_GITHUB_CLIENT_ID, BARK_GITHUB_APP_SLUG
+    #   Secrets (Web Store API; generate with `bunx wxt submit init`):
+    #     CHROME_EXTENSION_ID, CHROME_CLIENT_ID, CHROME_CLIENT_SECRET,
+    #     CHROME_REFRESH_TOKEN
+    environment: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Setup mise
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          install_args: aqua:oven-sh/bun
+          # Disable caching: a poisoned cache could taint the published artifact.
+          cache: false
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      # Build the production bundle with the production GitHub App identity.
+      # These BARK_-prefixed vars are baked into the shipped JS at build time
+      # (wxt.config.ts envPrefix); BARK_DEV_ROLE_SWITCH is intentionally unset.
+      # wxt zip builds then packages into .output/bark-<version>-chrome.zip.
+      - name: Build and zip extension
+        run: bun run zip
+        env:
+          BARK_GITHUB_CLIENT_ID: ${{ vars.BARK_GITHUB_CLIENT_ID }}
+          BARK_GITHUB_APP_SLUG: ${{ vars.BARK_GITHUB_APP_SLUG }}
+      # Exchanges the refresh token for an access token, uploads the ZIP to the
+      # Web Store item, and publishes it. To ship to trusted testers instead of
+      # everyone, append `--chrome-publish-target trustedTesters`.
+      - name: Submit to Chrome Web Store
+        run: bunx wxt submit --chrome-zip .output/*-chrome.zip
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
