@@ -287,6 +287,14 @@ export class GitHubClient {
     return (await this.getPull(ref)).headSha;
   }
 
+  /** The authenticated user's login (`GET /user`), used to derive the author role (§7.4). */
+  async getAuthenticatedUser(): Promise<{ login: string }> {
+    const res = await this.request("/user");
+    const json = (await res.json()) as { login?: string };
+    if (!json.login) throw new GitHubApiError(res.status, "authenticated user login not found");
+    return { login: json.login };
+  }
+
   /** The file's blob sha at the given branch (needed for conflict detection on commit, §7.4). */
   async getFileSha(ref: PrRef, path: string, branch: string): Promise<string> {
     const encoded = path.split("/").map(encodeURIComponent).join("/");

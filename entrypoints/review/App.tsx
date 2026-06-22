@@ -41,6 +41,7 @@ import {
   buildSuggestionMarks,
   buildThreads,
   composerInsertIndex,
+  deriveRole,
   filterReviewEntries,
   revealSubmittedFacets,
   reviewEntryCounts,
@@ -49,6 +50,7 @@ import {
   type PendingSuggestion,
   type ReviewFacet,
   type ReviewThread,
+  type Role,
   type ThreadRange,
 } from "./reviewItems";
 import {
@@ -99,7 +101,6 @@ import { pollForToken, requestDeviceAuthorization, type DeviceAuthorization } fr
 import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/metadata";
 import { sampleDoc } from "./sample";
 
-type Role = "author" | "reviewer";
 type ViewMode = "raw" | "preview";
 
 function errMessage(e: unknown): string {
@@ -456,6 +457,15 @@ export function App() {
         setHeadRef(info.headRef);
         setFiles(md);
         setSelectedPath((prev) => prev ?? md[0]?.path ?? null);
+        try {
+          const viewer = await client.getAuthenticatedUser();
+          if (!cancelled) setRole(deriveRole(viewer.login, info.author));
+        } catch (identityError) {
+          // Identity lookup failed (network / missing scope). Stay reviewer:
+          // only the author-only commit affordance is withheld; the reviewer
+          // flow is unaffected. (#83)
+          console.warn("Bark: author-role lookup failed", identityError);
+        }
       } catch (e) {
         if (!cancelled) reportError(e);
       } finally {

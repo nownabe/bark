@@ -1,13 +1,31 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import {
   avatarUrl,
   buildBlobPermalink,
   buildSuggestionBlock,
   findThreadNodeId,
+  GitHubApiError,
+  GitHubClient,
   parseNextLink,
   pullStatus,
   type ReviewThreadInfo,
 } from "../lib/github";
+
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+function stubFetch(impl: (url: string, init?: RequestInit) => Promise<Response> | Response) {
+  globalThis.fetch = mock(impl) as unknown as typeof fetch;
+}
+function jsonResponse(status: number, body: unknown): Response {
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    headers: { get: () => null },
+    json: async () => body,
+  } as unknown as Response;
+}
 
 describe("pullStatus", () => {
   test("merged wins over everything", () => {
@@ -77,5 +95,27 @@ describe("findThreadNodeId", () => {
   });
   test("returns null when no thread contains the comment", () => {
     expect(findThreadNodeId(threads, 99)).toBeNull();
+  });
+});
+
+describe("getAuthenticatedUser", () => {
+  test("calls /user with the bearer token and returns the login", async () => {
+    let seenUrl = "";
+    let seenAuth = "";
+    stubFetch((url, init) => {
+      seenUrl = url;
+      seenAuth = (init!.headers as Record<string, string>).Authorization;
+      return jsonResponse(200, { login: "octocat", id: 1 });
+    });
+    const user = await new GitHubClient("tok").getAuthenticatedUser();
+    expect(user).toEqual({ login: "octocat" });
+    expect(seenUrl).toBe("https://api.github.com/user");
+    expect(seenAuth).toBe("Bearer tok");
+  });
+
+  test("throws GitHubApiError on a non-OK response", async () => {
+    stubFetch(() => jsonResponse(401, {}));
+    const err = await new GitHubClient("bad").getAuthenticatedUser().catch((e) => e);
+    expect(err).toBeInstanceOf(GitHubApiError);
   });
 });
