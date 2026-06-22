@@ -214,6 +214,26 @@ function threadPos(rootComment: ExistingComment | null, rootDraft: PendingDraft 
 }
 
 /**
+ * Compute the set of thread ids whose latest resolution event is "resolve".
+ * Bark tracks resolution via embedded `event: "resolve" | "unresolve"`
+ * metadata comments (a comment with the highest GitHub id wins per thread);
+ * this is the same logic `buildThreads` uses to mark threads resolved, and
+ * `buildSuggestionMarks` consults it so the in-editor overlay matches the
+ * sidebar's resolved-state view.
+ */
+export function resolvedThreadIds(comments: ExistingComment[]): Set<string> {
+  const latest = new Map<string, { id: number; event: "resolve" | "unresolve" }>();
+  for (const c of comments) {
+    if (!c.meta?.event) continue;
+    const prev = latest.get(c.meta.thread);
+    if (!prev || c.id > prev.id) latest.set(c.meta.thread, { id: c.id, event: c.meta.event });
+  }
+  const resolved = new Set<string>();
+  for (const [thread, e] of latest) if (e.event === "resolve") resolved.add(thread);
+  return resolved;
+}
+
+/**
  * Group submitted comments and pending drafts into threads by thread id, sorted
  * current-path-first then by position. Submitted comments come before pending
  * ones within a thread; submitted comments are ordered by GitHub id.
@@ -517,8 +537,15 @@ export function buildSuggestionMarks(args: {
 }): SuggestionRender[] {
   const { comments, source, lineStarts, headSha, currentPath, dismissed, oldSources } = args;
   const docLen = source.length;
+  const resolved = resolvedThreadIds(comments);
   return comments
-    .filter((c) => c.meta?.kind === "suggestion" && c.meta.path === currentPath && !dismissed[c.id])
+    .filter(
+      (c) =>
+        c.meta?.kind === "suggestion" &&
+        c.meta.path === currentPath &&
+        !dismissed[c.id] &&
+        !resolved.has(c.meta.thread),
+    )
     .map((c) => {
       const meta = c.meta as CommentMetadata;
       const oldSource = meta.sha ? oldSources?.[`${meta.sha}:${meta.path}`] : undefined;

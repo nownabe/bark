@@ -153,6 +153,67 @@ describe("buildSuggestionMarks", () => {
     });
     expect(marks).toHaveLength(0);
   });
+
+  test("skips suggestions whose thread has a 'resolve' event (regression)", () => {
+    // After Submit, the local dismissed map is cleared but the resolve-event
+    // metadata comment is persisted on GitHub. The overlay must also consult
+    // that event — otherwise the strikethrough + replacement keep showing in
+    // the editor even though the sidebar treats the thread as resolved.
+    const resolveEvent: ExistingComment = {
+      id: 2,
+      source: "review",
+      author: "x",
+      body: "Resolved via Bark.",
+      meta: {
+        cid: "e2",
+        path: "a.md",
+        range: { sl: 2, sc: 1, el: 2, ec: 1 },
+        quote: "line two",
+        sha: "HEAD",
+        thread: "t1",
+        kind: "comment",
+        event: "resolve",
+      },
+    };
+    const marks = buildSuggestionMarks({
+      comments: [suggestionComment(), resolveEvent],
+      source,
+      lineStarts,
+      headSha: "HEAD",
+      currentPath: "a.md",
+      dismissed: {},
+    });
+    expect(marks).toHaveLength(0);
+  });
+
+  test("restores the overlay when the latest event is 'unresolve'", () => {
+    const ev = (id: number, event: "resolve" | "unresolve"): ExistingComment => ({
+      id,
+      source: "review",
+      author: "x",
+      body: event === "resolve" ? "Resolved." : "Reopened.",
+      meta: {
+        cid: `e${id}`,
+        path: "a.md",
+        range: { sl: 2, sc: 1, el: 2, ec: 1 },
+        quote: "line two",
+        sha: "HEAD",
+        thread: "t1",
+        kind: "comment",
+        event,
+      },
+    });
+    const marks = buildSuggestionMarks({
+      // Latest event (highest id) wins: resolve(id=2) then unresolve(id=3) → reopened
+      comments: [suggestionComment(), ev(2, "resolve"), ev(3, "unresolve")],
+      source,
+      lineStarts,
+      headSha: "HEAD",
+      currentPath: "a.md",
+      dismissed: {},
+    });
+    expect(marks).toHaveLength(1);
+  });
 });
 
 describe("buildThreads", () => {
