@@ -18,6 +18,8 @@ interface Props {
   onConfirm: () => void;
   onCancel: () => void;
   loading?: boolean;
+  /** Primary button label. Defaults to "Submit review" (reviewer mode). */
+  submitLabel?: string;
 }
 
 function lineLabel(range: { sl: number; el: number }): string {
@@ -36,8 +38,16 @@ function groupText(g: SubmitGroup): string {
   return parts.join(" and ");
 }
 
-export function SubmitConfirmModal({ items, target, onConfirm, onCancel, loading }: Props) {
+export function SubmitConfirmModal({
+  items,
+  target,
+  onConfirm,
+  onCancel,
+  loading,
+  submitLabel,
+}: Props) {
   const summary = summarizePending(items);
+  const buttonLabel = submitLabel ?? "Submit review";
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div
@@ -81,6 +91,16 @@ export function SubmitConfirmModal({ items, target, onConfirm, onCancel, loading
                     .
                   </li>
                 ) : null}
+                {summary.commit.editedFiles > 0 || summary.commit.acceptances > 0 ? (
+                  <li>
+                    <strong>One commit</strong> updating{" "}
+                    {plural(summary.commit.editedFiles, "file")}
+                    {summary.commit.acceptances > 0
+                      ? `, applying ${plural(summary.commit.acceptances, "accepted suggestion")}`
+                      : ""}
+                    .
+                  </li>
+                ) : null}
               </ul>
               <p className="notice--muted" style={{ fontSize: 12 }}>
                 This posts to GitHub immediately and can't be undone from Bark.
@@ -91,6 +111,22 @@ export function SubmitConfirmModal({ items, target, onConfirm, onCancel, loading
                 <div key={path} className="submit-group">
                   <div className="submit-group__file">{path}</div>
                   {groupItems.map((item) => {
+                    if (item.kind === "acceptedSuggestion") {
+                      return (
+                        <div key={`accept:${item.commentId}`} className="thread">
+                          <div className="comment__meta">
+                            <span>L{item.line}</span>
+                            <span className="tag tag--accept">Accept</span>
+                          </div>
+                          <SuggestionDiff before={item.quote} after={item.replacement} />
+                        </div>
+                      );
+                    }
+                    if (item.kind === "edit") {
+                      // Author edits are summarized by the "One commit" line above —
+                      // no per-edit detail in the list (would duplicate the summary).
+                      return null;
+                    }
                     const v =
                       item.kind === "suggestion"
                         ? {
@@ -144,7 +180,7 @@ export function SubmitConfirmModal({ items, target, onConfirm, onCancel, loading
             onClick={onConfirm}
             disabled={loading || items.length === 0}
           >
-            Submit review
+            {buttonLabel}
           </button>
         </div>
       </div>

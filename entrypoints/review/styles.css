@@ -676,6 +676,26 @@ select.input:focus {
   color: var(--red);
 }
 
+/* Inline tag (lightweight chip; distinct from .badge so the existing
+   "no .badge in submit modal list" invariant still holds). Used inside
+   per-item metadata in the author Submit confirm modal. */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-inset);
+  color: var(--muted);
+  margin-left: 8px;
+}
+.tag--accept {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+
 /* PR title — the headline link (the only link in the header) */
 .topbar__pr-title {
   font-size: 14px;
