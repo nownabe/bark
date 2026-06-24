@@ -1,7 +1,7 @@
 // CodeMirror selection -> SourceAnchor conversion (anchoring from §7.1, CM version).
 // The CM document is always the Markdown source itself, so the selection from/to
-// map directly to source offsets. react-markdown DOM reverse-lookup (the old
-// rehypeSourcePos/anchor.ts) is not needed.
+// map directly to source offsets, with no DOM reverse-lookup needed (the earlier
+// react-markdown rendering required mapping rendered DOM back to source offsets).
 import type { EditorState } from "@codemirror/state";
 import type { ViewUpdate } from "@codemirror/view";
 import type { SourceAnchor } from "../../lib/anchor";
