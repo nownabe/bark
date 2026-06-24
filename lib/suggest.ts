@@ -5,10 +5,16 @@ import { diff_match_patch } from "diff-match-patch";
 import { reanchorComment } from "./reanchor";
 import type { CommentMetadata } from "./metadata";
 
-/** Extract the replacement text of a ```suggestion block from a comment body (null if absent). */
+/** Extract the replacement text of a ```suggestion block from a comment body (null if absent).
+ *
+ * Accepts variable-length fences (≥3 backticks) so a suggestion whose content
+ * contains an inner code fence — wrapped by `buildSuggestionBlock` with a
+ * longer outer fence — round-trips intact. The closing fence is matched at
+ * the same length via the backreference; trailing backticks (CommonMark
+ * allows a longer close) are tolerated by `[^\`]` lookahead/end-of-string. */
 export function extractSuggestionBlock(body: string): string | null {
-  const m = body.match(/```suggestion\n?([\s\S]*?)```/);
-  return m ? m[1].replace(/\n$/, "") : null;
+  const m = body.match(/(`{3,})suggestion\n?([\s\S]*?)\n?\1(?!`)/);
+  return m ? m[2] : null;
 }
 
 /**
@@ -42,7 +48,7 @@ export function applyAcceptedSuggestion(args: {
 
 /** The visible text of a comment body with the suggestion block removed. */
 export function stripSuggestionBlock(body: string): string {
-  return body.replace(/```suggestion\n?[\s\S]*?```/g, "").trim();
+  return body.replace(/(`{3,})suggestion\n?[\s\S]*?\n?\1(?!`)/g, "").trim();
 }
 
 /** Char-level diff [op(-1 del / 0 eq / 1 ins), text]. For inline tracked-changes decoration. */

@@ -140,6 +140,21 @@ describe("suggestion block helpers", () => {
   test("stripSuggestionBlock removes the fence", () => {
     expect(stripSuggestionBlock("hi\n\n```suggestion\nnew\n```")).toBe("hi");
   });
+
+  // Regression: when the suggestion content contained a ``` code fence the
+  // lazy regex stopped at the inner fence, so extractSuggestionBlock truncated
+  // the suggestion and stripSuggestionBlock left orphaned fence text behind.
+  // The helpers must recognize longer outer fences (≥3 backticks) so a 4- or
+  // 5-tick wrapper round-trips with content that contains 3- or 4-tick fences.
+  test("extractSuggestionBlock preserves inner ``` when the outer fence is longer", () => {
+    const inner = "before\n```js\nconst x = 1;\n```\nafter";
+    expect(extractSuggestionBlock("hi\n\n````suggestion\n" + inner + "\n````")).toBe(inner);
+  });
+
+  test("stripSuggestionBlock removes a longer outer fence cleanly", () => {
+    const inner = "before\n```js\nconst x = 1;\n```\nafter";
+    expect(stripSuggestionBlock("hi\n\n````suggestion\n" + inner + "\n````")).toBe("hi");
+  });
 });
 
 describe("charDiffs", () => {

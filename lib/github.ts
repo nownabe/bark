@@ -131,9 +131,18 @@ export function parseNextLink(link: string | null): string | null {
   return null;
 }
 
-/** A GitHub suggestion block (§7.3). Shows "Apply suggestion" when in-diff. */
+/** A GitHub suggestion block (§7.3). Shows "Apply suggestion" when in-diff.
+ *
+ * Picks a fence length one longer than the longest backtick run inside
+ * `replacement` (min 3) so an inner ``` code fence in the suggestion content
+ * can't prematurely close the outer block per CommonMark. */
 export function buildSuggestionBlock(replacement: string): string {
-  return `\`\`\`suggestion\n${replacement}\n\`\`\``;
+  let longest = 0;
+  for (const m of replacement.matchAll(/`+/g)) {
+    if (m[0].length > longest) longest = m[0].length;
+  }
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return `${fence}suggestion\n${replacement}\n${fence}`;
 }
 
 /** Public avatar URL for a GitHub login (github.com/<login>.png redirects to the CDN). */

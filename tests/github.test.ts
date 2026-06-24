@@ -95,6 +95,21 @@ describe("buildSuggestionBlock", () => {
   test("wraps replacement in a suggestion fence", () => {
     expect(buildSuggestionBlock("const x = 2;")).toBe("```suggestion\nconst x = 2;\n```");
   });
+
+  // Regression: a replacement that itself contains a ``` code fence used to be
+  // wrapped in a same-length 3-backtick fence, so GitHub's parser closed the
+  // outer suggestion block at the inner ``` and truncated the suggestion.
+  // CommonMark allows longer fences — pick one longer than any backtick run
+  // in the content so the inner fence cannot close the outer one.
+  test("uses a longer fence when the replacement contains ```", () => {
+    const inner = "before\n```js\nconst x = 1;\n```\nafter";
+    expect(buildSuggestionBlock(inner)).toBe("````suggestion\n" + inner + "\n````");
+  });
+
+  test("escalates fence length to outrun the longest backtick run in the content", () => {
+    const inner = "a ```` four-tick run";
+    expect(buildSuggestionBlock(inner)).toBe("`````suggestion\n" + inner + "\n`````");
+  });
 });
 
 describe("findThreadNodeId", () => {
