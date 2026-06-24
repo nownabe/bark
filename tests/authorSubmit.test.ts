@@ -105,7 +105,7 @@ function acceptedThread(over: Partial<AuthorSubmitInput["acceptedThreads"][numbe
   return {
     rootCommentId: 1,
     threadNodeId: "PRRT_1",
-    eventBody: "<!-- bark:meta {} -->\nResolved via Bark.",
+    eventBody: (_newHeadSha: string) => "<!-- bark:meta {} -->\nResolved via Bark.",
     ...over,
   };
 }
@@ -319,6 +319,58 @@ describe("executeAuthorSubmit — error semantics", () => {
     // No GraphQL resolves landed (event reply failed each time)
     expect(calls.filter((c) => c.method === "resolveReviewThread")).toHaveLength(0);
     expect(result.resolveErrors).toHaveLength(2);
+  });
+});
+
+describe("executeAuthorSubmit — eventBody composition", () => {
+  test("eventBody is invoked with the new commit sha after the commit lands", async () => {
+    // The accept-suggestion reply should reference the commit that applied
+    // the change — so eventBody is a function of the new head sha, called
+    // after the commit step. With a commit, that sha is the new commit.
+    const { client, calls } = makeMockClient({ commitSha: "new-commit-sha" });
+    const seen: string[] = [];
+    await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      files: [{ path: "a.md", content: "edited" }],
+      acceptedThreads: [
+        {
+          rootCommentId: 7,
+          threadNodeId: "PRRT_X",
+          eventBody: (sha) => {
+            seen.push(sha);
+            return `Applied via Bark in ${sha}.`;
+          },
+        },
+      ],
+    });
+    expect(seen).toEqual(["new-commit-sha"]);
+    const reply = calls.find((c) => c.method === "replyToReviewComment") as { body: string };
+    expect(reply.body).toBe("Applied via Bark in new-commit-sha.");
+  });
+
+  test("eventBody receives the baseSha when no files were committed", async () => {
+    // No-op accept (suggestion source === base): eventBody still runs, but
+    // there's no new commit, so the caller can detect that and fall back.
+    const { client, calls } = makeMockClient();
+    const seen: string[] = [];
+    await executeAuthorSubmit({
+      ...baseInput(),
+      client: client as never,
+      acceptedThreads: [
+        {
+          rootCommentId: 7,
+          threadNodeId: "PRRT_X",
+          eventBody: (sha) => {
+            seen.push(sha);
+            return `(no-op, ${sha})`;
+          },
+        },
+      ],
+    });
+    expect(seen).toEqual(["head-sha"]);
+    const reply = calls.find((c) => c.method === "replyToReviewComment") as { body: string };
+    expect(reply.body).toBe("(no-op, head-sha)");
   });
 });
 
