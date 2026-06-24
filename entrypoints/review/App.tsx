@@ -1219,7 +1219,7 @@ export function App() {
       const acceptedThreads: {
         rootCommentId: number;
         threadNodeId: string;
-        eventBody: string;
+        eventBody: (newHeadSha: string) => string;
       }[] = [];
       const resolvedCommentIds: number[] = [];
       if (acceptedSuggestionInfos.length > 0) {
@@ -1241,7 +1241,17 @@ export function App() {
           acceptedThreads.push({
             rootCommentId: info.commentId,
             threadNodeId: nodeId,
-            eventBody: embedMetadata("Resolved via Bark.", evMeta),
+            // Reference the commit that applied the suggestion so the reply
+            // is useful as audit trail. GitHub auto-renders the raw sha as a
+            // commit link. When no commit ran (no-op accept), fall back to
+            // the plain marker so the resolve-event still posts.
+            eventBody: (newHeadSha) => {
+              const body =
+                newHeadSha !== headSha
+                  ? `Applied via Bark in ${newHeadSha}.`
+                  : "Resolved via Bark.";
+              return embedMetadata(body, { ...evMeta, sha: newHeadSha });
+            },
           });
           resolvedCommentIds.push(info.commentId);
         }

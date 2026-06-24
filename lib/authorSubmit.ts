@@ -54,10 +54,15 @@ export interface AuthorSubmitInput {
    * Threads to resolve after the commit. For each: post a Bark resolve-event
    * metadata reply (so the local sidebar still treats the thread as resolved
    * after the dismissed map is cleared) THEN call the GraphQL resolve so the
-   * native GitHub UI matches. The caller composes `eventBody` with embedded
-   * `event: "resolve"` metadata — mirrors setThreadResolved's flow.
+   * native GitHub UI matches. `eventBody` is a function of the new head sha
+   * so the reply can reference the commit that applied the change — when no
+   * commit ran, it's invoked with `baseSha`.
    */
-  acceptedThreads: { rootCommentId: number; threadNodeId: string; eventBody: string }[];
+  acceptedThreads: {
+    rootCommentId: number;
+    threadNodeId: string;
+    eventBody: (newHeadSha: string) => string;
+  }[];
 }
 
 export interface AuthorSubmitResult {
@@ -140,7 +145,7 @@ export async function executeAuthorSubmit(input: AuthorSubmitInput): Promise<Aut
   const resolveErrors: { threadId: string; error: unknown }[] = [];
   for (const t of input.acceptedThreads) {
     try {
-      await client.replyToReviewComment(ref, t.rootCommentId, t.eventBody);
+      await client.replyToReviewComment(ref, t.rootCommentId, t.eventBody(newHeadSha));
     } catch (e) {
       resolveErrors.push({ threadId: t.threadNodeId, error: e });
       continue;
