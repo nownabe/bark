@@ -58,6 +58,7 @@ describe("github-transport — postReviewBatch", () => {
     const postedBody = embedMetadata(c.body, {
       cid: c.id,
       threadId: c.threadId,
+      path: c.path,
       anchor: c.anchor,
     });
     const { fetch, calls } = makeFetch(async (req) => {

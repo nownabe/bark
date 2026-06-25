@@ -74,6 +74,7 @@ function buildReviewCommentInput(c: Comment) {
   const body = embedMetadata(c.body, {
     cid: c.id,
     threadId: c.threadId,
+    path: c.path,
     anchor: c.anchor,
   });
   const base = {
@@ -102,6 +103,7 @@ async function postReply(
     const body = embedMetadata(step.comment.body, {
       cid: step.comment.id,
       threadId: step.comment.threadId,
+      path: step.comment.path,
       anchor: step.comment.anchor,
     });
     const result = await ghRequest<{ id: number }>(
@@ -130,6 +132,7 @@ async function postIssueComment(
     const body = embedMetadata(step.comment.body, {
       cid: step.comment.id,
       threadId: step.comment.threadId,
+      path: step.comment.path,
       anchor: step.comment.anchor,
     });
     const result = await ghRequest<{ id: number }>(

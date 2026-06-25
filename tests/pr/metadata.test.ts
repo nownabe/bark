@@ -5,6 +5,7 @@ function meta(overrides: Partial<WireMetadata> = {}): WireMetadata {
   return {
     cid: "c1",
     threadId: "t1",
+    path: "README.md",
     anchor: {
       sha: "deadbeef",
       range: { sl: 1, sc: 1, el: 2, ec: 10 },
