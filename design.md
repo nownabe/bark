@@ -132,6 +132,14 @@ heavy drop shadows.
   the user into the main UI with an error notice.
 - **Modal / popover** (`.modal*`, `.popover*`, `.debug-popover`): elevated
   surface, soft large shadow, blurred scrim for the modal, entrance animation.
+- **Snackbar (global error surface):** transient toast pinned to the bottom of
+  the viewport. It is the **default channel for any user-relevant error** —
+  failed refresh, failed sync, fetch / auth errors. Components may additionally
+  reflect errors inline where context helps (a retry affordance near a failed
+  draft, an `outdated` badge on a comment), but the Snackbar is always used;
+  errors are never surfaced silently. Severity uses the semantic palette
+  (`--red*` for errors, `--amber*` for warnings); auto-dismiss after a few
+  seconds with a close affordance.
 - **Floating controls** (`.debug-fab` bottom-left, `.role-fab` bottom-right):
   pill/circle, translucent, lift on hover. Dev-only controls (e.g. the
   role switch behind `BARK_DEV_ROLE_SWITCH`) live here, out of the main chrome.
