@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { reconcile } from "../../lib/pr/reconciler";
 import type { Comment, FileEdit, LocalState, RemoteState, Thread } from "../../lib/pr/types";
-import { emptyLocalState, emptyRemoteState } from "../../lib/pr/types";
+import { emptyState } from "../../lib/pr/types";
 
 const author = { login: "alice" };
 const anchor = {
@@ -44,45 +44,45 @@ function fileEdit(overrides: Partial<FileEdit> = {}): FileEdit {
 }
 
 function localState(overrides: Partial<LocalState> = {}): LocalState {
-  return { ...emptyLocalState(), ...overrides };
+  return { ...emptyState(), ...overrides };
 }
 
 function remoteState(overrides: Partial<RemoteState> = {}): RemoteState {
-  return { ...emptyRemoteState(), ...overrides };
+  return { ...emptyState(), ...overrides };
 }
 
 describe("reconciler — empty / inert cases", () => {
   test("empty states emit no operations", () => {
-    expect(reconcile(emptyLocalState(), emptyRemoteState())).toEqual([]);
+    expect(reconcile(emptyState(), emptyState())).toEqual([]);
   });
 
   test("a draft Comment is invisible to the Reconciler", () => {
     const c = comment({ state: "draft" });
-    expect(reconcile(localState({ comments: [c] }), emptyRemoteState())).toEqual([]);
+    expect(reconcile(localState({ comments: [c] }), emptyState())).toEqual([]);
   });
 
   test("a synced Comment emits nothing", () => {
     const c = comment({ state: "synced", remoteId: 42 });
-    expect(reconcile(localState({ comments: [c] }), emptyRemoteState())).toEqual([]);
+    expect(reconcile(localState({ comments: [c] }), emptyState())).toEqual([]);
   });
 
   test("a syncing Comment that already has a remoteId emits nothing (defensive)", () => {
     const c = comment({ state: "syncing", remoteId: 42 });
-    expect(reconcile(localState({ comments: [c] }), emptyRemoteState())).toEqual([]);
+    expect(reconcile(localState({ comments: [c] }), emptyState())).toEqual([]);
   });
 });
 
 describe("reconciler — CreateComment", () => {
   test("a top-level syncing Comment without remoteId emits CreateComment", () => {
     const c = comment();
-    const ops = reconcile(localState({ comments: [c] }), emptyRemoteState());
+    const ops = reconcile(localState({ comments: [c] }), emptyState());
     expect(ops).toEqual([{ kind: "create-comment", comment: c }]);
   });
 
   test("multiple top-level syncing Comments emit a CreateComment each", () => {
     const c1 = comment({ id: "c1", threadId: "t1" });
     const c2 = comment({ id: "c2", threadId: "t2" });
-    const ops = reconcile(localState({ comments: [c1, c2] }), emptyRemoteState());
+    const ops = reconcile(localState({ comments: [c1, c2] }), emptyState());
     expect(ops).toHaveLength(2);
     expect(ops[0]).toEqual({ kind: "create-comment", comment: c1 });
     expect(ops[1]).toEqual({ kind: "create-comment", comment: c2 });
@@ -97,7 +97,7 @@ describe("reconciler — CreateReply", () => {
       state: "syncing",
       parentLocalId: "c-parent",
     });
-    const ops = reconcile(localState({ comments: [parent, reply] }), emptyRemoteState());
+    const ops = reconcile(localState({ comments: [parent, reply] }), emptyState());
     expect(ops).toEqual([{ kind: "create-reply", comment: reply, parent }]);
   });
 
@@ -108,7 +108,7 @@ describe("reconciler — CreateReply", () => {
       state: "syncing",
       parentLocalId: "c-parent",
     });
-    const ops = reconcile(localState({ comments: [parent, reply] }), emptyRemoteState());
+    const ops = reconcile(localState({ comments: [parent, reply] }), emptyState());
     expect(ops).toEqual([]);
   });
 
@@ -119,7 +119,7 @@ describe("reconciler — CreateReply", () => {
       state: "syncing",
       parentLocalId: "c-parent",
     });
-    const ops = reconcile(localState({ comments: [parent, reply] }), emptyRemoteState());
+    const ops = reconcile(localState({ comments: [parent, reply] }), emptyState());
     // The parent itself is a CreateComment; the reply is deferred.
     expect(ops).toEqual([{ kind: "create-comment", comment: parent }]);
   });
@@ -130,14 +130,14 @@ describe("reconciler — CreateReply", () => {
       state: "syncing",
       parentLocalId: "missing-parent",
     });
-    expect(reconcile(localState({ comments: [reply] }), emptyRemoteState())).toEqual([]);
+    expect(reconcile(localState({ comments: [reply] }), emptyState())).toEqual([]);
   });
 });
 
 describe("reconciler — UpdateThreadResolved", () => {
   test("a syncing Thread that has no remoteThreadId emits no Op (cannot resolve a not-yet-created thread)", () => {
     const t = thread({ state: "syncing", resolved: true });
-    expect(reconcile(localState({ threads: [t] }), emptyRemoteState())).toEqual([]);
+    expect(reconcile(localState({ threads: [t] }), emptyState())).toEqual([]);
   });
 
   test("a syncing Thread whose resolved differs from remote emits UpdateThreadResolved", () => {
@@ -213,19 +213,19 @@ describe("reconciler — UpdateThreadResolved", () => {
 describe("reconciler — CommitFileEdit", () => {
   test("a syncing FileEdit emits CommitFileEdit", () => {
     const fe = fileEdit();
-    const ops = reconcile(localState({ fileEdits: [fe] }), emptyRemoteState());
+    const ops = reconcile(localState({ fileEdits: [fe] }), emptyState());
     expect(ops).toEqual([{ kind: "commit-file-edit", fileEdit: fe }]);
   });
 
   test("a draft FileEdit is invisible", () => {
     const fe = fileEdit({ state: "draft" });
-    expect(reconcile(localState({ fileEdits: [fe] }), emptyRemoteState())).toEqual([]);
+    expect(reconcile(localState({ fileEdits: [fe] }), emptyState())).toEqual([]);
   });
 
   test("multiple syncing FileEdits emit a CommitFileEdit each", () => {
     const fe1 = fileEdit({ id: "f1", path: "a.md" });
     const fe2 = fileEdit({ id: "f2", path: "b.md" });
-    const ops = reconcile(localState({ fileEdits: [fe1, fe2] }), emptyRemoteState());
+    const ops = reconcile(localState({ fileEdits: [fe1, fe2] }), emptyState());
     expect(ops).toHaveLength(2);
     expect(ops[0]).toEqual({ kind: "commit-file-edit", fileEdit: fe1 });
     expect(ops[1]).toEqual({ kind: "commit-file-edit", fileEdit: fe2 });
@@ -263,7 +263,7 @@ describe("reconciler — mixed cases", () => {
   test("Reconciler does not mutate the input states", () => {
     const c = comment();
     const local = localState({ comments: [c] });
-    const remote = emptyRemoteState();
+    const remote = emptyState();
     const localCopy = JSON.parse(JSON.stringify(local));
     const remoteCopy = JSON.parse(JSON.stringify(remote));
     reconcile(local, remote);

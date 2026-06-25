@@ -26,8 +26,9 @@ export type Anchor = {
   quote: string;
 };
 
-/** Inline user reference (used by Comment.author, PullRequest.author). */
-export type Author = {
+/** A GitHub user identity. Used for `Comment.author`, `PullRequest.author`,
+ *  and `PRState.viewer`. */
+export type User = {
   login: string;
   avatarUrl?: string;
 };
@@ -48,7 +49,7 @@ export type Comment = {
   parentLocalId?: LocalId;
 
   body: string;
-  author: Author;
+  author: User;
 
   path: string;
   /** Immutable; set at creation. */
@@ -91,13 +92,7 @@ export type PullRequest = {
   state: "open" | "closed";
   draft: boolean;
   merged: boolean;
-  author: Author;
-};
-
-/** The authenticated user (viewer). */
-export type User = {
-  login: string;
-  avatarUrl?: string;
+  author: User;
 };
 
 /** File content at a specific commit. Immutable per (sha, path). */
@@ -107,34 +102,32 @@ export type FileContent = {
   source: string;
 };
 
-/** User-intended state, persisted to chrome.storage.local. */
-export type LocalState = {
+/** Shape shared by `LocalState` and `RemoteState`. Both sides carry the same
+ *  fields so the Reconciler can diff them field-by-field; individual fields are
+ *  conventionally populated on one side or the other (see ADR 0002). */
+export type PRState = {
   comments: Comment[];
   threads: Thread[];
   fileEdits: FileEdit[];
-};
-
-/** Last-known GitHub state, in-memory only, refetched each session. */
-export type RemoteState = {
+  fileContents: FileContent[];
   pullRequest: PullRequest | null;
   viewer: User | null;
-  comments: Comment[];
-  threads: Thread[];
-  fileContents: FileContent[];
 };
 
-/** Empty LocalState helper. */
-export function emptyLocalState(): LocalState {
-  return { comments: [], threads: [], fileEdits: [] };
-}
+/** User-intended state, persisted to chrome.storage.local. */
+export type LocalState = PRState;
 
-/** Empty RemoteState helper. */
-export function emptyRemoteState(): RemoteState {
+/** Last-known GitHub state, in-memory only, refetched each session. */
+export type RemoteState = PRState;
+
+/** Empty PRState helper (used for both LocalState and RemoteState). */
+export function emptyState(): PRState {
   return {
-    pullRequest: null,
-    viewer: null,
     comments: [],
     threads: [],
+    fileEdits: [],
     fileContents: [],
+    pullRequest: null,
+    viewer: null,
   };
 }
