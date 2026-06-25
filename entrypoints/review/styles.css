@@ -1292,6 +1292,40 @@ select.input:focus {
   color: var(--faint);
 }
 
+/* AppV2 boot gate — used by AppV2Mount before / outside the data layer
+   (missing PR ref, missing token, bootstrap error). Compact, centred. */
+.appv2--gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 48px 16px;
+}
+.appv2--gate .appv2__loading {
+  text-align: center;
+  color: var(--muted);
+  max-width: 560px;
+  line-height: 1.6;
+}
+.appv2--gate code {
+  font-family: var(--font-mono);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  font-size: 13px;
+}
+.appv2__boot-error {
+  font-family: var(--font-mono);
+  background: var(--red-tint);
+  border: 1px solid var(--red);
+  color: var(--red-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-top: 12px;
+  white-space: pre-wrap;
+  text-align: left;
+}
+
 /* Snackbar — global error / warning surface (ADR 0005 §4).
    Stacks bottom-center; semantic palette drives severity. */
 .snackbar-stack {
