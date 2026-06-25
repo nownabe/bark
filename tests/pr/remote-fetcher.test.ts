@@ -3,6 +3,7 @@ import type { PrRef } from "../../lib/pr/github-transport";
 import { embedMetadata } from "../../lib/pr/metadata";
 import {
   fetchComments,
+  fetchFileContent,
   fetchPullRequest,
   fetchRemoteState,
   fetchThreads,
@@ -256,6 +257,19 @@ describe("remote-fetcher — fetchThreads", () => {
       { id: "local-thread-A", state: "synced", remoteThreadId: "PRT_A", resolved: true },
       { id: "foreign-thread-PRT_B", state: "synced", remoteThreadId: "PRT_B", resolved: false },
     ]);
+  });
+});
+
+describe("remote-fetcher — fetchFileContent URL encoding", () => {
+  test("preserves slashes in nested paths (per-segment percent encoding)", async () => {
+    let calledUrl = "";
+    const { fetch } = makeFetch(async (req) => {
+      calledUrl = req.url;
+      return jsonResponse({ content: btoa("body"), encoding: "base64" });
+    });
+    await fetchFileContent({ token: "t", fetch }, PR, "abc", "docs/sub dir/file.md");
+    expect(calledUrl).toContain("/contents/docs/sub%20dir/file.md");
+    expect(calledUrl).not.toContain("%2F");
   });
 });
 

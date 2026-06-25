@@ -235,10 +235,12 @@ async function commit(
         parents: [step.baseSha],
       },
     );
+    // Per-segment encoding so a branch like "topic/feature" survives.
+    const encodedHeadRef = step.headRef.split("/").map(encodeURIComponent).join("/");
     await ghRequest(
       client,
       "PATCH",
-      `/repos/${prRef.owner}/${prRef.repo}/git/refs/heads/${step.headRef}`,
+      `/repos/${prRef.owner}/${prRef.repo}/git/refs/heads/${encodedHeadRef}`,
       { sha: newCommit.sha, force: false },
     );
     return { ok: true, newHeadSha: newCommit.sha };
