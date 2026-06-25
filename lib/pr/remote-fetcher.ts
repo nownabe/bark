@@ -7,6 +7,7 @@
 //
 // See docs/adr/0005-refresh-policy.md §2 for what a full refresh covers.
 
+import type { ChangedFile } from "./diff";
 import { type GitHubClient, ghGraphQL, ghPaginate, ghRequest } from "./github-api";
 import type { PrRef } from "./github-transport";
 import { extractMetadata } from "./metadata";
@@ -255,6 +256,29 @@ function findThreadLocalId(thread: {
     if (meta) return meta.threadId;
   }
   return `foreign-thread-${thread.id}`;
+}
+
+// ---- ChangedFiles ------------------------------------------------------
+
+type RawChangedFile = {
+  filename: string;
+  status: ChangedFile["status"];
+  patch?: string;
+};
+
+/** Fetch the PR's changed files with their unified-diff patches. Used to
+ *  build the `isInDiff` predicate that routes CreateComment ops between
+ *  PostReviewBatch and PostIssueComment. */
+export async function fetchChangedFiles(client: GitHubClient, ref: PrRef): Promise<ChangedFile[]> {
+  const raw = await ghPaginate<RawChangedFile>(
+    client,
+    `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/files?per_page=100`,
+  );
+  return raw.map((f) => ({
+    path: f.filename,
+    status: f.status,
+    patch: f.patch,
+  }));
 }
 
 // ---- FileContent -------------------------------------------------------

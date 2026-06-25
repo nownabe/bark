@@ -1292,6 +1292,72 @@ select.input:focus {
   color: var(--faint);
 }
 
+/* Snackbar — global error / warning surface (ADR 0005 §4).
+   Stacks bottom-center; semantic palette drives severity. */
+.snackbar-stack {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: min(560px, calc(100vw - 32px));
+}
+.snackbar {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  font-size: 14px;
+  line-height: 1.4;
+  animation: snackbar-in var(--dur) var(--ease);
+}
+.snackbar--error {
+  background: var(--red-tint);
+  color: var(--red-strong);
+  border: 1px solid var(--red);
+}
+.snackbar--warning {
+  background: var(--amber-tint);
+  color: var(--amber);
+  border: 1px solid var(--amber);
+}
+.snackbar__message {
+  flex: 1;
+}
+.snackbar__close {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  opacity: 0.7;
+  transition: opacity var(--dur) var(--ease);
+}
+.snackbar__close:hover {
+  opacity: 1;
+}
+@keyframes snackbar-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
