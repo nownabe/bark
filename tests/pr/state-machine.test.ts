@@ -1,0 +1,390 @@
+import { describe, expect, test } from "bun:test";
+import type { StepResult } from "../../lib/pr/executor";
+import {
+  applyStepResults,
+  flipDraftsToSyncing,
+  mergeRemoteIntoLocal,
+  setThreadResolvedToSyncing,
+} from "../../lib/pr/state-machine";
+import type {
+  Comment,
+  FileEdit,
+  LocalState,
+  PullRequest,
+  RemoteState,
+  Thread,
+} from "../../lib/pr/types";
+import { emptyState } from "../../lib/pr/types";
+
+const author = { login: "alice" };
+const anchor = {
+  sha: "deadbeef",
+  range: { sl: 1, sc: 1, el: 1, ec: 10 },
+  quote: "hello",
+};
+
+function comment(overrides: Partial<Comment> = {}): Comment {
+  return {
+    id: "c1",
+    state: "syncing",
+    threadId: "t1",
+    body: "body",
+    author,
+    path: "README.md",
+    anchor,
+    ...overrides,
+  };
+}
+
+function thread(overrides: Partial<Thread> = {}): Thread {
+  return {
+    id: "t1",
+    state: "synced",
+    resolved: false,
+    ...overrides,
+  };
+}
+
+function fileEdit(overrides: Partial<FileEdit> = {}): FileEdit {
+  return {
+    id: "f1",
+    state: "syncing",
+    path: "README.md",
+    baseSha: "deadbeef",
+    editedSource: "edited",
+    ...overrides,
+  };
+}
+
+function pr(overrides: Partial<PullRequest> = {}): PullRequest {
+  return {
+    owner: "o",
+    repo: "r",
+    number: 1,
+    title: "t",
+    body: "b",
+    headSha: "h",
+    headRef: "topic",
+    baseRef: "main",
+    state: "open",
+    draft: false,
+    merged: false,
+    author,
+    ...overrides,
+  };
+}
+
+function localState(overrides: Partial<LocalState> = {}): LocalState {
+  return { ...emptyState(), ...overrides };
+}
+
+function remoteState(overrides: Partial<RemoteState> = {}): RemoteState {
+  return { ...emptyState(), ...overrides };
+}
+
+describe("state-machine — flipDraftsToSyncing", () => {
+  test("flips draft Comments, Threads, and FileEdits to syncing", () => {
+    const dc = comment({ id: "dc", state: "draft" });
+    const sc = comment({ id: "sc", state: "synced", remoteId: 1 });
+    const dt = thread({ id: "dt", state: "draft" });
+    const st = thread({ id: "st", state: "synced", remoteThreadId: "PRT" });
+    const df = fileEdit({ id: "df", state: "draft" });
+    const sf = fileEdit({ id: "sf", state: "syncing" });
+
+    const out = flipDraftsToSyncing(
+      localState({ comments: [dc, sc], threads: [dt, st], fileEdits: [df, sf] }),
+    );
+    expect(out.comments.find((c) => c.id === "dc")?.state).toBe("syncing");
+    expect(out.comments.find((c) => c.id === "sc")?.state).toBe("synced");
+    expect(out.threads.find((t) => t.id === "dt")?.state).toBe("syncing");
+    expect(out.threads.find((t) => t.id === "st")?.state).toBe("synced");
+    expect(out.fileEdits.find((f) => f.id === "df")?.state).toBe("syncing");
+    expect(out.fileEdits.find((f) => f.id === "sf")?.state).toBe("syncing");
+  });
+
+  test("clears lastError on the flipped entities", () => {
+    const c = comment({
+      state: "draft",
+      lastError: { message: "old failure" },
+    });
+    const out = flipDraftsToSyncing(localState({ comments: [c] }));
+    expect(out.comments[0]?.lastError).toBeUndefined();
+  });
+});
+
+describe("state-machine — setThreadResolvedToSyncing", () => {
+  test("a synced Thread transitions to syncing with the new resolved value", () => {
+    const t = thread({ state: "synced", remoteThreadId: "PRT" });
+    const out = setThreadResolvedToSyncing(localState({ threads: [t] }), "t1", true);
+    expect(out.threads[0]).toMatchObject({ state: "syncing", resolved: true });
+  });
+
+  test("a draft Thread keeps its draft state but updates the field", () => {
+    const t = thread({ state: "draft", resolved: false });
+    const out = setThreadResolvedToSyncing(localState({ threads: [t] }), "t1", true);
+    expect(out.threads[0]).toMatchObject({ state: "draft", resolved: true });
+  });
+
+  test("a non-matching id is a no-op", () => {
+    const t = thread();
+    const local = localState({ threads: [t] });
+    expect(setThreadResolvedToSyncing(local, "other", true)).toEqual(local);
+  });
+});
+
+describe("state-machine — applyStepResults: PostReviewBatch", () => {
+  test("success marks each Comment synced + populates remoteId", () => {
+    const c1 = comment({ id: "c1", state: "syncing" });
+    const c2 = comment({ id: "c2", state: "syncing", threadId: "t2" });
+    const local = localState({ comments: [c1, c2] });
+    const results: StepResult[] = [
+      {
+        step: {
+          kind: "post-review-batch",
+          commitId: "h",
+          comments: [c1, c2],
+        },
+        outcome: {
+          ok: true,
+          mappings: [
+            { cid: "c1", remoteId: 11 },
+            { cid: "c2", remoteId: 22 },
+          ],
+        },
+      },
+    ];
+    const out = applyStepResults(local, results);
+    expect(out.comments[0]).toMatchObject({ state: "synced", remoteId: 11 });
+    expect(out.comments[1]).toMatchObject({ state: "synced", remoteId: 22 });
+  });
+
+  test("success with remoteThreadId in a mapping marks the matching Thread synced", () => {
+    const c = comment({ id: "c1", state: "syncing", threadId: "t1" });
+    const t = thread({ id: "t1", state: "syncing" });
+    const results: StepResult[] = [
+      {
+        step: { kind: "post-review-batch", commitId: "h", comments: [c] },
+        outcome: {
+          ok: true,
+          mappings: [{ cid: "c1", remoteId: 99, remoteThreadId: "PRT_new" }],
+        },
+      },
+    ];
+    const out = applyStepResults(localState({ comments: [c], threads: [t] }), results);
+    expect(out.threads[0]).toMatchObject({
+      state: "synced",
+      remoteThreadId: "PRT_new",
+    });
+  });
+
+  test("failure reverts every batched Comment to draft + lastError", () => {
+    const c1 = comment({ id: "c1", state: "syncing" });
+    const c2 = comment({ id: "c2", state: "syncing", threadId: "t2" });
+    const err = { message: "422" };
+    const results: StepResult[] = [
+      {
+        step: { kind: "post-review-batch", commitId: "h", comments: [c1, c2] },
+        outcome: { ok: false, error: err },
+      },
+    ];
+    const out = applyStepResults(localState({ comments: [c1, c2] }), results);
+    expect(out.comments[0]).toMatchObject({ state: "draft", lastError: err });
+    expect(out.comments[1]).toMatchObject({ state: "draft", lastError: err });
+  });
+
+  test("failure also reverts newly-created threads (syncing + no remoteThreadId) to draft", () => {
+    const c = comment({ id: "c1", state: "syncing", threadId: "t1" });
+    const t = thread({ id: "t1", state: "syncing" }); // no remoteThreadId
+    const err = { message: "boom" };
+    const results: StepResult[] = [
+      {
+        step: { kind: "post-review-batch", commitId: "h", comments: [c] },
+        outcome: { ok: false, error: err },
+      },
+    ];
+    const out = applyStepResults(localState({ comments: [c], threads: [t] }), results);
+    expect(out.threads[0]).toMatchObject({ state: "draft", lastError: err });
+  });
+
+  test("failure does not revert an existing-thread reply scenario (thread already has remoteThreadId)", () => {
+    // The comment was a reply; the thread already existed and is synced.
+    const c = comment({ id: "c1", state: "syncing", threadId: "t1", parentLocalId: "p" });
+    const t = thread({ id: "t1", state: "synced", remoteThreadId: "PRT_existing" });
+    const results: StepResult[] = [
+      {
+        step: { kind: "post-review-batch", commitId: "h", comments: [c] },
+        outcome: { ok: false, error: { message: "boom" } },
+      },
+    ];
+    const out = applyStepResults(localState({ comments: [c], threads: [t] }), results);
+    expect(out.threads[0]).toEqual(t); // thread unchanged
+  });
+});
+
+describe("state-machine — applyStepResults: PostReply / PostIssueComment", () => {
+  test("PostReply success marks the single comment synced", () => {
+    const r = comment({ id: "r", state: "syncing", parentLocalId: "p" });
+    const parent = comment({ id: "p", state: "synced", remoteId: 1 });
+    const results: StepResult[] = [
+      {
+        step: { kind: "post-reply", comment: r, parent },
+        outcome: { ok: true, mapping: { cid: "r", remoteId: 42 } },
+      },
+    ];
+    const out = applyStepResults(localState({ comments: [parent, r] }), results);
+    expect(out.comments.find((c) => c.id === "r")).toMatchObject({
+      state: "synced",
+      remoteId: 42,
+    });
+  });
+
+  test("PostIssueComment success marks the comment synced", () => {
+    const c = comment({ id: "x", state: "syncing" });
+    const results: StepResult[] = [
+      {
+        step: { kind: "post-issue-comment", comment: c },
+        outcome: { ok: true, mapping: { cid: "x", remoteId: 7 } },
+      },
+    ];
+    const out = applyStepResults(localState({ comments: [c] }), results);
+    expect(out.comments[0]).toMatchObject({ state: "synced", remoteId: 7 });
+  });
+
+  test("Failure reverts the single comment to draft + lastError", () => {
+    const c = comment({ id: "x", state: "syncing" });
+    const err = { message: "no" };
+    const results: StepResult[] = [
+      {
+        step: { kind: "post-issue-comment", comment: c },
+        outcome: { ok: false, error: err },
+      },
+    ];
+    const out = applyStepResults(localState({ comments: [c] }), results);
+    expect(out.comments[0]).toMatchObject({ state: "draft", lastError: err });
+  });
+});
+
+describe("state-machine — applyStepResults: Resolve / Unresolve", () => {
+  test("ResolveReviewThread success marks the Thread synced", () => {
+    const t = thread({ state: "syncing", resolved: true, remoteThreadId: "PRT" });
+    const results: StepResult[] = [
+      {
+        step: { kind: "resolve-review-thread", threadId: "t1", remoteThreadId: "PRT" },
+        outcome: { ok: true },
+      },
+    ];
+    const out = applyStepResults(localState({ threads: [t] }), results);
+    expect(out.threads[0]).toMatchObject({ state: "synced", resolved: true });
+  });
+
+  test("UnresolveReviewThread failure reverts to draft + lastError, preserving the desired field value", () => {
+    const t = thread({ state: "syncing", resolved: false, remoteThreadId: "PRT" });
+    const err = { message: "unauthorized" };
+    const results: StepResult[] = [
+      {
+        step: { kind: "unresolve-review-thread", threadId: "t1", remoteThreadId: "PRT" },
+        outcome: { ok: false, error: err },
+      },
+    ];
+    const out = applyStepResults(localState({ threads: [t] }), results);
+    expect(out.threads[0]).toMatchObject({
+      state: "draft",
+      resolved: false,
+      lastError: err,
+    });
+  });
+});
+
+describe("state-machine — applyStepResults: Commit", () => {
+  test("Commit success removes every bundled FileEdit", () => {
+    const f1 = fileEdit({ id: "f1", state: "syncing" });
+    const f2 = fileEdit({ id: "f2", state: "syncing", path: "b.md" });
+    const f3 = fileEdit({ id: "f3", state: "draft" }); // unrelated
+    const results: StepResult[] = [
+      {
+        step: {
+          kind: "commit",
+          baseSha: "h0",
+          headRef: "topic",
+          fileEdits: [f1, f2],
+        },
+        outcome: { ok: true, newHeadSha: "h1" },
+      },
+    ];
+    const out = applyStepResults(localState({ fileEdits: [f1, f2, f3] }), results);
+    expect(out.fileEdits.map((f) => f.id)).toEqual(["f3"]);
+  });
+
+  test("Commit failure reverts every bundled FileEdit to draft + lastError", () => {
+    const f = fileEdit({ id: "f", state: "syncing" });
+    const err = { message: "non-fast-forward", code: 422 };
+    const results: StepResult[] = [
+      {
+        step: {
+          kind: "commit",
+          baseSha: "h0",
+          headRef: "topic",
+          fileEdits: [f],
+        },
+        outcome: { ok: false, error: err },
+      },
+    ];
+    const out = applyStepResults(localState({ fileEdits: [f] }), results);
+    expect(out.fileEdits[0]).toMatchObject({ state: "draft", lastError: err });
+  });
+});
+
+describe("state-machine — mergeRemoteIntoLocal", () => {
+  test("draft and syncing local items are preserved", () => {
+    const draft = comment({ id: "d", state: "draft" });
+    const syncing = comment({ id: "s", state: "syncing" });
+    const local = localState({ comments: [draft, syncing] });
+    const out = mergeRemoteIntoLocal(local, remoteState({ pullRequest: pr() }));
+    expect(out.comments).toEqual([draft, syncing]);
+  });
+
+  test("synced local items are replaced by remote counterparts", () => {
+    const localC = comment({ id: "c1", state: "synced", remoteId: 1, body: "old" });
+    const remoteC = comment({ id: "c1", state: "synced", remoteId: 1, body: "new" });
+    const out = mergeRemoteIntoLocal(
+      localState({ comments: [localC] }),
+      remoteState({ comments: [remoteC] }),
+    );
+    expect(out.comments).toEqual([remoteC]);
+  });
+
+  test("synced local items absent from remote are dropped", () => {
+    const localC = comment({ id: "deleted", state: "synced", remoteId: 1 });
+    const out = mergeRemoteIntoLocal(
+      localState({ comments: [localC] }),
+      remoteState(), // empty remote.comments
+    );
+    expect(out.comments).toEqual([]);
+  });
+
+  test("remote items not in local are added", () => {
+    const remoteC = comment({ id: "new", state: "synced", remoteId: 99 });
+    const out = mergeRemoteIntoLocal(localState(), remoteState({ comments: [remoteC] }));
+    expect(out.comments).toEqual([remoteC]);
+  });
+
+  test("Threads follow the same protection rule", () => {
+    const draftT = thread({ id: "dt", state: "draft" });
+    const syncedT = thread({ id: "st", state: "synced", remoteThreadId: "PRT_a" });
+    const remoteT = thread({ id: "st", state: "synced", remoteThreadId: "PRT_a", resolved: true });
+    const newRemoteT = thread({ id: "newt", state: "synced", remoteThreadId: "PRT_b" });
+    const out = mergeRemoteIntoLocal(
+      localState({ threads: [draftT, syncedT] }),
+      remoteState({ threads: [remoteT, newRemoteT] }),
+    );
+    expect(out.threads.find((t) => t.id === "dt")).toEqual(draftT);
+    expect(out.threads.find((t) => t.id === "st")?.resolved).toBe(true);
+    expect(out.threads.find((t) => t.id === "newt")).toEqual(newRemoteT);
+  });
+
+  test("FileEdits are not touched by refresh", () => {
+    const f = fileEdit({ state: "draft" });
+    const local = localState({ fileEdits: [f] });
+    expect(mergeRemoteIntoLocal(local, remoteState()).fileEdits).toEqual([f]);
+  });
+});

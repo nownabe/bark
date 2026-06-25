@@ -1,0 +1,209 @@
+// PullRequestRepository — the umbrella per-PR component.
+//
+// Owns LocalState (persistent) and RemoteState (in-memory), exposes mutation
+// methods, runs the reconcile/plan/execute pipeline on submit, and applies
+// step results back to LocalState per the state machine.
+//
+// React subscribes via `subscribe(listener)` and reads via `getLocalState()`
+// / `getRemoteState()`. The AppState derivation layer (Phase 4) sits on top.
+//
+// See docs/adr/0001-pr-data-layer-architecture.md §2.
+
+import { execute } from "./executor";
+import { planExecution, type PlannerContext } from "./planner";
+import { reconcile } from "./reconciler";
+import {
+  applyStepResults,
+  flipDraftsToSyncing,
+  mergeRemoteIntoLocal,
+  setThreadResolvedToSyncing,
+} from "./state-machine";
+import type { StorageAdapter } from "./storage";
+import type { Transport } from "./transport";
+import type { Comment, FileEdit, LocalId, LocalState, RemoteState, Thread } from "./types";
+import { emptyState } from "./types";
+
+export type RepositoryOptions = {
+  storage: StorageAdapter;
+  transport: Transport;
+  /** Routes a Comment to PostReviewBatch (in-diff) or PostIssueComment (out-of-diff). */
+  isInDiff: (comment: Comment) => boolean;
+  /** Cap on chained reconcile cycles within one sync invocation; the only
+   *  case that needs more than one is reply chains where the parent must
+   *  sync first. Default 5. */
+  maxSyncCycles?: number;
+};
+
+export class PullRequestRepository {
+  private localState: LocalState = emptyState();
+  private remoteState: RemoteState = emptyState();
+  private readonly listeners = new Set<() => void>();
+  private readonly storage: StorageAdapter;
+  private readonly transport: Transport;
+  private readonly isInDiff: (comment: Comment) => boolean;
+  private readonly maxSyncCycles: number;
+
+  constructor(opts: RepositoryOptions) {
+    this.storage = opts.storage;
+    this.transport = opts.transport;
+    this.isInDiff = opts.isInDiff;
+    this.maxSyncCycles = opts.maxSyncCycles ?? 5;
+  }
+
+  // ---- Hydration / lifecycle ---------------------------------------------
+
+  /** Load persisted LocalState from storage. Call once at startup. */
+  async hydrate(): Promise<void> {
+    const loaded = await this.storage.load();
+    if (loaded) {
+      this.localState = loaded;
+      this.notify();
+    }
+  }
+
+  // ---- Snapshots ---------------------------------------------------------
+
+  getLocalState(): LocalState {
+    return this.localState;
+  }
+
+  getRemoteState(): RemoteState {
+    return this.remoteState;
+  }
+
+  // ---- Subscription ------------------------------------------------------
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  // ---- Mutations ---------------------------------------------------------
+
+  /** Insert or update a Comment in LocalState. The caller supplies the full
+   *  Comment object including id; this is meant for both creation and edits. */
+  async upsertComment(comment: Comment): Promise<void> {
+    this.localState = {
+      ...this.localState,
+      comments: upsertById(this.localState.comments, comment),
+    };
+    this.notify();
+    await this.persist();
+  }
+
+  async upsertThread(thread: Thread): Promise<void> {
+    this.localState = {
+      ...this.localState,
+      threads: upsertById(this.localState.threads, thread),
+    };
+    this.notify();
+    await this.persist();
+  }
+
+  async upsertFileEdit(fileEdit: FileEdit): Promise<void> {
+    this.localState = {
+      ...this.localState,
+      fileEdits: upsertById(this.localState.fileEdits, fileEdit),
+    };
+    this.notify();
+    await this.persist();
+  }
+
+  async discardComment(id: LocalId): Promise<void> {
+    this.localState = {
+      ...this.localState,
+      comments: this.localState.comments.filter((c) => c.id !== id),
+    };
+    this.notify();
+    await this.persist();
+  }
+
+  async discardFileEdit(id: LocalId): Promise<void> {
+    this.localState = {
+      ...this.localState,
+      fileEdits: this.localState.fileEdits.filter((f) => f.id !== id),
+    };
+    this.notify();
+    await this.persist();
+  }
+
+  // ---- Pipeline triggers -------------------------------------------------
+
+  /** Flip every draft Comment/Thread/FileEdit to syncing and run the
+   *  reconcile → plan → execute → apply cycle. */
+  async submitDrafts(): Promise<void> {
+    this.localState = flipDraftsToSyncing(this.localState);
+    this.notify();
+    await this.persist();
+    await this.runSyncCycles();
+  }
+
+  /** Toggle a Thread's resolved field. For a synced Thread this also flips
+   *  it to syncing and runs the pipeline (immediate-action UX). */
+  async setThreadResolved(id: LocalId, resolved: boolean): Promise<void> {
+    this.localState = setThreadResolvedToSyncing(this.localState, id, resolved);
+    this.notify();
+    await this.persist();
+    await this.runSyncCycles();
+  }
+
+  // ---- Refresh -----------------------------------------------------------
+
+  /** Replace RemoteState with a freshly-fetched snapshot and merge it into
+   *  LocalState per the conflict policy.
+   *
+   *  Network-fetching itself is the caller's responsibility (Phase 5 wiring). */
+  async setRemoteState(remote: RemoteState): Promise<void> {
+    this.remoteState = remote;
+    this.localState = mergeRemoteIntoLocal(this.localState, remote);
+    this.notify();
+    await this.persist();
+  }
+
+  // ---- Internals ---------------------------------------------------------
+
+  private notify(): void {
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+
+  private async persist(): Promise<void> {
+    await this.storage.save(this.localState);
+  }
+
+  private plannerContext(): PlannerContext | null {
+    const pr = this.remoteState.pullRequest;
+    if (!pr) return null;
+    return {
+      isInDiff: this.isInDiff,
+      headSha: pr.headSha,
+      headRef: pr.headRef,
+    };
+  }
+
+  private async runSyncCycles(): Promise<void> {
+    const ctx = this.plannerContext();
+    if (!ctx) return;
+    for (let i = 0; i < this.maxSyncCycles; i++) {
+      const ops = reconcile(this.localState, this.remoteState);
+      if (ops.length === 0) break;
+      const steps = planExecution(ops, ctx);
+      if (steps.length === 0) break;
+      const results = await execute(steps, this.transport);
+      this.localState = applyStepResults(this.localState, results);
+      this.notify();
+      await this.persist();
+    }
+  }
+}
+
+function upsertById<T extends { id: LocalId }>(items: T[], next: T): T[] {
+  const idx = items.findIndex((x) => x.id === next.id);
+  if (idx === -1) return [...items, next];
+  const out = items.slice();
+  out[idx] = next;
+  return out;
+}
