@@ -171,6 +171,141 @@ describe("AppV2 — threads + comments", () => {
   });
 });
 
+describe("AppV2 — draft creation and submission", () => {
+  async function withPullRequest(repo: PullRequestRepository) {
+    await repo.setRemoteState({
+      ...repo.getRemoteState(),
+      pullRequest: {
+        owner: "acme",
+        repo: "site",
+        number: 1,
+        title: "T",
+        body: "",
+        headSha: "h",
+        headRef: "topic",
+        baseRef: "main",
+        state: "open",
+        draft: false,
+        merged: false,
+        author: { login: "carol" },
+      },
+      viewer: { login: "alice" },
+    });
+  }
+
+  test("the new-comment form renders with all required fields", async () => {
+    const repo = makeRepo();
+    await withPullRequest(repo);
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+    expect(container.querySelector("[data-testid='new-comment-form']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='new-comment-body']")).not.toBeNull();
+    // The "Submit drafts" header button is hidden when there are no drafts.
+    expect(container.querySelector("[data-testid='submit-drafts']")).toBeNull();
+  });
+
+  test("a draft Comment created via the Repository appears in the rendered list with the submit button", async () => {
+    const repo = makeRepo();
+    await withPullRequest(repo);
+    const { container, getByText } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+    await act(async () => {
+      await repo.upsertThread({ id: "t-x", state: "draft", resolved: false });
+      await repo.upsertComment({
+        id: "c-x",
+        state: "draft",
+        threadId: "t-x",
+        body: "looks suspicious",
+        author: { login: "alice" },
+        path: "f.md",
+        anchor,
+      });
+    });
+    expect(container.textContent).toContain("looks suspicious");
+    expect(getByText(/Submit 1 draft/).tagName).toBe("BUTTON");
+  });
+
+  test("empty body shows a warning Snackbar and does not create a draft", async () => {
+    const repo = makeRepo();
+    await withPullRequest(repo);
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+
+    const form = container.querySelector("[data-testid='new-comment-form']") as HTMLFormElement;
+    fireEvent.submit(form);
+
+    await waitFor(() => {
+      expect(document.querySelector(".snackbar--warning")).not.toBeNull();
+    });
+    expect(document.querySelector(".snackbar--warning")?.textContent).toContain("empty");
+    expect(repo.getLocalState().comments.length).toBe(0);
+  });
+
+  test("Discard removes a draft Comment", async () => {
+    const repo = makeRepo();
+    await withPullRequest(repo);
+    await repo.upsertThread({ id: "t1", state: "draft", resolved: false });
+    await repo.upsertComment({
+      id: "c1",
+      state: "draft",
+      threadId: "t1",
+      body: "tentative",
+      author,
+      path: "f.md",
+      anchor,
+    });
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+
+    const discardBtn = container.querySelector("[data-testid='discard-c1']") as HTMLButtonElement;
+    expect(discardBtn).not.toBeNull();
+    fireEvent.click(discardBtn);
+
+    await waitFor(() => {
+      expect(repo.getLocalState().comments.find((c) => c.id === "c1")).toBeUndefined();
+    });
+  });
+
+  test("Submit drafts triggers the Repository pipeline and marks comments synced", async () => {
+    let nextRemoteId = 100;
+    const transport: Transport = {
+      ...noopTransport(),
+      async postReviewBatch(step) {
+        return {
+          ok: true,
+          mappings: step.comments.map((c, idx) => ({
+            cid: c.id,
+            remoteId: nextRemoteId++,
+            ...(idx === 0 ? { remoteThreadId: "PRT_new" } : {}),
+          })),
+        };
+      },
+    };
+    const repo = new PullRequestRepository({
+      storage: new InMemoryStorageAdapter(),
+      transport,
+      isInDiff: () => true,
+    });
+    await withPullRequest(repo);
+    await repo.upsertThread({ id: "t1", state: "draft", resolved: false });
+    await repo.upsertComment({
+      id: "c1",
+      state: "draft",
+      threadId: "t1",
+      body: "needs work",
+      author,
+      path: "f.md",
+      anchor,
+    });
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+
+    const submitBtn = container.querySelector("[data-testid='submit-drafts']") as HTMLButtonElement;
+    expect(submitBtn).not.toBeNull();
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(repo.getLocalState().comments[0]?.state).toBe("synced");
+    });
+    expect(repo.getLocalState().comments[0]?.remoteId).toBe(100);
+  });
+});
+
 describe("AppV2 — refresh button", () => {
   test("calls the provided refresh and shows progress feedback", async () => {
     const repo = makeRepo();

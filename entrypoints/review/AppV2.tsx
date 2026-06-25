@@ -12,8 +12,9 @@
 // integration can be supplied separately by the entrypoint.
 
 import { useEffect, useMemo, useState } from "react";
-import { RepositoryProvider, useAppState } from "../../lib/pr/react";
+import { RepositoryProvider, useAppState, useRepository } from "../../lib/pr/react";
 import type { PullRequestRepository } from "../../lib/pr/repository";
+import type { Comment, LocalId } from "../../lib/pr/types";
 import { SnackbarProvider, useSnackbar } from "./components/Snackbar";
 
 export type AppV2Props = {
@@ -33,8 +34,6 @@ export function AppV2({ repository, refresh }: AppV2Props) {
   );
 }
 
-/** A first cut of the V2 review surface. Renders PR metadata, the
- *  viewer's role, and the list of threads with their comments. */
 function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
   // For now `isInDiff` defaults to false here; the entrypoint wires it
   // through the bootstrapped repository's `runSyncCycles` already. Once
@@ -43,7 +42,9 @@ function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
   const ctx = useMemo(() => ({ isInDiff: () => false }), []);
   const state = useAppState(ctx);
   const snackbar = useSnackbar();
+  const repository = useRepository();
   const [refreshing, setRefreshing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const onRefresh = async () => {
     if (refreshing) return;
@@ -57,19 +58,60 @@ function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
     }
   };
 
-  // Per ADR 0005 §1, refresh on visibility-change after the tab has been
-  // hidden for ≥ 30 s. The threshold avoids fetching on every brief tab
-  // switch while still picking up "come back tomorrow" returns.
+  const onSubmitDrafts = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await repository.submitDrafts();
+    } catch (e) {
+      snackbar.show(`Submit failed. (${errMessage(e)})`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onDiscardComment = async (id: LocalId) => {
+    try {
+      await repository.discardComment(id);
+    } catch (e) {
+      snackbar.show(`Discard failed. (${errMessage(e)})`);
+    }
+  };
+
   useVisibilityRefresh(onRefresh);
+
+  const draftCount = countDrafts(state.commentViews);
 
   return (
     <main className="appv2">
       <header className="appv2__header">
         <PrHeading pullRequest={state.pullRequest} viewer={state.viewer} role={state.role} />
-        <button type="button" className="btn btn--sm" onClick={onRefresh} disabled={refreshing}>
-          {refreshing ? "Refreshing…" : "Refresh"}
-        </button>
+        <div className="appv2__header-actions">
+          {draftCount > 0 && (
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              onClick={onSubmitDrafts}
+              disabled={submitting}
+              data-testid="submit-drafts"
+            >
+              {submitting
+                ? "Submitting…"
+                : `Submit ${draftCount} draft${draftCount === 1 ? "" : "s"}`}
+            </button>
+          )}
+          <button type="button" className="btn btn--sm" onClick={onRefresh} disabled={refreshing}>
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </header>
+
+      {state.pullRequest && (
+        <NewCommentForm
+          headSha={state.pullRequest.headSha}
+          viewerLogin={state.viewer?.login ?? "you"}
+        />
+      )}
 
       <section className="appv2__threads" data-testid="threads">
         <h2 className="appv2__section-title">Threads ({state.threadGroups.length})</h2>
@@ -94,6 +136,24 @@ function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
                       {view.kind === "suggestion" && (
                         <span className="appv2__badge appv2__badge--suggestion">suggestion</span>
                       )}
+                      {view.comment.lastError && (
+                        <span
+                          className="appv2__badge appv2__badge--error"
+                          title={view.comment.lastError.message}
+                        >
+                          error
+                        </span>
+                      )}
+                      {view.isMyDraft && (
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--danger"
+                          onClick={() => onDiscardComment(view.comment.id)}
+                          data-testid={`discard-${view.comment.id}`}
+                        >
+                          Discard
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -103,6 +163,143 @@ function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
         )}
       </section>
     </main>
+  );
+}
+
+/** Manual comment-creation form. Stand-in for the eventual
+ *  selection-driven UX (CodeMirror integration) — this lets V2 exercise
+ *  the create-draft → submit pipeline in real React. */
+function NewCommentForm({ headSha, viewerLogin }: { headSha: string; viewerLogin: string }) {
+  const repository = useRepository();
+  const snackbar = useSnackbar();
+  const [path, setPath] = useState("README.md");
+  const [body, setBody] = useState("");
+  const [sl, setSl] = useState("1");
+  const [sc, setSc] = useState("1");
+  const [el, setEl] = useState("1");
+  const [ec, setEc] = useState("1");
+  const [quote, setQuote] = useState("");
+
+  const reset = () => {
+    setBody("");
+    setQuote("");
+  };
+
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (body.trim() === "") {
+      snackbar.show("Comment body is empty.", "warning");
+      return;
+    }
+    const threadId = crypto.randomUUID();
+    const commentId = crypto.randomUUID();
+    try {
+      await repository.upsertThread({
+        id: threadId,
+        state: "draft",
+        resolved: false,
+      });
+      await repository.upsertComment({
+        id: commentId,
+        state: "draft",
+        threadId,
+        body,
+        author: { login: viewerLogin },
+        path,
+        anchor: {
+          sha: headSha,
+          range: {
+            sl: Number(sl),
+            sc: Number(sc),
+            el: Number(el),
+            ec: Number(ec),
+          },
+          quote,
+        },
+      });
+      reset();
+    } catch (err) {
+      snackbar.show(`Could not create draft. (${errMessage(err)})`);
+    }
+  };
+
+  return (
+    <form className="appv2__new-comment" onSubmit={onSubmit} data-testid="new-comment-form">
+      <h2 className="appv2__section-title">New comment</h2>
+      <label className="appv2__field">
+        <span>Path</span>
+        <input
+          className="input"
+          type="text"
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+        />
+      </label>
+      <div className="appv2__range">
+        <label className="appv2__field appv2__field--narrow">
+          <span>sl</span>
+          <input
+            className="input"
+            type="number"
+            min="1"
+            value={sl}
+            onChange={(e) => setSl(e.target.value)}
+          />
+        </label>
+        <label className="appv2__field appv2__field--narrow">
+          <span>sc</span>
+          <input
+            className="input"
+            type="number"
+            min="1"
+            value={sc}
+            onChange={(e) => setSc(e.target.value)}
+          />
+        </label>
+        <label className="appv2__field appv2__field--narrow">
+          <span>el</span>
+          <input
+            className="input"
+            type="number"
+            min="1"
+            value={el}
+            onChange={(e) => setEl(e.target.value)}
+          />
+        </label>
+        <label className="appv2__field appv2__field--narrow">
+          <span>ec</span>
+          <input
+            className="input"
+            type="number"
+            min="1"
+            value={ec}
+            onChange={(e) => setEc(e.target.value)}
+          />
+        </label>
+      </div>
+      <label className="appv2__field">
+        <span>Quote</span>
+        <input
+          className="input"
+          type="text"
+          value={quote}
+          onChange={(e) => setQuote(e.target.value)}
+        />
+      </label>
+      <label className="appv2__field">
+        <span>Body</span>
+        <textarea
+          className="input"
+          rows={3}
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          data-testid="new-comment-body"
+        />
+      </label>
+      <button type="submit" className="btn btn--primary btn--sm">
+        Add draft
+      </button>
+    </form>
   );
 }
 
@@ -138,9 +335,16 @@ function PrHeading({
   );
 }
 
+function countDrafts(views: Map<LocalId, { comment: Comment }>): number {
+  let n = 0;
+  for (const v of views.values()) {
+    if (v.comment.state === "draft") n++;
+  }
+  return n;
+}
+
 const VISIBILITY_THRESHOLD_MS = 30_000;
 
-/** Re-fetch on tab visibility change, gated by a threshold per ADR 0005 §1. */
 function useVisibilityRefresh(onRefresh: () => Promise<void>) {
   useEffect(() => {
     if (typeof document === "undefined") return;
