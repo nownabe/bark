@@ -48,9 +48,16 @@ Every persisted entity follows the same shape:
 - **No state-conditional fields.** Anything role-, mode-, or kind-conditional that _can_ be derived from `body` or other fields is not stored. It is computed in `AppState` (see §4).
 - **Creation-time data is immutable.** Once set, anchors and other "set at creation" fields are never mutated by reconciliation, refresh, or display logic. Display-time recomputation (such as re-anchoring) is a derivation in `AppState`, not a mutation of the persisted entity.
 
-### 3. Persisted entities (`LocalState`)
+### 3. Entities and the `PRState` shape
+
+`LocalState` and `RemoteState` share a single `PRState` shape so the Reconciler can diff them field-by-field; individual fields are conventionally populated on one side or the other (e.g. `fileEdits` lives in `LocalState`, `pullRequest`/`viewer`/`fileContents` come from GitHub via `RemoteState`).
 
 ````ts
+type User = {
+  login: string;
+  avatarUrl?: string;
+};
+
 type Comment = {
   id: LocalId;
   state: "draft" | "syncing" | "synced";
@@ -61,7 +68,7 @@ type Comment = {
   parentLocalId?: LocalId; // reply target within the same thread
 
   body: string; // includes ```suggestion fence if any
-  author: { login: string; avatarUrl?: string };
+  author: User;
 
   path: string;
   anchor: {
@@ -91,18 +98,7 @@ type FileEdit = {
   baseSha: string;
   editedSource: string;
 };
-````
 
-`FileEdit` is the one mutating entity that does not retain a `synced` state. After a successful commit, its information is fully captured by `RemoteState`'s file content, and the entity is removed. Its draft and syncing states have identical shape, satisfying the consistency rule.
-
-`RemoteState` mirrors GitHub. It contains:
-
-- **`Comment`** and **`Thread`** — same shape as `LocalState`, so structural diff is straightforward.
-- **`PullRequest`** — the PR being viewed: identity, head/base refs, head sha, status, author. One per session.
-- **`User`** — the current authenticated user (viewer). Used for setting draft authorship and computing role. One per session.
-- **`FileContent`** — file content keyed by `(sha, path)`. The current display source is at `(headSha, currentPath)`; older sha values back re-anchoring ([ADR 0004](0004-reanchoring.md)).
-
-```ts
 type PullRequest = {
   owner: string;
   repo: string;
@@ -116,13 +112,7 @@ type PullRequest = {
   state: "open" | "closed";
   draft: boolean;
   merged: boolean;
-  author: { login: string; avatarUrl?: string };
-};
-
-type User = {
-  // the viewer
-  login: string;
-  avatarUrl?: string;
+  author: User;
 };
 
 type FileContent = {
@@ -130,11 +120,36 @@ type FileContent = {
   path: string;
   source: string;
 };
-```
 
-None of these are reconciled against `LocalState`. `PullRequest` and `User` are point-in-time facts about GitHub fetched at bootstrap (and refreshed on demand per the refresh policy). `FileContent` is immutable per `(sha, path)`; the Executor fetches it on demand and the Reconciler treats it as input only.
+type PRState = {
+  comments: Comment[];
+  threads: Thread[];
+  fileEdits: FileEdit[];
+  fileContents: FileContent[];
+  pullRequest: PullRequest | null;
+  viewer: User | null;
+};
 
-Other user references — `Comment.author` and `PullRequest.author` — are inlined as `{ login, avatarUrl? }` value objects rather than references to a `User` entity. There is no GitHub-side user table to normalise against, and the inlined form is small and stable.
+type LocalState = PRState;
+type RemoteState = PRState;
+````
+
+Field-by-field, which side conventionally populates each:
+
+| Field          | `LocalState`                                | `RemoteState`                                               |
+| -------------- | ------------------------------------------- | ----------------------------------------------------------- |
+| `comments`     | drafts + last-known synced                  | mirror of GitHub                                            |
+| `threads`      | drafts + last-known synced (resolve intent) | mirror of GitHub (incl. GraphQL `isResolved`)               |
+| `fileEdits`    | pending author edits                        | always empty                                                |
+| `fileContents` | always empty                                | fetched per `(sha, path)` ([ADR 0004](0004-reanchoring.md)) |
+| `pullRequest`  | always `null`                               | the PR being viewed                                         |
+| `viewer`       | always `null`                               | the current authenticated user                              |
+
+`FileEdit` is the one mutating entity that does not retain a `synced` state. After a successful commit, its information is fully captured by `RemoteState`'s `fileContents` and the entity is removed. Its draft and syncing states have identical shape, satisfying the consistency rule.
+
+`PullRequest`, `viewer`, and `fileContents` are read-only mirrors of GitHub; the Reconciler does not diff them against `LocalState`. They are fetched at bootstrap (and refreshed on demand per the refresh policy) and treated as input by the Executor.
+
+`User` is a single value-object type used wherever a GitHub identity appears — `Comment.author`, `PullRequest.author`, and `PRState.viewer`. There is no GitHub-side user table to normalise against; the inlined form stays small and avoids reference indirection.
 
 ### 4. Derived data (`AppState`)
 
