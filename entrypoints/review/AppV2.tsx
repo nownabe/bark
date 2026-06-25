@@ -12,6 +12,7 @@
 // integration can be supplied separately by the entrypoint.
 
 import { useEffect, useMemo, useState } from "react";
+import type { ThreadGroup } from "../../lib/pr/appstate";
 import { RepositoryProvider, useAppState, useRepository } from "../../lib/pr/react";
 import type { PullRequestRepository } from "../../lib/pr/repository";
 import type { Comment, LocalId } from "../../lib/pr/types";
@@ -120,49 +121,198 @@ function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
         ) : (
           <ul className="appv2__thread-list">
             {state.threadGroups.map((group) => (
-              <li key={group.thread.id} className="appv2__thread">
-                <span className="appv2__thread-id">{group.thread.id}</span>
-                {group.thread.resolved && (
-                  <span className="appv2__badge appv2__badge--resolved">resolved</span>
-                )}
-                <ul className="appv2__comment-list">
-                  {group.comments.map((view) => (
-                    <li key={view.comment.id} className="appv2__comment">
-                      <span className="appv2__author">@{view.comment.author.login}</span>
-                      <span className="appv2__body">{view.comment.body}</span>
-                      {view.isMyDraft && (
-                        <span className="appv2__badge appv2__badge--draft">draft</span>
-                      )}
-                      {view.kind === "suggestion" && (
-                        <span className="appv2__badge appv2__badge--suggestion">suggestion</span>
-                      )}
-                      {view.comment.lastError && (
-                        <span
-                          className="appv2__badge appv2__badge--error"
-                          title={view.comment.lastError.message}
-                        >
-                          error
-                        </span>
-                      )}
-                      {view.isMyDraft && (
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--danger"
-                          onClick={() => onDiscardComment(view.comment.id)}
-                          data-testid={`discard-${view.comment.id}`}
-                        >
-                          Discard
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </li>
+              <ThreadItem
+                key={group.thread.id}
+                group={group}
+                viewerLogin={state.viewer?.login ?? "you"}
+                onDiscard={onDiscardComment}
+              />
             ))}
           </ul>
         )}
       </section>
     </main>
+  );
+}
+
+/** A single thread row: the thread's metadata + its comments + the
+ *  per-thread actions (Resolve / Unresolve, Reply). */
+function ThreadItem({
+  group,
+  viewerLogin,
+  onDiscard,
+}: {
+  group: ThreadGroup;
+  viewerLogin: string;
+  onDiscard: (id: LocalId) => Promise<void>;
+}) {
+  const repository = useRepository();
+  const snackbar = useSnackbar();
+  const [showReply, setShowReply] = useState(false);
+  const [togglingResolve, setTogglingResolve] = useState(false);
+
+  const thread = group.thread;
+  // Resolve only makes sense once the thread exists on GitHub.
+  const canToggleResolve = thread.state === "synced";
+
+  const onToggleResolve = async () => {
+    if (togglingResolve) return;
+    setTogglingResolve(true);
+    try {
+      await repository.setThreadResolved(thread.id, !thread.resolved);
+    } catch (e) {
+      snackbar.show(
+        `Could not ${thread.resolved ? "unresolve" : "resolve"} thread. (${errMessage(e)})`,
+      );
+    } finally {
+      setTogglingResolve(false);
+    }
+  };
+
+  return (
+    <li className="appv2__thread">
+      <div className="appv2__thread-head">
+        <span className="appv2__thread-id">{thread.id}</span>
+        {thread.resolved && <span className="appv2__badge appv2__badge--resolved">resolved</span>}
+        {thread.state === "syncing" && (
+          <span className="appv2__badge appv2__badge--syncing">syncing</span>
+        )}
+        {canToggleResolve && (
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={onToggleResolve}
+            disabled={togglingResolve}
+            data-testid={`resolve-${thread.id}`}
+          >
+            {togglingResolve
+              ? thread.resolved
+                ? "Unresolving…"
+                : "Resolving…"
+              : thread.resolved
+                ? "Unresolve"
+                : "Resolve"}
+          </button>
+        )}
+      </div>
+
+      <ul className="appv2__comment-list">
+        {group.comments.map((view) => (
+          <li key={view.comment.id} className="appv2__comment">
+            <span className="appv2__author">@{view.comment.author.login}</span>
+            <span className="appv2__body">{view.comment.body}</span>
+            {view.isMyDraft && <span className="appv2__badge appv2__badge--draft">draft</span>}
+            {view.kind === "suggestion" && (
+              <span className="appv2__badge appv2__badge--suggestion">suggestion</span>
+            )}
+            {view.comment.lastError && (
+              <span
+                className="appv2__badge appv2__badge--error"
+                title={view.comment.lastError.message}
+              >
+                error
+              </span>
+            )}
+            {view.isMyDraft && (
+              <button
+                type="button"
+                className="btn btn--sm btn--danger"
+                onClick={() => onDiscard(view.comment.id)}
+                data-testid={`discard-${view.comment.id}`}
+              >
+                Discard
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {group.comments.length > 0 && (
+        <div className="appv2__thread-actions">
+          {!showReply ? (
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={() => setShowReply(true)}
+              data-testid={`reply-${thread.id}`}
+            >
+              Reply
+            </button>
+          ) : (
+            <ReplyForm
+              thread={thread}
+              root={group.comments[0]!.comment}
+              viewerLogin={viewerLogin}
+              onDone={() => setShowReply(false)}
+            />
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** Inline reply form. Mirrors NewCommentForm but creates a Comment with
+ *  parentLocalId pointing at the thread's root, so the Reconciler emits
+ *  a CreateReply (rather than a CreateComment) on submit. */
+function ReplyForm({
+  thread,
+  root,
+  viewerLogin,
+  onDone,
+}: {
+  thread: { id: LocalId };
+  root: Comment;
+  viewerLogin: string;
+  onDone: () => void;
+}) {
+  const repository = useRepository();
+  const snackbar = useSnackbar();
+  const [body, setBody] = useState("");
+
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (body.trim() === "") {
+      snackbar.show("Reply body is empty.", "warning");
+      return;
+    }
+    try {
+      await repository.upsertComment({
+        id: crypto.randomUUID(),
+        state: "draft",
+        threadId: thread.id,
+        parentLocalId: root.id,
+        body,
+        author: { login: viewerLogin },
+        path: root.path,
+        anchor: root.anchor,
+      });
+      setBody("");
+      onDone();
+    } catch (e) {
+      snackbar.show(`Could not create reply. (${errMessage(e)})`);
+    }
+  };
+
+  return (
+    <form className="appv2__reply" onSubmit={onSubmit} data-testid={`reply-form-${thread.id}`}>
+      <textarea
+        className="input"
+        rows={2}
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder="Reply…"
+        data-testid={`reply-body-${thread.id}`}
+      />
+      <div className="appv2__reply-actions">
+        <button type="submit" className="btn btn--primary btn--sm">
+          Add reply draft
+        </button>
+        <button type="button" className="btn btn--sm" onClick={onDone}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

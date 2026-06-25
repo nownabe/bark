@@ -306,6 +306,217 @@ describe("AppV2 — draft creation and submission", () => {
   });
 });
 
+describe("AppV2 — Resolve / Unresolve", () => {
+  async function withPrAndThread(repo: PullRequestRepository, resolved: boolean) {
+    // Remote first — so reconcile sees a coherent prior state and can
+    // diff against any local toggle.
+    await repo.setRemoteState({
+      ...repo.getRemoteState(),
+      pullRequest: {
+        owner: "acme",
+        repo: "site",
+        number: 1,
+        title: "T",
+        body: "",
+        headSha: "h",
+        headRef: "topic",
+        baseRef: "main",
+        state: "open",
+        draft: false,
+        merged: false,
+        author: { login: "carol" },
+      },
+      viewer: { login: "alice" },
+      threads: [
+        {
+          id: "t1",
+          state: "synced",
+          remoteThreadId: "PRT_a",
+          resolved,
+        },
+      ],
+      comments: [
+        {
+          id: "c1",
+          state: "synced",
+          remoteId: 10,
+          threadId: "t1",
+          body: "comment",
+          author,
+          path: "f.md",
+          anchor,
+        },
+      ],
+    });
+  }
+
+  test("Resolve button is hidden for draft threads", async () => {
+    const repo = makeRepo();
+    await repo.setRemoteState({
+      ...repo.getRemoteState(),
+      pullRequest: {
+        owner: "a",
+        repo: "b",
+        number: 1,
+        title: "T",
+        body: "",
+        headSha: "h",
+        headRef: "t",
+        baseRef: "m",
+        state: "open",
+        draft: false,
+        merged: false,
+        author: { login: "x" },
+      },
+      viewer: { login: "alice" },
+    });
+    await repo.upsertThread({ id: "tt", state: "draft", resolved: false });
+    await repo.upsertComment({
+      id: "cc",
+      state: "draft",
+      threadId: "tt",
+      body: "x",
+      author,
+      path: "f.md",
+      anchor,
+    });
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+    expect(container.querySelector("[data-testid='resolve-tt']")).toBeNull();
+  });
+
+  test("Resolve button on a synced thread runs setThreadResolved and lands as resolved", async () => {
+    let resolveCalled = false;
+    const transport: Transport = {
+      ...noopTransport(),
+      async resolveReviewThread() {
+        resolveCalled = true;
+        return { ok: true };
+      },
+    };
+    const repo = new PullRequestRepository({
+      storage: new InMemoryStorageAdapter(),
+      transport,
+      isInDiff: () => true,
+    });
+    await withPrAndThread(repo, false);
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+
+    const btn = container.querySelector("[data-testid='resolve-t1']") as HTMLButtonElement;
+    expect(btn?.textContent).toBe("Resolve");
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(repo.getLocalState().threads[0]?.resolved).toBe(true);
+    });
+    expect(resolveCalled).toBe(true);
+    expect(repo.getLocalState().threads[0]?.state).toBe("synced");
+  });
+
+  test("an already-resolved thread shows Unresolve and toggles back", async () => {
+    let unresolveCalled = false;
+    const transport: Transport = {
+      ...noopTransport(),
+      async unresolveReviewThread() {
+        unresolveCalled = true;
+        return { ok: true };
+      },
+    };
+    const repo = new PullRequestRepository({
+      storage: new InMemoryStorageAdapter(),
+      transport,
+      isInDiff: () => true,
+    });
+    await withPrAndThread(repo, true);
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+
+    const btn = container.querySelector("[data-testid='resolve-t1']") as HTMLButtonElement;
+    expect(btn?.textContent).toBe("Unresolve");
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(repo.getLocalState().threads[0]?.resolved).toBe(false);
+    });
+    expect(unresolveCalled).toBe(true);
+  });
+});
+
+describe("AppV2 — Reply", () => {
+  async function withSyncedThread(repo: PullRequestRepository) {
+    await repo.setRemoteState({
+      ...repo.getRemoteState(),
+      pullRequest: {
+        owner: "a",
+        repo: "b",
+        number: 1,
+        title: "T",
+        body: "",
+        headSha: "h",
+        headRef: "t",
+        baseRef: "m",
+        state: "open",
+        draft: false,
+        merged: false,
+        author: { login: "carol" },
+      },
+      viewer: { login: "alice" },
+    });
+    await repo.upsertThread({
+      id: "t1",
+      state: "synced",
+      remoteThreadId: "PRT_a",
+      resolved: false,
+    });
+    await repo.upsertComment({
+      id: "c-root",
+      state: "synced",
+      remoteId: 10,
+      threadId: "t1",
+      body: "root",
+      author,
+      path: "f.md",
+      anchor,
+    });
+  }
+
+  test("Reply button reveals an inline form when clicked", async () => {
+    const repo = makeRepo();
+    await withSyncedThread(repo);
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+
+    expect(container.querySelector("[data-testid='reply-form-t1']")).toBeNull();
+    const btn = container.querySelector("[data-testid='reply-t1']") as HTMLButtonElement;
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(container.querySelector("[data-testid='reply-form-t1']")).not.toBeNull();
+    });
+  });
+
+  test("a reply Comment upserted via Repository inherits parentLocalId and threadId from the root", async () => {
+    const repo = makeRepo();
+    await withSyncedThread(repo);
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+
+    // The Reply path the form takes: clone anchor / path from the root.
+    await act(async () => {
+      await repo.upsertComment({
+        id: "c-reply",
+        state: "draft",
+        threadId: "t1",
+        parentLocalId: "c-root",
+        body: "replying",
+        author: { login: "alice" },
+        path: "f.md",
+        anchor,
+      });
+    });
+
+    expect(container.textContent).toContain("replying");
+    const reply = repo.getLocalState().comments.find((c) => c.id === "c-reply");
+    expect(reply?.parentLocalId).toBe("c-root");
+    expect(reply?.threadId).toBe("t1");
+  });
+});
+
 describe("AppV2 — refresh button", () => {
   test("calls the provided refresh and shows progress feedback", async () => {
     const repo = makeRepo();
