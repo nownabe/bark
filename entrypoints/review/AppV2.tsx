@@ -12,8 +12,9 @@
 // integration can be supplied separately by the entrypoint.
 
 import { useEffect, useMemo, useState } from "react";
+import Markdown from "react-markdown";
 import type { ThreadGroup } from "../../lib/pr/appstate";
-import { RepositoryProvider, useAppState, useRepository } from "../../lib/pr/react";
+import { RepositoryProvider, useAppState, useRemoteState, useRepository } from "../../lib/pr/react";
 import type { PullRequestRepository } from "../../lib/pr/repository";
 import type { Comment, LocalId } from "../../lib/pr/types";
 import { SnackbarProvider, useSnackbar } from "./components/Snackbar";
@@ -106,6 +107,8 @@ function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
           </button>
         </div>
       </header>
+
+      {state.pullRequest && <SourceViewer headSha={state.pullRequest.headSha} />}
 
       {state.pullRequest && (
         <NewCommentForm
@@ -313,6 +316,78 @@ function ReplyForm({
         </button>
       </div>
     </form>
+  );
+}
+
+/** Read-only Markdown preview of the file at the current PR head.
+ *  Lists the files for which we have content cached in RemoteState at
+ *  `headSha`, lets the viewer pick one, and renders it as Markdown via
+ *  `react-markdown`. */
+function SourceViewer({ headSha }: { headSha: string }) {
+  const remote = useRemoteState();
+  const availablePaths = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const fc of remote.fileContents) {
+      if (fc.sha === headSha && !seen.has(fc.path)) {
+        seen.add(fc.path);
+        out.push(fc.path);
+      }
+    }
+    return out.sort();
+  }, [remote.fileContents, headSha]);
+
+  const [currentPath, setCurrentPath] = useState<string | null>(null);
+  // Pin the selection to the first available path; switch only when the
+  // current one disappears (file removed from the PR, fetch dropped).
+  const selected =
+    currentPath !== null && availablePaths.includes(currentPath)
+      ? currentPath
+      : (availablePaths[0] ?? null);
+
+  const source = useMemo(() => {
+    if (selected === null) return null;
+    return (
+      remote.fileContents.find((f) => f.sha === headSha && f.path === selected)?.source ?? null
+    );
+  }, [remote.fileContents, headSha, selected]);
+
+  if (availablePaths.length === 0) {
+    return (
+      <section className="appv2__source" data-testid="source-viewer">
+        <h2 className="appv2__section-title">Source</h2>
+        <p className="appv2__empty">No file content loaded yet.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="appv2__source" data-testid="source-viewer">
+      <div className="appv2__source-head">
+        <h2 className="appv2__section-title">Source</h2>
+        {availablePaths.length > 1 && (
+          <select
+            className="input"
+            value={selected ?? ""}
+            onChange={(e) => setCurrentPath(e.target.value)}
+            data-testid="source-path"
+          >
+            {availablePaths.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      <article className="appv2__markdown" data-testid="source-markdown">
+        {source !== null ? (
+          <Markdown>{source}</Markdown>
+        ) : (
+          <p className="appv2__empty">Could not load source.</p>
+        )}
+      </article>
+    </section>
   );
 }
 
