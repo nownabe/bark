@@ -11,13 +11,24 @@
 // `bootstrapPullRequest` itself so the auth-token / browser-storage
 // integration can be supplied separately by the entrypoint.
 
-import { useEffect, useMemo, useState } from "react";
-import Markdown from "react-markdown";
+import { markdown } from "@codemirror/lang-markdown";
+import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ThreadGroup } from "../../lib/pr/appstate";
 import { RepositoryProvider, useAppState, useRemoteState, useRepository } from "../../lib/pr/react";
 import type { PullRequestRepository } from "../../lib/pr/repository";
 import type { Comment, LocalId } from "../../lib/pr/types";
 import { SnackbarProvider, useSnackbar } from "./components/Snackbar";
+
+/** Live editor selection — sufficient to construct a Comment.anchor. */
+export type EditorSelection = {
+  path: string;
+  sl: number;
+  sc: number;
+  el: number;
+  ec: number;
+  quote: string;
+};
 
 export type AppV2Props = {
   repository: PullRequestRepository;
@@ -47,6 +58,7 @@ function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
   const repository = useRepository();
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [selection, setSelection] = useState<EditorSelection | null>(null);
 
   const onRefresh = async () => {
     if (refreshing) return;
@@ -108,12 +120,16 @@ function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
         </div>
       </header>
 
-      {state.pullRequest && <SourceViewer headSha={state.pullRequest.headSha} />}
+      {state.pullRequest && (
+        <SourceViewer headSha={state.pullRequest.headSha} onSelectionChange={setSelection} />
+      )}
 
       {state.pullRequest && (
         <NewCommentForm
           headSha={state.pullRequest.headSha}
           viewerLogin={state.viewer?.login ?? "you"}
+          selection={selection}
+          onClearSelection={() => setSelection(null)}
         />
       )}
 
@@ -319,11 +335,17 @@ function ReplyForm({
   );
 }
 
-/** Read-only Markdown preview of the file at the current PR head.
- *  Lists the files for which we have content cached in RemoteState at
- *  `headSha`, lets the viewer pick one, and renders it as Markdown via
- *  `react-markdown`. */
-function SourceViewer({ headSha }: { headSha: string }) {
+/** CodeMirror-backed source viewer (read-only). Lists the files for
+ *  which we have FileContent at `headSha`, lets the viewer pick one,
+ *  shows the source with Markdown syntax highlighting, and reports
+ *  selection changes upward so the comment form can pick them up. */
+function SourceViewer({
+  headSha,
+  onSelectionChange,
+}: {
+  headSha: string;
+  onSelectionChange: (selection: EditorSelection | null) => void;
+}) {
   const remote = useRemoteState();
   const availablePaths = useMemo(() => {
     const seen = new Set<string>();
@@ -338,8 +360,6 @@ function SourceViewer({ headSha }: { headSha: string }) {
   }, [remote.fileContents, headSha]);
 
   const [currentPath, setCurrentPath] = useState<string | null>(null);
-  // Pin the selection to the first available path; switch only when the
-  // current one disappears (file removed from the PR, fetch dropped).
   const selected =
     currentPath !== null && availablePaths.includes(currentPath)
       ? currentPath
@@ -351,6 +371,35 @@ function SourceViewer({ headSha }: { headSha: string }) {
       remote.fileContents.find((f) => f.sha === headSha && f.path === selected)?.source ?? null
     );
   }, [remote.fileContents, headSha, selected]);
+
+  // Clear the parent's captured selection whenever the active path
+  // changes, because the anchor would refer to a different file.
+  useEffect(() => {
+    onSelectionChange(null);
+  }, [selected, onSelectionChange]);
+
+  const onUpdate = useCallback(
+    (vu: ViewUpdate) => {
+      if (!vu.selectionSet || selected === null) return;
+      const sel = vu.state.selection.main;
+      if (sel.from === sel.to) {
+        onSelectionChange(null);
+        return;
+      }
+      const quote = vu.state.doc.sliceString(sel.from, sel.to);
+      const startLine = vu.state.doc.lineAt(sel.from);
+      const endLine = vu.state.doc.lineAt(sel.to);
+      onSelectionChange({
+        path: selected,
+        sl: startLine.number,
+        sc: sel.from - startLine.from + 1,
+        el: endLine.number,
+        ec: sel.to - endLine.from + 1,
+        quote,
+      });
+    },
+    [selected, onSelectionChange],
+  );
 
   if (availablePaths.length === 0) {
     return (
@@ -380,21 +429,44 @@ function SourceViewer({ headSha }: { headSha: string }) {
           </select>
         )}
       </div>
-      <article className="appv2__markdown" data-testid="source-markdown">
+      <div className="appv2__editor" data-testid="source-editor">
         {source !== null ? (
-          <Markdown>{source}</Markdown>
+          <CodeMirror
+            value={source}
+            editable={false}
+            extensions={MARKDOWN_EXTENSIONS}
+            onUpdate={onUpdate}
+            basicSetup={CM_BASIC_SETUP}
+          />
         ) : (
           <p className="appv2__empty">Could not load source.</p>
         )}
-      </article>
+      </div>
     </section>
   );
 }
 
-/** Manual comment-creation form. Stand-in for the eventual
- *  selection-driven UX (CodeMirror integration) — this lets V2 exercise
- *  the create-draft → submit pipeline in real React. */
-function NewCommentForm({ headSha, viewerLogin }: { headSha: string; viewerLogin: string }) {
+const MARKDOWN_EXTENSIONS = [markdown()];
+const CM_BASIC_SETUP = {
+  lineNumbers: true,
+  highlightActiveLine: false,
+  foldGutter: false,
+};
+
+/** Comment-creation form. When a live editor selection is provided, the
+ *  form uses it as the anchor; otherwise it falls back to manual entry
+ *  for path / range / quote. The body is always typed by the user. */
+function NewCommentForm({
+  headSha,
+  viewerLogin,
+  selection,
+  onClearSelection,
+}: {
+  headSha: string;
+  viewerLogin: string;
+  selection: EditorSelection | null;
+  onClearSelection: () => void;
+}) {
   const repository = useRepository();
   const snackbar = useSnackbar();
   const [path, setPath] = useState("README.md");
@@ -405,10 +477,7 @@ function NewCommentForm({ headSha, viewerLogin }: { headSha: string; viewerLogin
   const [ec, setEc] = useState("1");
   const [quote, setQuote] = useState("");
 
-  const reset = () => {
-    setBody("");
-    setQuote("");
-  };
+  const usingSelection = selection !== null;
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -418,6 +487,18 @@ function NewCommentForm({ headSha, viewerLogin }: { headSha: string; viewerLogin
     }
     const threadId = crypto.randomUUID();
     const commentId = crypto.randomUUID();
+    const anchor = usingSelection
+      ? {
+          sha: headSha,
+          range: { sl: selection.sl, sc: selection.sc, el: selection.el, ec: selection.ec },
+          quote: selection.quote,
+        }
+      : {
+          sha: headSha,
+          range: { sl: Number(sl), sc: Number(sc), el: Number(el), ec: Number(ec) },
+          quote,
+        };
+    const commentPath = usingSelection ? selection.path : path;
     try {
       await repository.upsertThread({
         id: threadId,
@@ -430,19 +511,12 @@ function NewCommentForm({ headSha, viewerLogin }: { headSha: string; viewerLogin
         threadId,
         body,
         author: { login: viewerLogin },
-        path,
-        anchor: {
-          sha: headSha,
-          range: {
-            sl: Number(sl),
-            sc: Number(sc),
-            el: Number(el),
-            ec: Number(ec),
-          },
-          quote,
-        },
+        path: commentPath,
+        anchor,
       });
-      reset();
+      setBody("");
+      if (usingSelection) onClearSelection();
+      else setQuote("");
     } catch (err) {
       snackbar.show(`Could not create draft. (${errMessage(err)})`);
     }
@@ -451,66 +525,85 @@ function NewCommentForm({ headSha, viewerLogin }: { headSha: string; viewerLogin
   return (
     <form className="appv2__new-comment" onSubmit={onSubmit} data-testid="new-comment-form">
       <h2 className="appv2__section-title">New comment</h2>
-      <label className="appv2__field">
-        <span>Path</span>
-        <input
-          className="input"
-          type="text"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-        />
-      </label>
-      <div className="appv2__range">
-        <label className="appv2__field appv2__field--narrow">
-          <span>sl</span>
-          <input
-            className="input"
-            type="number"
-            min="1"
-            value={sl}
-            onChange={(e) => setSl(e.target.value)}
-          />
-        </label>
-        <label className="appv2__field appv2__field--narrow">
-          <span>sc</span>
-          <input
-            className="input"
-            type="number"
-            min="1"
-            value={sc}
-            onChange={(e) => setSc(e.target.value)}
-          />
-        </label>
-        <label className="appv2__field appv2__field--narrow">
-          <span>el</span>
-          <input
-            className="input"
-            type="number"
-            min="1"
-            value={el}
-            onChange={(e) => setEl(e.target.value)}
-          />
-        </label>
-        <label className="appv2__field appv2__field--narrow">
-          <span>ec</span>
-          <input
-            className="input"
-            type="number"
-            min="1"
-            value={ec}
-            onChange={(e) => setEc(e.target.value)}
-          />
-        </label>
-      </div>
-      <label className="appv2__field">
-        <span>Quote</span>
-        <input
-          className="input"
-          type="text"
-          value={quote}
-          onChange={(e) => setQuote(e.target.value)}
-        />
-      </label>
+      {usingSelection ? (
+        <div className="appv2__selection" data-testid="selection-banner">
+          <span>
+            Selection on <strong>{selection.path}</strong> L{selection.sl}:{selection.sc}–L
+            {selection.el}:{selection.ec}
+          </span>
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={onClearSelection}
+            data-testid="clear-selection"
+          >
+            Clear
+          </button>
+        </div>
+      ) : (
+        <>
+          <label className="appv2__field">
+            <span>Path</span>
+            <input
+              className="input"
+              type="text"
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+            />
+          </label>
+          <div className="appv2__range">
+            <label className="appv2__field appv2__field--narrow">
+              <span>sl</span>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                value={sl}
+                onChange={(e) => setSl(e.target.value)}
+              />
+            </label>
+            <label className="appv2__field appv2__field--narrow">
+              <span>sc</span>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                value={sc}
+                onChange={(e) => setSc(e.target.value)}
+              />
+            </label>
+            <label className="appv2__field appv2__field--narrow">
+              <span>el</span>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                value={el}
+                onChange={(e) => setEl(e.target.value)}
+              />
+            </label>
+            <label className="appv2__field appv2__field--narrow">
+              <span>ec</span>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                value={ec}
+                onChange={(e) => setEc(e.target.value)}
+              />
+            </label>
+          </div>
+          <label className="appv2__field">
+            <span>Quote</span>
+            <input
+              className="input"
+              type="text"
+              value={quote}
+              onChange={(e) => setQuote(e.target.value)}
+            />
+          </label>
+        </>
+      )}
       <label className="appv2__field">
         <span>Body</span>
         <textarea

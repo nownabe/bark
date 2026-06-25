@@ -552,31 +552,38 @@ describe("AppV2 — SourceViewer", () => {
     );
   });
 
-  test("renders Markdown for the file at headSha", async () => {
+  test("renders a CodeMirror editor for the file at headSha", async () => {
     const repo = makeRepo();
     await withPrAndFiles(repo, [
-      { sha: "h", path: "README.md", source: "# Hello\n\nThis is **bold**." },
+      { sha: "h", path: "README.md", source: "# Hello\n\nThis is bold." },
     ]);
     const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
-    const md = container.querySelector("[data-testid='source-markdown']");
-    expect(md?.querySelector("h1")?.textContent).toBe("Hello");
-    expect(md?.querySelector("strong")?.textContent).toBe("bold");
+    const editor = container.querySelector("[data-testid='source-editor']");
+    expect(editor).not.toBeNull();
+    // The CodeMirror wrapper mounts a `.cm-editor` element when it boots.
+    expect(editor?.querySelector(".cm-editor")).not.toBeNull();
+    // The source content lands in the editor's content area.
+    expect(editor?.textContent).toContain("Hello");
   });
 
-  test("offers a selector when multiple files are loaded and switches between them", async () => {
+  test("offers a selector when multiple files are loaded and updates the editor on change", async () => {
     const repo = makeRepo();
     await withPrAndFiles(repo, [
-      { sha: "h", path: "A.md", source: "# A" },
-      { sha: "h", path: "B.md", source: "# B" },
+      { sha: "h", path: "A.md", source: "alpha line" },
+      { sha: "h", path: "B.md", source: "beta line" },
     ]);
     const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
     const select = container.querySelector("[data-testid='source-path']") as HTMLSelectElement;
     expect(select).not.toBeNull();
-    // Initial: first in sorted order (A).
-    expect(container.querySelector("[data-testid='source-markdown'] h1")?.textContent).toBe("A");
+    // Initial: alpha is rendered (first in sorted order).
+    expect(container.querySelector("[data-testid='source-editor']")?.textContent).toContain(
+      "alpha",
+    );
     fireEvent.change(select, { target: { value: "B.md" } });
     await waitFor(() => {
-      expect(container.querySelector("[data-testid='source-markdown'] h1")?.textContent).toBe("B");
+      expect(container.querySelector("[data-testid='source-editor']")?.textContent).toContain(
+        "beta",
+      );
     });
   });
 
@@ -584,14 +591,43 @@ describe("AppV2 — SourceViewer", () => {
     const repo = makeRepo();
     await withPrAndFiles(repo, [
       { sha: "h", path: "current.md", source: "# Current" },
-      { sha: "old", path: "past.md", source: "# Past (for re-anchoring)" },
+      { sha: "old", path: "past.md", source: "# Past" },
     ]);
     const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
     // Only one path at headSha, so no selector is rendered.
     expect(container.querySelector("[data-testid='source-path']")).toBeNull();
-    expect(container.querySelector("[data-testid='source-markdown'] h1")?.textContent).toBe(
+    // Editor shows the headSha file content.
+    expect(container.querySelector("[data-testid='source-editor']")?.textContent).toContain(
       "Current",
     );
+  });
+});
+
+describe("AppV2 — NewCommentForm: selection mode", () => {
+  test("without a selection, manual range / quote fields are shown", async () => {
+    const repo = makeRepo();
+    await repo.setRemoteState({
+      ...repo.getRemoteState(),
+      pullRequest: {
+        owner: "a",
+        repo: "b",
+        number: 1,
+        title: "T",
+        body: "",
+        headSha: "h",
+        headRef: "t",
+        baseRef: "m",
+        state: "open",
+        draft: false,
+        merged: false,
+        author: { login: "x" },
+      },
+      viewer: { login: "alice" },
+    });
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+    // Range inputs are present; selection banner is absent.
+    expect(container.querySelector("[data-testid='selection-banner']")).toBeNull();
+    expect(container.querySelectorAll(".appv2__field--narrow").length).toBeGreaterThan(0);
   });
 });
 
