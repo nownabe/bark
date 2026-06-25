@@ -16,10 +16,13 @@ export type CreateReplyOp = {
   parent: Comment;
 };
 
-/** Thread.resolved differs from remote and the entity has been committed to sync. */
+/** Thread.resolved differs from remote and the entity has been committed to sync.
+ *  The Reconciler only emits this Op once the thread has a `remoteThreadId`,
+ *  so the field is non-undefined here. */
 export type UpdateThreadResolvedOp = {
   kind: "update-thread-resolved";
   threadId: LocalId;
+  remoteThreadId: string;
   desiredResolved: boolean;
 };
 

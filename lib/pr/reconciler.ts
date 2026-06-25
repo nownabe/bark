@@ -38,6 +38,7 @@ export function reconcile(local: LocalState, remote: RemoteState): ReconcileOper
       ops.push({
         kind: "update-thread-resolved",
         threadId: t.id,
+        remoteThreadId: t.remoteThreadId,
         desiredResolved: t.resolved,
       });
     }

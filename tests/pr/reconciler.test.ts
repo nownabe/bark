@@ -153,7 +153,12 @@ describe("reconciler — UpdateThreadResolved", () => {
     });
     const ops = reconcile(localState({ threads: [t] }), remoteState({ threads: [remoteT] }));
     expect(ops).toEqual([
-      { kind: "update-thread-resolved", threadId: "t1", desiredResolved: true },
+      {
+        kind: "update-thread-resolved",
+        threadId: "t1",
+        remoteThreadId: "PRT_remote1",
+        desiredResolved: true,
+      },
     ]);
   });
 
@@ -205,7 +210,12 @@ describe("reconciler — UpdateThreadResolved", () => {
     });
     const ops = reconcile(localState({ threads: [local] }), remoteState({ threads: [remote] }));
     expect(ops).toEqual([
-      { kind: "update-thread-resolved", threadId: "t1", desiredResolved: true },
+      {
+        kind: "update-thread-resolved",
+        threadId: "t1",
+        remoteThreadId: "PRT_remote_xyz",
+        desiredResolved: true,
+      },
     ]);
   });
 });
@@ -255,6 +265,7 @@ describe("reconciler — mixed cases", () => {
     expect(ops).toContainEqual({
       kind: "update-thread-resolved",
       threadId: "t1",
+      remoteThreadId: "PRT_r",
       desiredResolved: true,
     });
     expect(ops).toContainEqual({ kind: "commit-file-edit", fileEdit: fe });
