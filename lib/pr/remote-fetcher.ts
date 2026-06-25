@@ -291,10 +291,13 @@ export async function fetchFileContent(
   sha: string,
   path: string,
 ): Promise<FileContent> {
+  // Encode each path segment individually — `encodeURIComponent` on the
+  // whole path turns "/" into "%2F", which GitHub rejects with 404.
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
   const raw = await ghRequest<RawContents>(
     client,
     "GET",
-    `/repos/${ref.owner}/${ref.repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(sha)}`,
+    `/repos/${ref.owner}/${ref.repo}/contents/${encodedPath}?ref=${encodeURIComponent(sha)}`,
   );
   return {
     sha,
