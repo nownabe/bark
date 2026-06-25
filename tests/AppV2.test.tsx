@@ -517,6 +517,84 @@ describe("AppV2 — Reply", () => {
   });
 });
 
+describe("AppV2 — SourceViewer", () => {
+  async function withPrAndFiles(
+    repo: PullRequestRepository,
+    files: Array<{ sha: string; path: string; source: string }>,
+  ) {
+    await repo.setRemoteState({
+      ...repo.getRemoteState(),
+      pullRequest: {
+        owner: "a",
+        repo: "b",
+        number: 1,
+        title: "T",
+        body: "",
+        headSha: "h",
+        headRef: "t",
+        baseRef: "m",
+        state: "open",
+        draft: false,
+        merged: false,
+        author: { login: "x" },
+      },
+      viewer: { login: "alice" },
+      fileContents: files,
+    });
+  }
+
+  test("placeholder when no file content is loaded yet", async () => {
+    const repo = makeRepo();
+    await withPrAndFiles(repo, []);
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+    expect(container.querySelector("[data-testid='source-viewer']")?.textContent).toContain(
+      "No file content loaded yet",
+    );
+  });
+
+  test("renders Markdown for the file at headSha", async () => {
+    const repo = makeRepo();
+    await withPrAndFiles(repo, [
+      { sha: "h", path: "README.md", source: "# Hello\n\nThis is **bold**." },
+    ]);
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+    const md = container.querySelector("[data-testid='source-markdown']");
+    expect(md?.querySelector("h1")?.textContent).toBe("Hello");
+    expect(md?.querySelector("strong")?.textContent).toBe("bold");
+  });
+
+  test("offers a selector when multiple files are loaded and switches between them", async () => {
+    const repo = makeRepo();
+    await withPrAndFiles(repo, [
+      { sha: "h", path: "A.md", source: "# A" },
+      { sha: "h", path: "B.md", source: "# B" },
+    ]);
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+    const select = container.querySelector("[data-testid='source-path']") as HTMLSelectElement;
+    expect(select).not.toBeNull();
+    // Initial: first in sorted order (A).
+    expect(container.querySelector("[data-testid='source-markdown'] h1")?.textContent).toBe("A");
+    fireEvent.change(select, { target: { value: "B.md" } });
+    await waitFor(() => {
+      expect(container.querySelector("[data-testid='source-markdown'] h1")?.textContent).toBe("B");
+    });
+  });
+
+  test("only files matching headSha are listed", async () => {
+    const repo = makeRepo();
+    await withPrAndFiles(repo, [
+      { sha: "h", path: "current.md", source: "# Current" },
+      { sha: "old", path: "past.md", source: "# Past (for re-anchoring)" },
+    ]);
+    const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+    // Only one path at headSha, so no selector is rendered.
+    expect(container.querySelector("[data-testid='source-path']")).toBeNull();
+    expect(container.querySelector("[data-testid='source-markdown'] h1")?.textContent).toBe(
+      "Current",
+    );
+  });
+});
+
 describe("AppV2 — refresh button", () => {
   test("calls the provided refresh and shows progress feedback", async () => {
     const repo = makeRepo();
