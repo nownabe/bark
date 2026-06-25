@@ -15,6 +15,9 @@ const FENCE_RE = /\n*<!--\s+bark:v2\s+([A-Za-z0-9+/=]+)\s+-->\s*$/;
 export type WireMetadata = {
   cid: string;
   threadId: string;
+  /** Comment.path — included so out-of-diff comments (issue comments) can
+   *  round-trip their path even though GitHub does not store it natively. */
+  path: string;
   anchor: Anchor;
 };
 
@@ -53,6 +56,7 @@ function isValidWireMetadata(x: unknown): x is WireMetadata {
   if (!x || typeof x !== "object") return false;
   const m = x as Record<string, unknown>;
   if (typeof m.cid !== "string" || typeof m.threadId !== "string") return false;
+  if (typeof m.path !== "string") return false;
   if (!m.anchor || typeof m.anchor !== "object") return false;
   const a = m.anchor as Record<string, unknown>;
   if (typeof a.sha !== "string" || typeof a.quote !== "string") return false;
