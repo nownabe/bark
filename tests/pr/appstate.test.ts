@@ -1,0 +1,243 @@
+import { describe, expect, test } from "bun:test";
+import { deriveAppState, parseSuggestion } from "../../lib/pr/appstate";
+import type {
+  Comment,
+  FileContent,
+  LocalState,
+  PullRequest,
+  RemoteState,
+  Thread,
+  User,
+} from "../../lib/pr/types";
+import { emptyState } from "../../lib/pr/types";
+
+const author = { login: "alice" };
+
+function comment(overrides: Partial<Comment> = {}): Comment {
+  return {
+    id: "c1",
+    state: "synced",
+    remoteId: 1,
+    threadId: "t1",
+    body: "body",
+    author,
+    path: "README.md",
+    anchor: {
+      sha: "old-sha",
+      range: { sl: 1, sc: 1, el: 1, ec: 6 },
+      quote: "hello",
+    },
+    ...overrides,
+  };
+}
+
+function thread(overrides: Partial<Thread> = {}): Thread {
+  return {
+    id: "t1",
+    state: "synced",
+    remoteThreadId: "PRT",
+    resolved: false,
+    ...overrides,
+  };
+}
+
+function pr(overrides: Partial<PullRequest> = {}): PullRequest {
+  return {
+    owner: "o",
+    repo: "r",
+    number: 1,
+    title: "t",
+    body: "b",
+    headSha: "head",
+    headRef: "topic",
+    baseRef: "main",
+    state: "open",
+    draft: false,
+    merged: false,
+    author,
+    ...overrides,
+  };
+}
+
+function fileContent(sha: string, path: string, source: string): FileContent {
+  return { sha, path, source };
+}
+
+function localState(overrides: Partial<LocalState> = {}): LocalState {
+  return { ...emptyState(), ...overrides };
+}
+
+function remoteState(overrides: Partial<RemoteState> = {}): RemoteState {
+  return { ...emptyState(), ...overrides };
+}
+
+describe("appstate — parseSuggestion", () => {
+  test("plain text is comment", () => {
+    expect(parseSuggestion("Looks good!")).toEqual({ kind: "comment" });
+  });
+
+  test("body with a suggestion fence is suggestion + replacement", () => {
+    const body = "Try this:\n```suggestion\nnew line\n```";
+    expect(parseSuggestion(body)).toEqual({
+      kind: "suggestion",
+      replacement: "new line",
+    });
+  });
+
+  test("multi-line suggestion replacement is preserved", () => {
+    const body = "```suggestion\nline a\nline b\n```";
+    expect(parseSuggestion(body)).toEqual({
+      kind: "suggestion",
+      replacement: "line a\nline b",
+    });
+  });
+
+  test("empty suggestion fence yields an empty replacement", () => {
+    const body = "```suggestion\n```";
+    expect(parseSuggestion(body)).toMatchObject({ kind: "suggestion" });
+  });
+
+  test("only the first suggestion fence is parsed", () => {
+    const body = "```suggestion\nfirst\n```\nand\n```suggestion\nsecond\n```";
+    expect(parseSuggestion(body)).toEqual({
+      kind: "suggestion",
+      replacement: "first",
+    });
+  });
+});
+
+describe("appstate — deriveAppState: role", () => {
+  test("role is null until both viewer and pullRequest are loaded", () => {
+    const out = deriveAppState(localState(), remoteState(), { isInDiff: () => false });
+    expect(out.role).toBeNull();
+  });
+
+  test("viewer matching PR author → role: author", () => {
+    const viewer: User = { login: "alice" };
+    const out = deriveAppState(
+      localState(),
+      remoteState({ viewer, pullRequest: pr({ author: { login: "ALICE" } }) }),
+      { isInDiff: () => false },
+    );
+    expect(out.role).toBe("author");
+  });
+
+  test("viewer different from PR author → role: reviewer", () => {
+    const out = deriveAppState(
+      localState(),
+      remoteState({
+        viewer: { login: "bob" },
+        pullRequest: pr({ author: { login: "alice" } }),
+      }),
+      { isInDiff: () => false },
+    );
+    expect(out.role).toBe("reviewer");
+  });
+});
+
+describe("appstate — deriveAppState: CommentView", () => {
+  test("a draft Comment is marked isMyDraft", () => {
+    const c = comment({ state: "draft" });
+    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }), {
+      isInDiff: () => true,
+    });
+    expect(out.commentViews.get("c1")?.isMyDraft).toBe(true);
+  });
+
+  test("inDiff is taken from the DeriveContext callback", () => {
+    const c = comment();
+    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }), {
+      isInDiff: () => false,
+    });
+    expect(out.commentViews.get("c1")?.inDiff).toBe(false);
+  });
+
+  test("kind / replacement are derived from the body", () => {
+    const c = comment({
+      body: "Try:\n```suggestion\nfixed\n```",
+    });
+    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }), {
+      isInDiff: () => true,
+    });
+    const view = out.commentViews.get("c1");
+    expect(view?.kind).toBe("suggestion");
+    expect(view?.replacement).toBe("fixed");
+  });
+
+  test("displayPosition is current when anchor.sha === headSha", () => {
+    const c = comment({
+      anchor: { sha: "head", range: { sl: 1, sc: 1, el: 1, ec: 6 }, quote: "hi" },
+    });
+    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }), {
+      isInDiff: () => true,
+    });
+    expect(out.commentViews.get("c1")?.displayPosition.status).toBe("current");
+  });
+
+  test("displayPosition is outdated when oldSource is missing", () => {
+    const c = comment({
+      anchor: { sha: "older", range: { sl: 1, sc: 1, el: 1, ec: 6 }, quote: "x" },
+    });
+    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }), {
+      isInDiff: () => true,
+    });
+    expect(out.commentViews.get("c1")?.displayPosition.status).toBe("outdated");
+  });
+
+  test("displayPosition is mapped when LCS traces the anchor and quote matches", () => {
+    const oldS = "alpha\nbeta\ngamma";
+    const newS = "alpha\nINSERTED\nbeta\ngamma";
+    const c = comment({
+      anchor: { sha: "old", range: { sl: 2, sc: 1, el: 2, ec: 5 }, quote: "beta" },
+      path: "f.md",
+    });
+    const out = deriveAppState(
+      localState({ comments: [c] }),
+      remoteState({
+        pullRequest: pr(),
+        fileContents: [fileContent("head", "f.md", newS), fileContent("old", "f.md", oldS)],
+      }),
+      { isInDiff: () => true },
+    );
+    const dp = out.commentViews.get("c1")?.displayPosition;
+    expect(dp).toEqual({ status: "mapped", range: { sl: 3, sc: 1, el: 3, ec: 5 } });
+  });
+
+  test("displayPosition is outdated when no PullRequest is loaded yet", () => {
+    const c = comment();
+    const out = deriveAppState(localState({ comments: [c] }), remoteState(), {
+      isInDiff: () => true,
+    });
+    expect(out.commentViews.get("c1")?.displayPosition.status).toBe("outdated");
+  });
+});
+
+describe("appstate — deriveAppState: threadGroups", () => {
+  test("groups Comments by threadId", () => {
+    const c1 = comment({ id: "c1", threadId: "t1" });
+    const c2 = comment({ id: "c2", threadId: "t1" });
+    const c3 = comment({ id: "c3", threadId: "t2" });
+    const t1 = thread({ id: "t1" });
+    const t2 = thread({ id: "t2" });
+    const out = deriveAppState(
+      localState({ comments: [c1, c2, c3], threads: [t1, t2] }),
+      remoteState({ pullRequest: pr() }),
+      { isInDiff: () => true },
+    );
+    const ids = (id: string) =>
+      out.threadGroups.find((g) => g.thread.id === id)?.comments.map((c) => c.comment.id);
+    expect(ids("t1")).toEqual(["c1", "c2"]);
+    expect(ids("t2")).toEqual(["c3"]);
+  });
+
+  test("a thread with no comments still appears (empty group)", () => {
+    const t = thread({ id: "orphan" });
+    const out = deriveAppState(localState({ threads: [t] }), remoteState({ pullRequest: pr() }), {
+      isInDiff: () => true,
+    });
+    expect(out.threadGroups[0]).toMatchObject({
+      thread: t,
+      comments: [],
+    });
+  });
+});
