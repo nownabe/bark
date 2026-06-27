@@ -91,7 +91,8 @@ import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/
 import { browser } from "wxt/browser";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { PullRequestRepository } from "../../lib/pr/repository";
-import { RepositoryProvider } from "../../lib/pr/react";
+import { RepositoryProvider, useAppStateFromRepository } from "../../lib/pr/react";
+import { commentViewsToExisting } from "./adapters/commentViewsToExisting";
 import { useAuthFlow } from "./hooks/useAuthFlow";
 import { productionAuthDeps } from "./hooks/useAuthFlow.deps";
 import { usePullRequestData } from "./hooks/usePullRequestData";
@@ -156,7 +157,12 @@ export function App() {
   const [selection, setSelection] = useState<SourceAnchor | null>(null);
   const [bubblePos, setBubblePos] = useState<BubblePos | null>(null);
   const [commentBody, setCommentBody] = useState("");
-  const [comments, setComments] = useState<ExistingComment[]>([]);
+  // Legacy comments fetcher: the GitHub REST normaliser still owns the
+  // submit-time read-after-write polling (reloadCommentsUntil). The
+  // derived `comments` value below merges in foreign comments surfaced by
+  // the new data layer — those couldn't be seen at all through the legacy
+  // path because the normaliser doesn't carry foreign-id conventions.
+  const [legacyComments, setLegacyComments] = useState<ExistingComment[]>([]);
   // Source of each commented file as of its createdAtSha, keyed `${sha}:${path}`,
   // so re-anchoring can diff against the exact revision a comment was made on
   // (lib/reanchor diff path). Populated lazily; a missing entry just means
@@ -278,6 +284,25 @@ export function App() {
       cancelled = true;
     };
   }, [token, ref?.owner, ref?.repo, ref?.number]);
+
+  // L2 of the legacy-on-new-data-layer plan: read the Repository's AppState
+  // and pull foreign comments (which the legacy normaliser can't see) into
+  // the rendered comment list. Bark-authored ids still come through the
+  // legacy fetcher — its read-after-write polling (reloadCommentsUntil)
+  // remains the source of truth for the just-submitted path until L6.
+  const deriveCtx = useMemo(() => ({ isInDiff: () => false }), []);
+  const repositoryAppState = useAppStateFromRepository(prRepository, deriveCtx);
+  const foreignFromAppState = useMemo(() => {
+    if (!repositoryAppState) return [];
+    return commentViewsToExisting(repositoryAppState.commentViews.values()).filter(
+      (c) => c.meta === null,
+    );
+  }, [repositoryAppState]);
+  const comments = useMemo(() => {
+    const seen = new Set(legacyComments.map((c) => c.id));
+    return [...legacyComments, ...foreignFromAppState.filter((c) => !seen.has(c.id))];
+  }, [legacyComments, foreignFromAppState]);
+
   const lineStarts = useMemo(() => buildLineIndex(source), [source]);
   const diffRanges = useMemo(
     () => parseRightRanges(files.find((f) => f.path === selectedPath)?.patch),
@@ -454,7 +479,7 @@ export function App() {
       client.listReviewComments(ref),
       client.listIssueComments(ref),
     ]);
-    setComments(normalizeComments(reviews, issues));
+    setLegacyComments(normalizeComments(reviews, issues));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, ref?.owner, ref?.repo, ref?.number]);
 
@@ -965,7 +990,7 @@ export function App() {
         ]);
         return normalizeComments(reviews, issues);
       }, submittedCids);
-      setComments(comments);
+      setLegacyComments(comments);
       // The pending items just became submitted; if the list was filtered to
       // "Pending" it would now look empty, so make sure "submitted" is on —
       // without forcing the user's "resolved" preference on.
@@ -1185,7 +1210,7 @@ export function App() {
         ]);
         return normalizeComments(reviews, issues);
       }, submittedCids);
-      setComments(fresh);
+      setLegacyComments(fresh);
       setReviewFilter(revealSubmittedFacets);
       setEmphasizedThreadId(null);
 
