@@ -378,4 +378,177 @@ describe("remote-fetcher — fetchRemoteState", () => {
       "h1:b.md:hello",
     ]);
   });
+
+  test("fileContents are auto-collected from every fetched comment's anchor (Bark-authored)", async () => {
+    const barkBody = embedMetadata("hi", {
+      cid: "c1",
+      threadId: "t1",
+      path: "src/x.md",
+      anchor: {
+        sha: "old-sha",
+        range: { sl: 5, sc: 1, el: 5, ec: 10 },
+        quote: "hello",
+      },
+    });
+    const b64 = btoa("hello world");
+    const contentsCalls: string[] = [];
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7"))
+        return jsonResponse({
+          number: 7,
+          title: "T",
+          body: "B",
+          state: "open",
+          draft: false,
+          merged: false,
+          head: { sha: "head", ref: "topic" },
+          base: { ref: "main" },
+          user: { login: "alice", avatar_url: "" },
+        });
+      if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/comments"))
+        return jsonResponse([
+          {
+            id: 1,
+            body: barkBody,
+            path: "src/x.md",
+            line: 5,
+            user: { login: "alice", avatar_url: "" },
+          },
+        ]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      if (req.url.includes("/contents/")) {
+        contentsCalls.push(req.url);
+        return jsonResponse({ content: b64, encoding: "base64" });
+      }
+      throw new Error(`unexpected: ${req.url}`);
+    });
+
+    const out = await fetchRemoteState({ token: "t", fetch }, PR);
+
+    // No explicit fileContentTargets — the orchestrator should have
+    // pulled the old source for the bark comment's `(anchor.sha, path)`
+    // entirely on its own.
+    expect(out.fileContents).toHaveLength(1);
+    expect(out.fileContents[0]?.sha).toBe("old-sha");
+    expect(out.fileContents[0]?.path).toBe("src/x.md");
+    expect(out.fileContents[0]?.source).toBe("hello world");
+    expect(contentsCalls).toHaveLength(1);
+  });
+
+  test("auto-collect dedups against caller-provided fileContentTargets", async () => {
+    const barkBody = embedMetadata("hi", {
+      cid: "c1",
+      threadId: "t1",
+      path: "x.md",
+      anchor: {
+        sha: "old",
+        range: { sl: 1, sc: 1, el: 1, ec: 2 },
+        quote: "x",
+      },
+    });
+    const contentsCalls: string[] = [];
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7"))
+        return jsonResponse({
+          number: 7,
+          title: "T",
+          body: "B",
+          state: "open",
+          draft: false,
+          merged: false,
+          head: { sha: "head", ref: "topic" },
+          base: { ref: "main" },
+          user: { login: "alice", avatar_url: "" },
+        });
+      if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/comments"))
+        return jsonResponse([
+          {
+            id: 1,
+            body: barkBody,
+            path: "x.md",
+            line: 1,
+            user: { login: "alice", avatar_url: "" },
+          },
+        ]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      if (req.url.includes("/contents/")) {
+        contentsCalls.push(req.url);
+        return jsonResponse({ content: btoa("x"), encoding: "base64" });
+      }
+      throw new Error(`unexpected: ${req.url}`);
+    });
+
+    // Pass the same (sha, path) that the bark comment already requires.
+    const out = await fetchRemoteState({ token: "t", fetch }, PR, {
+      fileContentTargets: [{ sha: "old", path: "x.md" }],
+    });
+    expect(out.fileContents).toHaveLength(1);
+    expect(contentsCalls).toHaveLength(1);
+  });
+
+  test("a 404 on one file is non-fatal — surviving fetches still land in fileContents", async () => {
+    const barkBody = (cid: string, sha: string, path: string) =>
+      embedMetadata("hi", {
+        cid,
+        threadId: cid,
+        path,
+        anchor: { sha, range: { sl: 1, sc: 1, el: 1, ec: 2 }, quote: "x" },
+      });
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7"))
+        return jsonResponse({
+          number: 7,
+          title: "T",
+          body: "B",
+          state: "open",
+          draft: false,
+          merged: false,
+          head: { sha: "head", ref: "topic" },
+          base: { ref: "main" },
+          user: { login: "alice", avatar_url: "" },
+        });
+      if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/comments"))
+        return jsonResponse([
+          {
+            id: 1,
+            body: barkBody("c1", "good-sha", "good.md"),
+            path: "good.md",
+            line: 1,
+            user: { login: "alice", avatar_url: "" },
+          },
+          {
+            id: 2,
+            body: barkBody("c2", "missing-sha", "missing.md"),
+            path: "missing.md",
+            line: 1,
+            user: { login: "alice", avatar_url: "" },
+          },
+        ]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      if (req.url.includes("missing.md")) return jsonResponse({}, 404);
+      if (req.url.includes("/contents/"))
+        return jsonResponse({ content: btoa("ok"), encoding: "base64" });
+      throw new Error(`unexpected: ${req.url}`);
+    });
+
+    const out = await fetchRemoteState({ token: "t", fetch }, PR);
+    // good.md survives; missing.md silently drops out — its comment will
+    // re-anchor to 'outdated' downstream.
+    expect(out.fileContents.map((f) => f.path)).toEqual(["good.md"]);
+  });
 });
