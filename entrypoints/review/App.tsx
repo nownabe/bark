@@ -26,11 +26,11 @@ import { commentHighlightField, commentHighlightTheme, setCommentHighlights } fr
 import { richMarkdown, richMarkdownTheme } from "./richMarkdown";
 import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from "./suggestMode";
 import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from "./suggestionView";
-import { SelectionComposer } from "./components/SelectionComposer";
 import { SelectionBubble } from "./components/SelectionBubble";
 import { LoginGate } from "./components/LoginGate";
 import { SuggestionDiff } from "./components/SuggestionDiff";
 import { Topbar } from "./components/Topbar";
+import { ReviewSidebar } from "./components/ReviewSidebar";
 import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import { DiscardAllConfirmModal } from "./components/DiscardAllConfirmModal";
@@ -42,12 +42,10 @@ import {
   buildReviewEntries,
   buildSuggestionMarks,
   buildThreads,
-  composerInsertIndex,
   deriveRole,
   filterReviewEntries,
   revealSubmittedFacets,
   reviewEntryCounts,
-  sortPos,
   threadRangeAt,
   type AcceptedSuggestionInfo,
   type PendingSuggestion,
@@ -1972,59 +1970,20 @@ export function App() {
           </div>
         </main>
 
-        <aside className="sidebar" ref={sidebarRef}>
-          {/* one list: the selection composer, pending items and submitted
-              threads all live here — no separate comment / suggestion / review
-              blocks. */}
-          <section className="panel panel--bare">
-            <div className="panel__head">
-              <h2 className="panel__title">Review</h2>
-              <div className="seg seg--sm">
-                {(["pending", "submitted", "resolved"] as const).map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    aria-pressed={reviewFilter.has(f)}
-                    onClick={() => toggleFacet(f)}
-                  >
-                    {f === "pending" ? "Pending" : f === "submitted" ? "Sent" : "Resolved"} (
-                    {counts[f]})
-                  </button>
-                ))}
-              </div>
-            </div>
-            {visibleEntries.length === 0 && !anchor ? (
-              <p className="empty">No items.</p>
-            ) : (
-              (() => {
-                const items = visibleEntries.map((e) =>
-                  e.kind === "liveSuggestion"
-                    ? renderLiveSuggestion(e.suggestion)
-                    : renderThread(e.thread),
-                );
-                if (anchor) {
-                  const idx = composerInsertIndex(
-                    visibleEntries,
-                    sortPos(anchor.startLine, anchor.startCol),
-                  );
-                  items.splice(
-                    idx,
-                    0,
-                    <SelectionComposer
-                      key="__composer"
-                      anchor={anchor}
-                      value={commentBody}
-                      onChange={setCommentBody}
-                      onAdd={addDraft}
-                      onDiscard={discardComposer}
-                    />,
-                  );
-                }
-                return items;
-              })()
-            )}
-          </section>
-        </aside>
+        <ReviewSidebar
+          sidebarRef={sidebarRef}
+          reviewFilter={reviewFilter}
+          counts={counts}
+          onToggleFacet={toggleFacet}
+          visibleEntries={visibleEntries}
+          anchor={anchor}
+          commentBody={commentBody}
+          onChangeComposer={setCommentBody}
+          onAddDraft={addDraft}
+          onDiscardComposer={discardComposer}
+          renderLiveSuggestion={renderLiveSuggestion}
+          renderThread={renderThread}
+        />
       </div>
 
       <SelectionBubble pos={bubblePos} onClick={openComposer} />
