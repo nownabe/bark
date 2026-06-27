@@ -169,6 +169,65 @@ describe("AppV2 — threads + comments", () => {
     const { container } = render(<AppV2 repository={repo} refresh={async () => {}} />);
     expect(container.textContent).toContain("resolved");
   });
+
+  test("foreign comments (no Bark metadata, no matching Thread) still appear", async () => {
+    // Reproduces the production state where someone else's review or
+    // issue comments live in RemoteState — they get copied into
+    // LocalState by mergeRemoteIntoLocal but carry no Thread because
+    // there is no embedded metadata to wire them up. The synthetic
+    // ThreadGroup keeps them visible.
+    const repo = makeRepo();
+    await repo.setRemoteState({
+      ...repo.getRemoteState(),
+      pullRequest: {
+        owner: "acme",
+        repo: "site",
+        number: 1,
+        title: "T",
+        body: "",
+        headSha: "h",
+        headRef: "topic",
+        baseRef: "main",
+        state: "open",
+        draft: false,
+        merged: false,
+        author: { login: "alice" },
+      },
+      viewer: { login: "alice" },
+    });
+    await repo.upsertComment({
+      id: "foreign-review-42",
+      state: "synced",
+      remoteId: 42,
+      threadId: "foreign-thread-review-42",
+      body: "Drive-by review comment",
+      author: { login: "carol" },
+      path: "test.md",
+      anchor: { sha: "", range: { sl: 7, sc: 1, el: 7, ec: 1 }, quote: "" },
+    });
+    await repo.upsertComment({
+      id: "foreign-issue-50",
+      state: "synced",
+      remoteId: 50,
+      threadId: "foreign-thread-issue-50",
+      body: "Top-level discussion",
+      author: { login: "dan" },
+      path: "",
+      anchor: { sha: "", range: { sl: 1, sc: 1, el: 1, ec: 1 }, quote: "" },
+    });
+
+    const { container, getByTestId } = render(<AppV2 repository={repo} refresh={async () => {}} />);
+    expect(container.textContent).toContain("Drive-by review comment");
+    expect(container.textContent).toContain("Top-level discussion");
+    expect(container.textContent).toContain("@carol");
+    expect(container.textContent).toContain("@dan");
+    // path:line surfaces for review comments so the reader has a rough
+    // location; issue comments have no path, so we render a "(no file)"
+    // hint instead of an empty span.
+    expect(getByTestId("location-foreign-review-42").textContent).toContain("test.md");
+    expect(getByTestId("location-foreign-review-42").textContent).toContain("L7");
+    expect(getByTestId("location-foreign-issue-50").textContent).toContain("(no file)");
+  });
 });
 
 describe("AppV2 — draft creation and submission", () => {
