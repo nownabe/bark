@@ -998,9 +998,84 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      const reviewComments: ReviewCommentInput[] = [];
-      const issueBodies: string[] = [];
-      for (const d of toSubmit) {
+      // L6c: route in-diff drafts through Repository (new write path),
+      // keep out-of-diff drafts on the legacy fetcher because their body
+      // composition (quoted block + permalink) is a Bark-specific UX
+      // extension that lives outside the new layer's Comment.body
+      // contract (ADR 0001 §3: body is the visible body only). Posting
+      // out-of-diff via Repository would lose the quote/permalink hint.
+      const inDiffDrafts = toSubmit.filter((d) => d.inDiff);
+      const outOfDiffDrafts = toSubmit.filter((d) => !d.inDiff);
+
+      // ---- in-diff: Repository.submitDrafts ---------------------------
+      if (prRepository && inDiffDrafts.length > 0) {
+        const inRepo = new Set(prRepository.getLocalState().comments.map((c) => c.id));
+        for (const d of inDiffDrafts) {
+          if (inRepo.has(d.cid)) continue; // already double-written by L4/L6a
+          const body =
+            d.kind === "suggestion"
+              ? `${d.body}\n\n${buildSuggestionBlock(d.suggestion ?? "")}`
+              : d.body;
+          // parentLocalId: top-level (d.cid === d.thread) → undefined;
+          // reply to a submitted thread → root comment's LocalId via
+          // commentViewByRemoteId; reply to a still-draft thread →
+          // rootDraft.cid (same as draft.thread).
+          const thread = threads.find((t) => t.id === d.thread);
+          const parentLocalId =
+            d.cid === d.thread
+              ? undefined
+              : thread?.rootComment
+                ? commentViewByRemoteId.get(thread.rootComment.id)?.comment.id
+                : (thread?.rootDraft?.cid ?? undefined);
+          await prRepository.upsertComment(
+            pendingDraftToComment({ ...d, body }, viewerLogin ?? "you", parentLocalId),
+          );
+        }
+        await prRepository.submitDrafts();
+      } else if (inDiffDrafts.length > 0) {
+        // Pre-bootstrap fallback: legacy in-diff submit.
+        const reviewComments: ReviewCommentInput[] = inDiffDrafts.map((d) => {
+          const suggestion =
+            d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
+          const dmeta: CommentMetadata = {
+            cid: d.cid,
+            path: d.path,
+            range: d.range,
+            quote: d.quote,
+            sha: d.sha,
+            thread: d.thread,
+            kind: d.kind,
+          };
+          return {
+            path: d.path,
+            side: "RIGHT" as const,
+            line: d.range.el,
+            ...(d.range.el !== d.range.sl
+              ? { start_line: d.range.sl, start_side: "RIGHT" as const }
+              : {}),
+            body: embedMetadata(`${d.body}${suggestion}`, dmeta),
+          };
+        });
+        await client.submitReview(ref, {
+          commitId: headSha ?? undefined,
+          comments: reviewComments,
+        });
+      }
+
+      // ---- out-of-diff: legacy path with the rich quoted body ---------
+      for (const d of outOfDiffDrafts) {
+        const suggestion =
+          d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
+        const quoted = d.quote
+          .split("\n")
+          .map((l) => `> ${l}`)
+          .join("\n");
+        const note =
+          d.kind === "suggestion"
+            ? "\n\n(Out of diff: this suggestion will not show an Apply button.)"
+            : "";
+        const visible =
+          `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
         const dmeta: CommentMetadata = {
           cid: d.cid,
           path: d.path,
@@ -1010,40 +1085,7 @@ export function App() {
           thread: d.thread,
           kind: d.kind,
         };
-        const suggestion =
-          d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
-        if (d.inDiff) {
-          reviewComments.push({
-            path: d.path,
-            side: "RIGHT",
-            line: d.range.el,
-            ...(d.range.el !== d.range.sl
-              ? { start_line: d.range.sl, start_side: "RIGHT" as const }
-              : {}),
-            body: embedMetadata(`${d.body}${suggestion}`, dmeta),
-          });
-        } else {
-          const quoted = d.quote
-            .split("\n")
-            .map((l) => `> ${l}`)
-            .join("\n");
-          const note =
-            d.kind === "suggestion"
-              ? "\n\n(Out of diff: this suggestion will not show an Apply button.)"
-              : "";
-          const visible =
-            `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
-          issueBodies.push(embedMetadata(visible, dmeta));
-        }
-      }
-      if (reviewComments.length > 0) {
-        await client.submitReview(ref, {
-          commitId: headSha ?? undefined,
-          comments: reviewComments,
-        });
-      }
-      for (const body of issueBodies) {
-        await client.createIssueComment(ref, body);
+        await client.createIssueComment(ref, embedMetadata(visible, dmeta));
       }
       await replaceAndPersistDrafts([]);
       setSource(baseSource); // live suggestion edits are now submitted
