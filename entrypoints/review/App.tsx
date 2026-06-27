@@ -32,6 +32,9 @@ import { SuggestionDiff } from "./components/SuggestionDiff";
 import { Topbar } from "./components/Topbar";
 import { ReviewSidebar } from "./components/ReviewSidebar";
 import { SourceEditor } from "./components/SourceEditor";
+import { InstallGate } from "./components/InstallGate";
+import { DebugFab } from "./components/DebugFab";
+import { RoleFab } from "./components/RoleFab";
 import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import { DiscardAllConfirmModal } from "./components/DiscardAllConfirmModal";
@@ -1596,60 +1599,16 @@ export function App() {
   // the user into the review UI with a confusing "Not Found" notice (§7.6).
   if (ref && needsInstall) {
     return (
-      <div className="gate">
-        <div className="gate__brand">
-          <img className="gate__logo" src="/icon/128.png" alt="" />
-          <h1>Bark</h1>
-        </div>
-        <p>
-          Bark can't open {owner}/{repo} #{prNum} yet.
-        </p>
-        {authMethod === "pat" ? (
-          <>
-            <p className="notice--muted" style={{ fontSize: 13 }}>
-              This token can't access {owner}/{repo}. Check the token's repository access and its{" "}
-              <code>Contents</code> / <code>Pull requests</code> permissions, then retry — or use a
-              different token.
-            </p>
-            <div className="gate__actions">
-              <button
-                type="button"
-                className="btn btn--primary"
-                onClick={retryLoad}
-                disabled={loading}
-              >
-                {loading ? "Checking…" : "Retry"}
-              </button>
-              <button type="button" className="btn" onClick={handleClearToken}>
-                Use a different token
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="notice--muted" style={{ fontSize: 13 }}>
-              You're authorized, but Bark isn't installed on this repository (or the repository / PR
-              doesn't exist). Install Bark and select this repository, then retry.
-            </p>
-            <div className="gate__actions">
-              {installUrl ? (
-                <a className="btn btn--primary" href={installUrl} target="_blank" rel="noreferrer">
-                  Install on this repository
-                </a>
-              ) : null}
-              <button type="button" className="btn" onClick={retryLoad} disabled={loading}>
-                {loading ? "Checking…" : "Retry"}
-              </button>
-            </div>
-            <p className="notice--muted" style={{ fontSize: 12 }}>
-              Authorized as the wrong account?{" "}
-              <button type="button" className="linkish" onClick={handleClearToken}>
-                Use a different account
-              </button>
-            </p>
-          </>
-        )}
-      </div>
+      <InstallGate
+        owner={owner}
+        repo={repo}
+        prNum={prNum}
+        authMethod={authMethod}
+        loading={loading}
+        installUrl={installUrl}
+        onRetry={retryLoad}
+        onClearToken={handleClearToken}
+      />
     );
   }
 
@@ -1997,87 +1956,22 @@ export function App() {
         />
       ) : null}
 
-      {/* floating debug (left-bottom) */}
-      <button
-        type="button"
-        className="debug-fab"
-        title="Debug info"
-        aria-label="Debug info"
-        onClick={() => setShowDebug((v) => !v)}
-      >
-        🐛
-      </button>
-      {showDebug ? (
-        <div className="debug-popover debug" role="dialog">
-          <div className="composer__row" style={{ justifyContent: "space-between", marginTop: 0 }}>
-            <strong>Debug</strong>
-            <button type="button" className="btn btn--sm" onClick={() => setShowDebug(false)}>
-              Close
-            </button>
-          </div>
-          <dl>
-            <dt>role / view</dt>
-            <dd>
-              {role} / {viewMode}
-            </dd>
-            <dt>head</dt>
-            <dd>{headSha ? headSha.slice(0, 7) : "-"}</dd>
-            <dt>edited</dt>
-            <dd>{source !== baseSource ? "yes" : "no"}</dd>
-            <dt>drafts</dt>
-            <dd>{drafts.length}</dd>
-          </dl>
-          {anchor ? (
-            <>
-              <dl>
-                <dt>offset</dt>
-                <dd>
-                  {anchor.startOffset}–{anchor.endOffset}
-                </dd>
-                <dt>range</dt>
-                <dd>
-                  L{anchor.startLine}:{anchor.startCol}–L{anchor.endLine}:{anchor.endCol}
-                </dd>
-              </dl>
-              <div style={{ marginTop: 8 }}>quoted:</div>
-              <pre>{anchor.quotedText}</pre>
-              <div style={{ marginTop: 8 }}>GitHub body to be posted:</div>
-              <pre>{previewBody}</pre>
-              {restored?.meta ? (
-                <p style={{ color: "var(--green)" }}>
-                  ✓ live round-trip OK: L{restored.meta.range.sl}:{restored.meta.range.sc}–L
-                  {restored.meta.range.el}:{restored.meta.range.ec}
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="empty">Select text in the body to see anchor info.</p>
-          )}
-        </div>
-      ) : null}
+      <DebugFab
+        show={showDebug}
+        onToggle={() => setShowDebug((v) => !v)}
+        onClose={() => setShowDebug(false)}
+        role={role}
+        viewMode={viewMode}
+        headSha={headSha}
+        edited={source !== baseSource}
+        draftsCount={drafts.length}
+        anchor={anchor}
+        previewBody={previewBody}
+        restored={restored}
+      />
 
       {/* Development-only role switch (bottom-right); see BARK_DEV_ROLE_SWITCH. */}
-      {DEV_ROLE_SWITCH ? (
-        <div className="role-fab" role="group" aria-label="Role (development)">
-          <span className="role-fab__label">dev</span>
-          <div className="seg seg--sm">
-            <button
-              type="button"
-              aria-pressed={role === "author"}
-              onClick={() => setRole("author")}
-            >
-              author
-            </button>
-            <button
-              type="button"
-              aria-pressed={role === "reviewer"}
-              onClick={() => setRole("reviewer")}
-            >
-              reviewer
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {DEV_ROLE_SWITCH ? <RoleFab role={role} onChangeRole={setRole} /> : null}
     </div>
   );
 
