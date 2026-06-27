@@ -126,7 +126,15 @@ function toCommentFromReview(rc: RawReviewComment, byId: Map<number, RawReviewCo
     };
   }
   // Foreign review comment — preserve as much position info as we can,
-  // but leave quote empty so re-anchoring reports `outdated`.
+  // but leave quote empty so re-anchoring reports `outdated`. When the
+  // GitHub `line` field is null (the comment's original line no longer
+  // exists in the head — i.e. it's outdated / diff-outside), encode
+  // that as `sl/el = 0`. The legacy UI (and any consumer that treats
+  // the comment as "renderable in the editor") should treat range.el
+  // === 0 as "no anchor known". The UI may then choose to hide the
+  // comment entirely (Bark currently does — it's scope is line-bound
+  // comments only) or render it elsewhere.
+  const headLine = rc.line ?? 0;
   return {
     id: `foreign-review-${rc.id}`,
     state: "synced",
@@ -139,9 +147,9 @@ function toCommentFromReview(rc: RawReviewComment, byId: Map<number, RawReviewCo
     anchor: {
       sha: "",
       range: {
-        sl: rc.start_line ?? rc.line ?? 1,
+        sl: rc.start_line ?? headLine,
         sc: 1,
-        el: rc.line ?? 1,
+        el: headLine,
         ec: 1,
       },
       quote: "",

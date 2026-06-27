@@ -61,7 +61,10 @@ function toExistingComment(view: CommentView): ExistingComment | null {
   if (source === "review") {
     base.path = c.path;
     // ExistingComment.line carries the GitHub-native end line (right side).
-    base.line = c.anchor.range.el;
+    // remote-fetcher encodes "no line known" (the comment is outdated /
+    // sits outside the diff) as range.el === 0; mirror the legacy
+    // normaliser's `c.line ?? undefined` by leaving `line` undefined.
+    if (c.anchor.range.el > 0) base.line = c.anchor.range.el;
   }
   return base;
 }

@@ -294,8 +294,13 @@ export function App() {
   const repositoryAppState = useAppStateFromRepository(prRepository, deriveCtx);
   const foreignFromAppState = useMemo(() => {
     if (!repositoryAppState) return [];
+    // Bark's scope is line-bound markdown review (Design Doc §1). So
+    // foreign comments we surface are limited to GitHub review comments
+    // that DO have a line in the head (i.e. the diff-inside ones).
+    // - issue comments (source === "issue")          → handled in GitHub
+    // - review comments without a line (outdated)    → handled in GitHub
     return commentViewsToExisting(repositoryAppState.commentViews.values()).filter(
-      (c) => c.meta === null,
+      (c) => c.meta === null && c.source === "review" && c.line !== undefined,
     );
   }, [repositoryAppState]);
   const comments = useMemo(() => {
