@@ -11,7 +11,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import type { ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { GFM } from "@lezer/markdown";
@@ -31,6 +31,7 @@ import { LoginGate } from "./components/LoginGate";
 import { SuggestionDiff } from "./components/SuggestionDiff";
 import { Topbar } from "./components/Topbar";
 import { ReviewSidebar } from "./components/ReviewSidebar";
+import { SourceEditor } from "./components/SourceEditor";
 import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import { DiscardAllConfirmModal } from "./components/DiscardAllConfirmModal";
@@ -1943,32 +1944,20 @@ export function App() {
       ) : null}
 
       <div className="layout">
-        <main>
-          <div
-            className="doc"
-            onClick={onEditorClick}
-            onMouseDown={onEditorMouseDown}
-            onMouseUp={onEditorMouseUp}
-          >
-            <CodeMirror
-              ref={cmRef}
-              value={source}
-              extensions={cmExtensions}
-              basicSetup={{
-                lineNumbers: viewMode === "raw",
-                foldGutter: viewMode === "raw",
-                highlightSelectionMatches: false,
-                highlightActiveLine: false,
-                highlightActiveLineGutter: false,
-              }}
-              onChange={onSourceChange}
-              onUpdate={(vu) => {
-                if (suppressNextAnchor.current) return;
-                handleSelectionUpdate(vu, setSelection);
-              }}
-            />
-          </div>
-        </main>
+        <SourceEditor
+          cmRef={cmRef}
+          source={source}
+          cmExtensions={cmExtensions}
+          viewMode={viewMode}
+          onSourceChange={onSourceChange}
+          onUpdate={(vu) => {
+            if (suppressNextAnchor.current) return;
+            handleSelectionUpdate(vu, setSelection);
+          }}
+          onClick={onEditorClick}
+          onMouseDown={onEditorMouseDown}
+          onMouseUp={onEditorMouseUp}
+        />
 
         <ReviewSidebar
           sidebarRef={sidebarRef}
