@@ -5,7 +5,12 @@ if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
 import { describe, expect, test } from "bun:test";
 import { act, render, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { RepositoryProvider, useAppState, useRepository } from "../../lib/pr/react";
+import {
+  RepositoryProvider,
+  useAppState,
+  useAppStateFromRepository,
+  useRepository,
+} from "../../lib/pr/react";
 import { PullRequestRepository } from "../../lib/pr/repository";
 import { InMemoryStorageAdapter } from "../../lib/pr/storage";
 import type { Transport } from "../../lib/pr/transport";
@@ -121,6 +126,49 @@ describe("react — useAppState", () => {
     });
     expect(result.current.commentViews.size).toBe(1);
     expect(result.current.commentViews.get("c1")?.isMyDraft).toBe(true);
+  });
+});
+
+describe("react — useAppStateFromRepository", () => {
+  test("returns null while repo is null", () => {
+    const ctx = { isInDiff: () => false };
+    const { result } = renderHook(() => useAppStateFromRepository(null, ctx));
+    expect(result.current).toBeNull();
+  });
+
+  test("with a repo, derives AppState and updates on every mutation", async () => {
+    const repo = makeRepo();
+    const ctx = { isInDiff: () => true };
+    const { result } = renderHook(() => useAppStateFromRepository(repo, ctx));
+
+    expect(result.current).not.toBeNull();
+    expect(result.current?.commentViews.size).toBe(0);
+
+    await act(async () => {
+      await repo.setRemoteState({
+        ...repo.getRemoteState(),
+        pullRequest: pr(),
+        viewer: { login: "bob" },
+      });
+    });
+    expect(result.current?.role).toBe("reviewer");
+
+    await act(async () => {
+      await repo.upsertComment(comment());
+    });
+    expect(result.current?.commentViews.size).toBe(1);
+    expect(result.current?.commentViews.get("c1")?.isMyDraft).toBe(true);
+  });
+
+  test("works without a <RepositoryProvider /> ancestor (Provider-free use)", async () => {
+    const repo = makeRepo();
+    const ctx = { isInDiff: () => false };
+    function Inner() {
+      const state = useAppStateFromRepository(repo, ctx);
+      return <div data-count={state?.commentViews.size ?? -1} />;
+    }
+    const { container } = render(<Inner />);
+    expect(container.querySelector("div")?.getAttribute("data-count")).toBe("0");
   });
 });
 
