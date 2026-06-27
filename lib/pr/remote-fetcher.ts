@@ -326,13 +326,24 @@ function decodeBase64Utf8(b64: string): string {
 // ---- Orchestrator ------------------------------------------------------
 
 export type FetchRemoteStateOptions = {
-  /** Past-sha file contents to populate for re-anchoring. The orchestrator
-   *  fetches each `(sha, path)` pair as part of the bootstrap so AppState's
-   *  re-anchoring derivation has the inputs it needs. */
+  /** Extra past-sha file contents to populate beyond the ones implied by
+   *  the fetched comments. Callers use this for anchors that aren't
+   *  already represented in the fetched RemoteState (typically draft-
+   *  authored comments that live only in LocalState). The orchestrator
+   *  automatically also collects targets from every fetched comment's
+   *  `anchor.(sha, path)` so the re-anchoring derivation has its LCS
+   *  inputs for submitted comments without the caller having to know
+   *  them up front. */
   fileContentTargets?: Array<{ sha: string; path: string }>;
 };
 
-/** Build a RemoteState from one parallel fetch round. */
+/** Build a RemoteState from one parallel fetch round.
+ *
+ *  The file-content fetch is a second sub-round because we can only know
+ *  every needed `(sha, path)` pair AFTER the comments come back — but
+ *  the result is still a single, fully-populated RemoteState that the
+ *  caller pushes to the Repository with one `setRemoteState`. No
+ *  intermediate partial RemoteState is ever observed. */
 export async function fetchRemoteState(
   client: GitHubClient,
   ref: PrRef,
@@ -344,10 +355,35 @@ export async function fetchRemoteState(
     fetchComments(client, ref),
     fetchThreads(client, ref),
   ]);
-  const targets = opts.fileContentTargets ?? [];
-  const fileContents = await Promise.all(
+
+  // Union of:
+  //   - every fetched comment's anchor (foreign comments with anchor.sha
+  //     === "" or empty path are skipped — they can't be re-anchored)
+  //   - caller-provided extras (draft anchors not yet in the fetched list)
+  const targetSet = new Map<string, { sha: string; path: string }>();
+  for (const c of comments) {
+    if (c.anchor.sha && c.path) {
+      targetSet.set(`${c.anchor.sha}\0${c.path}`, { sha: c.anchor.sha, path: c.path });
+    }
+  }
+  for (const t of opts.fileContentTargets ?? []) {
+    if (t.sha && t.path) {
+      targetSet.set(`${t.sha}\0${t.path}`, t);
+    }
+  }
+  const targets = Array.from(targetSet.values());
+
+  // A 404 on one file (the sha + path no longer exists at GitHub) is
+  // not fatal: the corresponding comment will fall back to `outdated`
+  // via the missing-fileContent path in lib/pr/reanchor — same behaviour
+  // as before this auto-collect existed.
+  const settled = await Promise.allSettled(
     targets.map((t) => fetchFileContent(client, ref, t.sha, t.path)),
   );
+  const fileContents: FileContent[] = settled
+    .filter((r): r is PromiseFulfilledResult<FileContent> => r.status === "fulfilled")
+    .map((r) => r.value);
+
   return {
     pullRequest,
     viewer,
