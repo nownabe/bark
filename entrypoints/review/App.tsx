@@ -826,35 +826,57 @@ export function App() {
       return next;
     });
 
-  // Post a resolution-event comment (hidden metadata SoT) and, for in-diff
-  // threads, mirror it with GitHub's native resolve. Immediate; then reload.
+  // Two paths share the same UI affordance:
+  //  - Bark-authored thread (root.meta exists): post a resolution-event
+  //    marker comment (Bark's source of truth for resolved state) AND
+  //    flip GitHub's native resolve via GraphQL.
+  //  - Foreign in-diff review thread (root present, meta null, line known):
+  //    flip GitHub's native resolve only. No marker comment to post —
+  //    there's no Bark identity to point at.
+  // Both finish with a reload so the new resolved state is visible.
   const setThreadResolved = async (t: ReviewThread, resolved: boolean) => {
-    if (!client || !ref || !headSha) return;
+    if (!client || !ref) return;
     const root = t.rootComment;
-    if (!root?.meta) return;
+    if (!root) return;
     setResolvingId(t.id);
     setError(null);
     try {
-      const evMeta: CommentMetadata = {
-        cid: crypto.randomUUID(),
-        path: root.meta.path,
-        range: root.meta.range,
-        quote: root.meta.quote,
-        sha: headSha,
-        thread: t.id,
-        kind: "comment",
-        event: resolved ? "resolve" : "unresolve",
-      };
-      const body = embedMetadata(resolved ? "Resolved via Bark." : "Reopened via Bark.", evMeta);
-      if (root.source === "review") {
-        await client.replyToReviewComment(ref, root.id, body);
-        const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
-        if (nodeId) {
-          if (resolved) await client.resolveReviewThread(nodeId);
-          else await client.unresolveReviewThread(nodeId);
+      if (root.meta) {
+        // ---- Bark-authored path (A) -------------------------------------
+        if (!headSha) return;
+        const evMeta: CommentMetadata = {
+          cid: crypto.randomUUID(),
+          path: root.meta.path,
+          range: root.meta.range,
+          quote: root.meta.quote,
+          sha: headSha,
+          thread: t.id,
+          kind: "comment",
+          event: resolved ? "resolve" : "unresolve",
+        };
+        const body = embedMetadata(resolved ? "Resolved via Bark." : "Reopened via Bark.", evMeta);
+        if (root.source === "review") {
+          await client.replyToReviewComment(ref, root.id, body);
+          const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
+          if (nodeId) {
+            if (resolved) await client.resolveReviewThread(nodeId);
+            else await client.unresolveReviewThread(nodeId);
+          }
+        } else {
+          await client.createIssueComment(ref, body);
         }
+      } else if (root.source === "review") {
+        // ---- Foreign review path (B) ------------------------------------
+        const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
+        if (!nodeId) {
+          setError("Could not find the GitHub review thread for this comment.");
+          return;
+        }
+        if (resolved) await client.resolveReviewThread(nodeId);
+        else await client.unresolveReviewThread(nodeId);
       } else {
-        await client.createIssueComment(ref, body);
+        // Issue comments (D) are filtered out in L3a; nothing to do.
+        return;
       }
       // Refresh comments now so the thread's resolved state reflects immediately
       // (the reloadKey path only reloads PR info/files, not comments).
@@ -1564,11 +1586,17 @@ export function App() {
     const root = t.rootComment;
     const st = root ? statusFor(root) : null;
     const showAuthorActions = root?.meta?.kind === "suggestion" && role === "author";
-    // A thread is event-resolvable when it has a Bark root comment with a
-    // submitted comment. Reopen is offered only when resolution came from an
-    // event, not from accepting a suggestion (which resolves implicitly).
+    // Resolvable when:
+    //  - A: Bark-authored thread (root.meta present), not via accepted-suggestion
+    //  - B: foreign in-diff review thread (root.meta null, source review). L3a's
+    //    filter already kept only diff-inside foreign reviews; there's a
+    //    GitHub-native reviewThread we can resolve via GraphQL.
+    // Reopen is offered only when resolution came from an event, not from
+    // accepting a suggestion (which resolves implicitly).
     const acceptedRoot = root?.meta?.kind === "suggestion" && dismissed[root.id] === "accepted";
-    const canResolve = Boolean(root?.meta) && t.hasSubmitted && !acceptedRoot;
+    const isBarkAuthored = Boolean(root?.meta);
+    const isForeignReviewRoot = !!root && !root.meta && root.source === "review";
+    const canResolve = (isBarkAuthored || isForeignReviewRoot) && t.hasSubmitted && !acceptedRoot;
     // Resolve/Reopen sits at the right end of the root comment's author row.
     const resolveAction = canResolve ? (
       <button
