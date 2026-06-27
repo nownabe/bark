@@ -96,20 +96,13 @@ import {
   type SuggestionEdit,
 } from "../../lib/drafts";
 import { AuthorSubmitError, executeAuthorSubmit } from "../../lib/authorSubmit";
-import {
-  clearToken,
-  getToken,
-  setToken as persistToken,
-  getAuthMethod,
-  setAuthMethod as persistAuthMethod,
-  type AuthMethod,
-} from "../../lib/storage";
-import { pollForToken, requestDeviceAuthorization, type DeviceAuthorization } from "../../lib/auth";
 import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/metadata";
 import { browser } from "wxt/browser";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { PullRequestRepository } from "../../lib/pr/repository";
 import { RepositoryProvider } from "../../lib/pr/react";
+import { useAuthFlow } from "./hooks/useAuthFlow";
+import { productionAuthDeps } from "./hooks/useAuthFlow.deps";
 import { sampleDoc } from "./sample";
 import { DEV_ROLE_SWITCH, errMessage, installUrl, STATUS_LABEL, type ViewMode } from "./uiHelpers";
 
@@ -120,13 +113,18 @@ export function App() {
   const prNum = params.get("pr");
   const ref: PrRef | null = owner && repo && prNum ? { owner, repo, number: Number(prNum) } : null;
 
-  const [token, setToken] = useState<string | null>(null);
-  const [authMethod, setAuthMethodState] = useState<AuthMethod | null>(null);
-  const [tokenLoaded, setTokenLoaded] = useState(false);
-  // Device-flow auth state (§7.6): the pending grant + transient UI status.
-  const [deviceAuth, setDeviceAuth] = useState<DeviceAuthorization | null>(null);
-  const [authStarting, setAuthStarting] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const auth = useAuthFlow(productionAuthDeps);
+  const {
+    token,
+    authMethod,
+    tokenLoaded,
+    deviceAuth,
+    authStarting,
+    authError,
+    startDeviceFlow,
+    completeAuth,
+    clearToken: clearAuthToken,
+  } = auth;
   // Set when the initial repo/PR load fails with 404/403 — most often the GitHub
   // App is not installed on this repository; we show a dedicated install gate.
   const [needsInstall, setNeedsInstall] = useState(false);
@@ -406,14 +404,6 @@ export function App() {
     return () => document.removeEventListener("mousedown", onDown);
   }, [showHelp]);
 
-  useEffect(() => {
-    Promise.all([getToken(), getAuthMethod()]).then(([t, m]) => {
-      setToken(t);
-      setAuthMethodState(m);
-      setTokenLoaded(true);
-    });
-  }, []);
-
   // Starting a fresh selection (new-comment composer) means focus moved off the
   // emphasized item, so drop the emphasis. Programmatic jump/emphasis selections
   // set suppressNextAnchor and never set `anchor`, so they don't trigger this.
@@ -421,50 +411,7 @@ export function App() {
     if (anchor) setEmphasizedThreadId(null);
   }, [anchor]);
 
-  // Device-flow polling (§7.6): once a grant exists, poll GitHub at its interval
-  // until the user authorizes (or the code expires / is denied). A self-scheduling
-  // timeout lets us honor `slow_down` by widening the gap.
-  useEffect(() => {
-    if (!deviceAuth) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    let delay = deviceAuth.interval * 1000;
-    const deadline = Date.now() + deviceAuth.expiresIn * 1000;
-
-    const tick = async () => {
-      if (cancelled) return;
-      if (Date.now() > deadline) {
-        setAuthError("The code expired before you authorized. Please try again.");
-        setDeviceAuth(null);
-        return;
-      }
-      try {
-        const r = await pollForToken(deviceAuth.deviceCode);
-        if (cancelled) return;
-        if (r.kind === "authorized") {
-          await persistToken(r.token);
-          await persistAuthMethod("app");
-          setToken(r.token);
-          setAuthMethodState("app");
-          setDeviceAuth(null);
-          return;
-        }
-        if (r.kind === "slow_down") delay = r.interval * 1000;
-      } catch (e) {
-        if (cancelled) return;
-        setAuthError(e instanceof Error ? e.message : String(e));
-        setDeviceAuth(null);
-        return;
-      }
-      timer = setTimeout(tick, delay);
-    };
-
-    timer = setTimeout(tick, delay);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [deviceAuth]);
+  // Restore + device-flow polling now live in useAuthFlow.
 
   useEffect(() => {
     if (!client || !ref) return;
@@ -1347,35 +1294,11 @@ export function App() {
     }
   };
 
-  // Begin the device flow: ask GitHub for a user code, then render it; the
-  // polling effect below takes over once `deviceAuth` is set.
-  const startDeviceFlow = async () => {
-    setAuthError(null);
-    setAuthStarting(true);
-    try {
-      setDeviceAuth(await requestDeviceAuthorization());
-    } catch (e) {
-      setAuthError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setAuthStarting(false);
-    }
-  };
-
-  // Finalize a PAT login: persist the token + method, then enter the app. The
-  // device flow finalizes itself in its polling effect (with method "app").
-  const completeAuth = async (newToken: string, method: AuthMethod) => {
-    await persistToken(newToken);
-    await persistAuthMethod(method);
-    setToken(newToken);
-    setAuthMethodState(method);
-  };
-
+  // After the auth hook drops the token, also wipe any PR-load-derived state
+  // so the surface returns to its "no PR loaded" baseline (matches what the
+  // legacy in-line implementation did).
   const handleClearToken = async () => {
-    await clearToken();
-    setToken(null);
-    setAuthMethodState(null);
-    setDeviceAuth(null);
-    setAuthError(null);
+    await clearAuthToken();
     setFiles([]);
     setHeadSha(null);
     setSelectedPath(null);
