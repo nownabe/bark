@@ -103,6 +103,7 @@ import { useDismissedSuggestions } from "./hooks/useDismissedSuggestions";
 import { productionDismissedDeps } from "./hooks/useDismissedSuggestions.deps";
 import { useSelectedFileContent } from "./hooks/useSelectedFileContent";
 import { useUiPanels } from "./hooks/useUiPanels";
+import { useThreadActions } from "./hooks/useThreadActions";
 import { sampleDoc } from "./sample";
 import { DEV_ROLE_SWITCH, errMessage, installUrl, STATUS_LABEL, type ViewMode } from "./uiHelpers";
 
@@ -165,8 +166,19 @@ export function App() {
   const { drafts, replaceAndPersist: replaceAndPersistDrafts, reset: resetDrafts } = draftsApi;
   const dismissedApi = useDismissedSuggestions(ref, productionDismissedDeps);
   const { dismissed, setDismissed, setDecision, reset: resetDismissed } = dismissedApi;
-  const [replyTo, setReplyTo] = useState<string | null>(null);
-  const [replyText, setReplyText] = useState("");
+  const threadActions = useThreadActions();
+  const {
+    replyTo,
+    replyText,
+    setReplyText,
+    startReply,
+    cancelReply,
+    emphasizedThreadId,
+    setEmphasizedThreadId,
+    clearEmphasis,
+    resolvingId,
+    setResolvingId,
+  } = threadActions;
   const suggestionEditsApi = useSuggestionEdits(ref, productionSuggestionEditsDeps);
   const {
     suggestionEdits,
@@ -210,9 +222,6 @@ export function App() {
   const [reviewFilter, setReviewFilter] = useState<Set<ReviewFacet>>(
     () => new Set<ReviewFacet>(["pending", "submitted"]),
   );
-  const [emphasizedThreadId, setEmphasizedThreadId] = useState<string | null>(null);
-  // The thread whose resolve/reopen request is in flight, for in-place button feedback.
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const uiPanels = useUiPanels();
   const {
     showSubmitConfirm,
@@ -419,7 +428,7 @@ export function App() {
   // emphasized item, so drop the emphasis. Programmatic jump/emphasis selections
   // set suppressNextAnchor and never set `anchor`, so they don't trigger this.
   useEffect(() => {
-    if (anchor) setEmphasizedThreadId(null);
+    if (anchor) clearEmphasis();
   }, [anchor]);
 
   // Restore + device-flow polling now live in useAuthFlow.
@@ -776,8 +785,7 @@ export function App() {
     };
     const next = [...drafts, draft];
     await replaceAndPersistDrafts(next);
-    setReplyText("");
-    setReplyTo(null);
+    cancelReply();
   };
 
   const toggleFacet = (f: ReviewFacet) =>
@@ -1323,10 +1331,7 @@ export function App() {
       setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"])); // make sure the emphasized thread is visible
     }
     setEmphasizedThreadId(hit.id);
-    if (replyTo !== hit.id) {
-      setReplyTo(hit.id);
-      setReplyText("");
-    }
+    if (replyTo !== hit.id) startReply(hit.id);
     alignItemToText(hit.id);
   };
 
@@ -1342,7 +1347,7 @@ export function App() {
       setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"])); // make sure the emphasized suggestion is visible
     }
     setEmphasizedThreadId(cid);
-    setReplyTo(null);
+    cancelReply();
     alignItemToText(cid);
   };
 
@@ -1418,10 +1423,7 @@ export function App() {
   const openThread = (t: ReviewThread) => {
     jumpToThread(t);
     setEmphasizedThreadId(t.id);
-    if (replyTo !== t.id) {
-      setReplyTo(t.id);
-      setReplyText("");
-    }
+    if (replyTo !== t.id) startReply(t.id);
     alignItemToText(t.id);
   };
 
@@ -1627,14 +1629,7 @@ export function App() {
               >
                 Add
               </button>
-              <button
-                type="button"
-                className="btn btn--sm"
-                onClick={() => {
-                  setReplyTo(null);
-                  setReplyText("");
-                }}
-              >
+              <button type="button" className="btn btn--sm" onClick={cancelReply}>
                 Cancel
               </button>
             </div>
