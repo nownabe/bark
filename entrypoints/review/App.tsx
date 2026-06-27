@@ -83,10 +83,8 @@ import {
   clearAcceptedDecisions,
   discardAllDrafts,
   listDismissedSuggestions,
-  listDrafts,
   listSuggestionEdits,
   saveDismissedSuggestions,
-  saveDrafts,
   saveSuggestionEdits,
   type PendingDraft,
   type SuggestionDecision,
@@ -101,6 +99,8 @@ import { RepositoryProvider } from "../../lib/pr/react";
 import { useAuthFlow } from "./hooks/useAuthFlow";
 import { productionAuthDeps } from "./hooks/useAuthFlow.deps";
 import { usePullRequestData } from "./hooks/usePullRequestData";
+import { useDrafts } from "./hooks/useDrafts";
+import { productionDraftsDeps } from "./hooks/useDrafts.deps";
 import { sampleDoc } from "./sample";
 import { DEV_ROLE_SWITCH, errMessage, installUrl, STATUS_LABEL, type ViewMode } from "./uiHelpers";
 
@@ -161,7 +161,8 @@ export function App() {
   // (lib/reanchor diff path). Populated lazily; a missing entry just means
   // re-anchoring falls back to quote search.
   const [oldSources, setOldSources] = useState<Record<string, string>>({});
-  const [drafts, setDrafts] = useState<PendingDraft[]>([]);
+  const draftsApi = useDrafts(ref, productionDraftsDeps);
+  const { drafts, replaceAndPersist: replaceAndPersistDrafts, reset: resetDrafts } = draftsApi;
   const [dismissed, setDismissed] = useState<Record<string, SuggestionDecision>>({});
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
@@ -524,10 +525,7 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comments, client, headSha, ref?.owner, ref?.repo, ref?.number]);
 
-  useEffect(() => {
-    if (ref) listDrafts(ref).then(setDrafts);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ref?.owner, ref?.repo, ref?.number]);
+  // Drafts restore + persistence now live in useDrafts.
 
   // All files' persisted suggestion edits, so the submit scope spans every file.
   useEffect(() => {
@@ -695,8 +693,7 @@ export function App() {
           : undefined,
     };
     const next = [...drafts, draft];
-    setDrafts(next);
-    await saveDrafts(ref, next);
+    await replaceAndPersistDrafts(next);
     setCommentBody("");
     collapseSelection(); // deselect; the pending highlight stays
     setAnchor(null);
@@ -813,8 +810,7 @@ export function App() {
           : undefined,
     };
     const next = [...drafts, draft];
-    setDrafts(next);
-    await saveDrafts(ref, next);
+    await replaceAndPersistDrafts(next);
     setReplyText("");
     setReplyTo(null);
   };
@@ -901,8 +897,7 @@ export function App() {
 
   const removeDraft = async (cidToRemove: string) => {
     const next = drafts.filter((d) => d.cid !== cidToRemove);
-    setDrafts(next);
-    if (ref) await saveDrafts(ref, next);
+    await replaceAndPersistDrafts(next);
   };
 
   // Materialize the reviewer's live suggestion edits into real drafts at submit
@@ -982,8 +977,7 @@ export function App() {
       for (const body of issueBodies) {
         await client.createIssueComment(ref, body);
       }
-      setDrafts([]);
-      await saveDrafts(ref, []);
+      await replaceAndPersistDrafts([]);
       setSource(baseSource); // live suggestion edits are now submitted
       setSuggestionComments({});
       // All files' suggestions just went out, so drop every persisted edit (not
@@ -1188,8 +1182,7 @@ export function App() {
 
       // Cleanup: drop drafts, persisted edits, and the just-applied accepted
       // decisions (rejected entries persist — they keep the suggestion hidden).
-      setDrafts([]);
-      await saveDrafts(ref, []);
+      await replaceAndPersistDrafts([]);
       setSuggestionEdits({});
       pendingEditWrites.current = {};
       if (editSaveTimer.current) {
@@ -1267,6 +1260,7 @@ export function App() {
   const handleClearToken = async () => {
     await clearAuthToken();
     resetPrData();
+    resetDrafts();
     setSelectedPath(null);
     setSource(ref ? "" : sampleDoc);
     setBaseSource(ref ? "" : sampleDoc);
@@ -1338,7 +1332,7 @@ export function App() {
   // suggestion decisions stay — they keep the suggestion hidden, not pending.
   const discardAllPending = async () => {
     setShowDiscardConfirm(false);
-    setDrafts([]);
+    resetDrafts();
     setSource(baseSource);
     setSuggestionComments({});
     setSuggestionEdits({});
