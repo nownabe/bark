@@ -101,6 +101,7 @@ import { useSuggestionEdits } from "./hooks/useSuggestionEdits";
 import { productionSuggestionEditsDeps } from "./hooks/useSuggestionEdits.deps";
 import { useDismissedSuggestions } from "./hooks/useDismissedSuggestions";
 import { productionDismissedDeps } from "./hooks/useDismissedSuggestions.deps";
+import { useSelectedFileContent } from "./hooks/useSelectedFileContent";
 import { sampleDoc } from "./sample";
 import { DEV_ROLE_SWITCH, errMessage, installUrl, STATUS_LABEL, type ViewMode } from "./uiHelpers";
 
@@ -142,8 +143,6 @@ export function App() {
   } = prData;
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [source, setSource] = useState<string>(ref ? "" : sampleDoc);
-  const [baseSource, setBaseSource] = useState<string>(ref ? "" : sampleDoc);
 
   const [role, setRole] = useState<Role>("reviewer");
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
@@ -178,6 +177,35 @@ export function App() {
     discardAllPersisted: discardAllPersistedEdits,
     reset: resetSuggestionEdits,
   } = suggestionEditsApi;
+  const fileSourceApi = useSelectedFileContent(
+    client,
+    ref,
+    headSha,
+    selectedPath,
+    ref ? "" : sampleDoc,
+    { listSuggestionEdits },
+    {
+      onLoadingChange: setLoading,
+      onError: setError,
+      onLoaded: ({ path, text, edit }) => {
+        setSuggestionComments(edit?.comments ?? {});
+        // Normalise the persisted entry against the fresh base so legacy
+        // edits stored before `base` existed remain submittable.
+        if (edit && edit.source !== text) {
+          setSuggestionEdits((prev) => ({
+            ...prev,
+            [path]: { source: edit.source, base: text, comments: edit.comments ?? {} },
+          }));
+        }
+      },
+      onCleanup: () => {
+        // Persist any pending edit before switching files / unmounting
+        // so a quick reload right after an edit still restores it.
+        void flushSuggestionEdits();
+      },
+    },
+  );
+  const { source, baseSource, setSource, setBaseSource } = fileSourceApi;
   const [reviewFilter, setReviewFilter] = useState<Set<ReviewFacet>>(
     () => new Set<ReviewFacet>(["pending", "submitted"]),
   );
@@ -417,49 +445,7 @@ export function App() {
     if (viewerLogin && pull) setRole(deriveRole(viewerLogin, pull.author));
   }, [viewerLogin, pull]);
 
-  useEffect(() => {
-    if (!client || !ref || !headSha || !selectedPath) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    (async () => {
-      try {
-        const text = await client.getFileContent(ref, selectedPath, headSha);
-        // Restore any persisted suggestion edit for this file so pending
-        // suggestions survive a reload (read fresh to avoid a load/mount race).
-        const edits = await listSuggestionEdits(ref);
-        if (!cancelled) {
-          // Per-file edits persist for both roles: reviewer's live suggestions
-          // AND author's pending edits (incl. accepted suggestions) come back
-          // through the same map after a reload.
-          const edit = edits[selectedPath];
-          setBaseSource(text);
-          setSource(edit?.source ?? text);
-          setSuggestionComments(edit?.comments ?? {});
-          // Normalize this file's map entry against the freshly fetched base so it
-          // stays in sync with the editor and so legacy edits stored before `base`
-          // existed become submittable (the submit scope reads the map).
-          if (edit && edit.source !== text) {
-            setSuggestionEdits((prev) => ({
-              ...prev,
-              [selectedPath]: { source: edit.source, base: text, comments: edit.comments ?? {} },
-            }));
-          }
-        }
-      } catch (e) {
-        if (!cancelled) setError(errMessage(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      // Persist any pending edit before switching files / unmounting, so a quick
-      // reload right after an edit still restores the pending suggestion.
-      void flushSuggestionEdits();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, headSha, selectedPath, ref?.owner, ref?.repo, ref?.number]);
+  // Per-file content load now lives in useSelectedFileContent.
 
   // Fetch the PR's review + issue comments and rebuild local state. Exposed as a
   // callback so actions that mutate comments on GitHub (resolve / reopen) can
