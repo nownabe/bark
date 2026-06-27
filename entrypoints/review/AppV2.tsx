@@ -219,6 +219,11 @@ function ThreadItem({
         {group.comments.map((view) => (
           <li key={view.comment.id} className="appv2__comment">
             <span className="appv2__author">@{view.comment.author.login}</span>
+            <span className="appv2__location" data-testid={`location-${view.comment.id}`}>
+              {view.comment.path
+                ? `${view.comment.path}:L${view.comment.anchor.range.sl}`
+                : "(no file)"}
+            </span>
             <span className="appv2__body">{view.comment.body}</span>
             {view.isMyDraft && <span className="appv2__badge appv2__badge--draft">draft</span>}
             {view.kind === "suggestion" && (

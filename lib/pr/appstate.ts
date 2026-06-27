@@ -134,10 +134,24 @@ function buildThreadGroups(
       byThread.set(view.comment.threadId, [view]);
     }
   }
-  return threads.map((thread) => ({
+  const knownIds = new Set(threads.map((t) => t.id));
+  const groups: ThreadGroup[] = threads.map((thread) => ({
     thread,
     comments: byThread.get(thread.id) ?? [],
   }));
+  // Synthesise a group for any threadId that owns comments but has no
+  // corresponding Thread entity. This happens for foreign review and
+  // foreign issue comments — they carry no Bark metadata, so neither
+  // remote-fetcher's fetchThreads nor any local upsert produced a
+  // matching Thread. Without this they would be invisible in the UI.
+  for (const [threadId, comments] of byThread) {
+    if (knownIds.has(threadId)) continue;
+    groups.push({
+      thread: { id: threadId, state: "synced", resolved: false },
+      comments,
+    });
+  }
+  return groups;
 }
 
 // ---- Role ---------------------------------------------------------------

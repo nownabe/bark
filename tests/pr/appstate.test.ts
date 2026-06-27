@@ -240,4 +240,37 @@ describe("appstate — deriveAppState: threadGroups", () => {
       comments: [],
     });
   });
+
+  test("comments whose threadId has no matching Thread surface in synthetic groups", () => {
+    // Foreign review/issue comments arrive with a threadId that does not
+    // match anything in LocalState.threads (the fetchThreads side uses a
+    // GraphQL node id while toCommentFromReview synthesises a per-comment
+    // id). Without a synthetic group they would be invisible in the UI.
+    const foreignReview = comment({
+      id: "foreign-review-42",
+      threadId: "foreign-thread-review-42",
+      path: "test.md",
+      anchor: { sha: "", range: { sl: 5, sc: 1, el: 5, ec: 1 }, quote: "" },
+    });
+    const foreignIssue = comment({
+      id: "foreign-issue-50",
+      threadId: "foreign-thread-issue-50",
+      path: "",
+      anchor: { sha: "", range: { sl: 1, sc: 1, el: 1, ec: 1 }, quote: "" },
+    });
+    const out = deriveAppState(
+      localState({ comments: [foreignReview, foreignIssue], threads: [] }),
+      remoteState({ pullRequest: pr() }),
+      { isInDiff: () => false },
+    );
+
+    const findGroup = (tid: string) => out.threadGroups.find((g) => g.thread.id === tid);
+    expect(findGroup("foreign-thread-review-42")?.thread.state).toBe("synced");
+    expect(findGroup("foreign-thread-review-42")?.comments.map((c) => c.comment.id)).toEqual([
+      "foreign-review-42",
+    ]);
+    expect(findGroup("foreign-thread-issue-50")?.comments.map((c) => c.comment.id)).toEqual([
+      "foreign-issue-50",
+    ]);
+  });
 });
