@@ -82,9 +82,7 @@ import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
 import {
   clearAcceptedDecisions,
   discardAllDrafts,
-  listDismissedSuggestions,
   listSuggestionEdits,
-  saveDismissedSuggestions,
   type PendingDraft,
   type SuggestionDecision,
 } from "../../lib/drafts";
@@ -101,6 +99,8 @@ import { useDrafts } from "./hooks/useDrafts";
 import { productionDraftsDeps } from "./hooks/useDrafts.deps";
 import { useSuggestionEdits } from "./hooks/useSuggestionEdits";
 import { productionSuggestionEditsDeps } from "./hooks/useSuggestionEdits.deps";
+import { useDismissedSuggestions } from "./hooks/useDismissedSuggestions";
+import { productionDismissedDeps } from "./hooks/useDismissedSuggestions.deps";
 import { sampleDoc } from "./sample";
 import { DEV_ROLE_SWITCH, errMessage, installUrl, STATUS_LABEL, type ViewMode } from "./uiHelpers";
 
@@ -163,7 +163,8 @@ export function App() {
   const [oldSources, setOldSources] = useState<Record<string, string>>({});
   const draftsApi = useDrafts(ref, productionDraftsDeps);
   const { drafts, replaceAndPersist: replaceAndPersistDrafts, reset: resetDrafts } = draftsApi;
-  const [dismissed, setDismissed] = useState<Record<string, SuggestionDecision>>({});
+  const dismissedApi = useDismissedSuggestions(ref, productionDismissedDeps);
+  const { dismissed, setDismissed, setDecision, reset: resetDismissed } = dismissedApi;
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const suggestionEditsApi = useSuggestionEdits(ref, productionSuggestionEditsDeps);
@@ -526,11 +527,8 @@ export function App() {
   // Drafts restore + persistence now live in useDrafts.
   // Suggestion-edits restore + persistence now live in useSuggestionEdits.
 
-  // author's accept/reject decisions on submitted suggestions (R3).
-  useEffect(() => {
-    if (ref) listDismissedSuggestions(ref).then(setDismissed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ref?.owner, ref?.repo, ref?.number]);
+  // Author's accept/reject decisions (R3) restore + persistence now live
+  // in useDismissedSuggestions.
 
   // Push the base text into CM for tracked changes (reviewer suggest).
   useEffect(() => {
@@ -856,11 +854,7 @@ export function App() {
   };
 
   // author: record an accept/reject decision on a submitted suggestion.
-  const setDecision = async (id: number, decision: SuggestionDecision) => {
-    const next = { ...dismissed, [id]: decision };
-    setDismissed(next);
-    if (ref) await saveDismissedSuggestions(ref, next);
-  };
+  // (setDecision now lives in useDismissedSuggestions.)
 
   // author: accept a suggestion. Stage two things:
   //   - apply the replacement to the editor source so the author sees the change
@@ -1243,6 +1237,7 @@ export function App() {
     resetPrData();
     resetDrafts();
     resetSuggestionEdits();
+    resetDismissed();
     setSelectedPath(null);
     setSource(ref ? "" : sampleDoc);
     setBaseSource(ref ? "" : sampleDoc);
