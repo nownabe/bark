@@ -30,6 +30,7 @@ import { SelectionComposer } from "./components/SelectionComposer";
 import { SelectionBubble } from "./components/SelectionBubble";
 import { LoginGate } from "./components/LoginGate";
 import { SuggestionDiff } from "./components/SuggestionDiff";
+import { Topbar } from "./components/Topbar";
 import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import { DiscardAllConfirmModal } from "./components/DiscardAllConfirmModal";
@@ -108,14 +109,7 @@ import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { PullRequestRepository } from "../../lib/pr/repository";
 import { RepositoryProvider } from "../../lib/pr/react";
 import { sampleDoc } from "./sample";
-import {
-  DEV_ROLE_SWITCH,
-  errMessage,
-  installUrl,
-  PR_STATUS_LABEL,
-  STATUS_LABEL,
-  type ViewMode,
-} from "./uiHelpers";
+import { DEV_ROLE_SWITCH, errMessage, installUrl, STATUS_LABEL, type ViewMode } from "./uiHelpers";
 
 export function App() {
   const params = new URLSearchParams(window.location.search);
@@ -1906,214 +1900,43 @@ export function App() {
 
   const reviewTree = (
     <div className="app">
-      <header className="topbar">
-        <span className="topbar__brand">
-          <img className="topbar__logo" src="/icon/128.png" alt="" />
-          Bark
-        </span>
-        {ref ? (
-          <>
-            <div className="topbar__pr-head">
-              <span className="topbar__pr-headline">
-                <a
-                  className="topbar__pr-title"
-                  href={`https://github.com/${owner}/${repo}/pull/${prNum}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={pull?.title ?? "Open this pull request on GitHub"}
-                >
-                  {pull?.title ?? `${owner}/${repo} #${prNum}`}
-                </a>
-                {prStatus ? (
-                  <span className={`badge badge--pr badge--pr-${prStatus}`}>
-                    {PR_STATUS_LABEL[prStatus]}
-                  </span>
-                ) : null}
-                {pull ? (
-                  <button
-                    type="button"
-                    ref={prInfoBtnRef}
-                    className="topbar__info-btn"
-                    title="Pull request details"
-                    aria-label="Pull request details"
-                    onClick={() => setShowPrInfo((v) => !v)}
-                  >
-                    ℹ
-                  </button>
-                ) : null}
-              </span>
-              <span className="topbar__pr-sub">
-                {owner}/{repo} #{prNum}
-                {headSha ? <> · @{headSha.slice(0, 7)}</> : null}
-              </span>
-            </div>
-            {files.length > 0 ? (
-              <select
-                className="input"
-                value={selectedPath ?? ""}
-                onChange={(e) => {
-                  setSelectedPath(e.target.value);
-                  setAnchor(null);
-                  setSelection(null);
-                  setBubblePos(null);
-                }}
-              >
-                {files.map((f) => (
-                  <option key={f.path} value={f.path}>
-                    {f.path}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-            <span className="topbar__spacer" />
-            <div className="seg">
-              <button
-                type="button"
-                aria-pressed={viewMode === "preview"}
-                className="seg--dark"
-                onClick={() => setViewMode("preview")}
-              >
-                Preview
-              </button>
-              <button
-                type="button"
-                aria-pressed={viewMode === "raw"}
-                className="seg--dark"
-                onClick={() => setViewMode("raw")}
-              >
-                Raw
-              </button>
-            </div>
-            <>
-              <button
-                type="button"
-                className="btn btn--icon"
-                onClick={() => setShowDiscardConfirm(true)}
-                disabled={loading || activePendingItems.length === 0}
-                aria-label="Discard all pending items"
-                title={
-                  role === "author"
-                    ? "Discard all pending items (comments, replies, accepted suggestions, edits)"
-                    : "Discard all pending review items (comments and suggestions) across every file"
-                }
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M3 6h18" />
-                  <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
-                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                  <line x1="10" x2="10" y1="11" y2="17" />
-                  <line x1="14" x2="14" y1="11" y2="17" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="btn btn--primary"
-                onClick={() => setShowSubmitConfirm(true)}
-                disabled={loading || activePendingItems.length === 0}
-                title={
-                  role === "author"
-                    ? "Review the staged comments, replies, accepted suggestions, and edits before submitting"
-                    : "Review the pending items from all files before submitting"
-                }
-              >
-                {role === "author"
-                  ? `Submit (${activePendingItems.length})`
-                  : `Submit review (${activePendingItems.length})`}
-              </button>
-            </>
-            <button
-              type="button"
-              ref={helpBtnRef}
-              className="help-btn"
-              title="Help"
-              aria-label="Help"
-              onClick={() => setShowHelp((v) => !v)}
-            >
-              ?
-            </button>
-          </>
-        ) : (
-          <span className="topbar__meta">sample document (no PR specified)</span>
-        )}
-        {showPrInfo && pull ? (
-          <div className="popover popover--pr" role="dialog" ref={prInfoRef}>
-            <h3>{pull.title || "(no title)"}</h3>
-            <div className="pr-info__meta">
-              <img
-                className="comment__avatar"
-                src={avatarUrl(pull.author, 40)}
-                alt=""
-                width={18}
-                height={18}
-                loading="lazy"
-              />
-              <span className="comment__author">{pull.author}</span>
-              {prStatus ? (
-                <span className={`badge badge--pr badge--pr-${prStatus}`}>
-                  {PR_STATUS_LABEL[prStatus]}
-                </span>
-              ) : null}
-            </div>
-            <div className="pr-info__body">{pull.body || "(no description)"}</div>
-          </div>
-        ) : null}
-        {showHelp ? (
-          <div className="popover" role="dialog" ref={helpRef}>
-            <h3>How to use</h3>
-            <ul>
-              <li>The body is always editable (the Markdown source is canonical).</li>
-              <li>
-                <strong>Preview / Raw</strong>: switch the view (both editable).
-              </li>
-              <li>
-                <strong>author</strong>: edit the body, accept reviewer suggestions, comment, and
-                reply — all staged locally. <strong>Submit</strong> posts the comments/replies and
-                creates one commit with every edit and every accepted suggestion in one go.
-              </li>
-              <li>
-                <strong>reviewer</strong>: select text to comment. Editing the body is queued
-                automatically as a suggestion (optionally annotate it with a comment).
-              </li>
-              <li>
-                Pending and submitted items share one list; filter it from the list header. Send all
-                pending items with <strong>Submit</strong> in the top bar — you confirm them first.
-              </li>
-              <li>
-                Click a side item to jump to and highlight its place in the body. You can reply
-                within a thread.
-              </li>
-              <li>
-                Press <strong>⌘/Ctrl+Enter</strong> in a comment or reply box to add it (same as the
-                Add button).
-              </li>
-            </ul>
-            {token ? (
-              <div className="popover__footer">
-                <button
-                  type="button"
-                  className="btn btn--sm btn--danger"
-                  onClick={() => {
-                    handleClearToken();
-                    setShowHelp(false);
-                  }}
-                >
-                  Delete token
-                </button>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </header>
+      <Topbar
+        prRef={ref}
+        owner={owner}
+        repo={repo}
+        prNum={prNum}
+        pull={pull}
+        prStatus={prStatus}
+        headSha={headSha}
+        files={files}
+        selectedPath={selectedPath}
+        viewMode={viewMode}
+        loading={loading}
+        pendingCount={activePendingItems.length}
+        role={role}
+        token={token}
+        showPrInfo={showPrInfo}
+        showHelp={showHelp}
+        prInfoBtnRef={prInfoBtnRef}
+        prInfoRef={prInfoRef}
+        helpBtnRef={helpBtnRef}
+        helpRef={helpRef}
+        onSelectPath={(path) => {
+          setSelectedPath(path);
+          setAnchor(null);
+          setSelection(null);
+          setBubblePos(null);
+        }}
+        onChangeViewMode={setViewMode}
+        onAskSubmit={() => setShowSubmitConfirm(true)}
+        onAskDiscardAll={() => setShowDiscardConfirm(true)}
+        onTogglePrInfo={() => setShowPrInfo((v) => !v)}
+        onToggleHelp={() => setShowHelp((v) => !v)}
+        onClearToken={() => {
+          handleClearToken();
+          setShowHelp(false);
+        }}
+      />
 
       {loading ? <p className="notice notice--muted">Loading…</p> : null}
       {error ? <p className="notice notice--error">{error}</p> : null}
