@@ -862,9 +862,12 @@ export function App() {
     });
 
   // Two paths share the same UI affordance:
-  //  - Bark-authored thread (root.meta exists): post a resolution-event
-  //    marker comment (Bark's source of truth for resolved state) AND
-  //    flip GitHub's native resolve via GraphQL.
+  //  - Bark-authored thread (root.meta exists): route through Repository.
+  //    setThreadResolved (L6b) — the Reconciler flips Thread.resolved and
+  //    the Executor calls GraphQL resolveReviewThread / unresolveReviewThread
+  //    once the sync cycle runs. No legacy marker-comment is posted any
+  //    more (ADR 0001 §3 puts resolved state on the Thread entity, not in
+  //    a comment body). Falls back to legacy if Repository isn't ready.
   //  - Foreign in-diff review thread (root present, meta null, line known):
   //    flip GitHub's native resolve only. No marker comment to post —
   //    there's no Bark identity to point at.
@@ -878,27 +881,34 @@ export function App() {
     try {
       if (root.meta) {
         // ---- Bark-authored path (A) -------------------------------------
-        if (!headSha) return;
-        const evMeta: CommentMetadata = {
-          cid: crypto.randomUUID(),
-          path: root.meta.path,
-          range: root.meta.range,
-          quote: root.meta.quote,
-          sha: headSha,
-          thread: t.id,
-          kind: "comment",
-          event: resolved ? "resolve" : "unresolve",
-        };
-        const body = embedMetadata(resolved ? "Resolved via Bark." : "Reopened via Bark.", evMeta);
-        if (root.source === "review") {
-          await client.replyToReviewComment(ref, root.id, body);
-          const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
-          if (nodeId) {
-            if (resolved) await client.resolveReviewThread(nodeId);
-            else await client.unresolveReviewThread(nodeId);
+        if (prRepository) {
+          await prRepository.setThreadResolved(t.id, resolved);
+        } else if (headSha) {
+          // Pre-bootstrap fallback: legacy marker comment + GraphQL.
+          const evMeta: CommentMetadata = {
+            cid: crypto.randomUUID(),
+            path: root.meta.path,
+            range: root.meta.range,
+            quote: root.meta.quote,
+            sha: headSha,
+            thread: t.id,
+            kind: "comment",
+            event: resolved ? "resolve" : "unresolve",
+          };
+          const body = embedMetadata(
+            resolved ? "Resolved via Bark." : "Reopened via Bark.",
+            evMeta,
+          );
+          if (root.source === "review") {
+            await client.replyToReviewComment(ref, root.id, body);
+            const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
+            if (nodeId) {
+              if (resolved) await client.resolveReviewThread(nodeId);
+              else await client.unresolveReviewThread(nodeId);
+            }
+          } else {
+            await client.createIssueComment(ref, body);
           }
-        } else {
-          await client.createIssueComment(ref, body);
         }
       } else if (root.source === "review") {
         // ---- Foreign review path (B) ------------------------------------
