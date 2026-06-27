@@ -104,6 +104,10 @@ import {
 } from "../../lib/storage";
 import { pollForToken, requestDeviceAuthorization, type DeviceAuthorization } from "../../lib/auth";
 import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/metadata";
+import { browser } from "wxt/browser";
+import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
+import type { PullRequestRepository } from "../../lib/pr/repository";
+import { RepositoryProvider } from "../../lib/pr/react";
 import { sampleDoc } from "./sample";
 
 type ViewMode = "raw" | "preview";
@@ -233,6 +237,32 @@ export function App() {
   const suppressNextAnchor = useRef(false);
 
   const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
+
+  // New data layer (lib/pr/) — phase L1 of the legacy-on-new-data-layer plan.
+  // We bootstrap a Repository as soon as we have a token + PR ref so the
+  // review tree can read from AppState in follow-up phases. Legacy data
+  // paths are untouched; if bootstrap fails, the rest of App keeps working
+  // through its own fetchers.
+  const [prRepository, setPrRepository] = useState<PullRequestRepository | null>(null);
+  useEffect(() => {
+    if (!token || !ref) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { repository } = await bootstrapPullRequest({
+          token,
+          prRef: ref,
+          storage: browser.storage.local,
+        });
+        if (!cancelled) setPrRepository(repository);
+      } catch {
+        // Silent — legacy App still works without the new data layer.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, ref?.owner, ref?.repo, ref?.number]);
   const lineStarts = useMemo(() => buildLineIndex(source), [source]);
   const diffRanges = useMemo(
     () => parseRightRanges(files.find((f) => f.path === selectedPath)?.patch),
@@ -1903,7 +1933,7 @@ export function App() {
     );
   };
 
-  return (
+  const reviewTree = (
     <div className="app">
       <header className="topbar">
         <span className="topbar__brand">
@@ -2307,5 +2337,15 @@ export function App() {
         </div>
       ) : null}
     </div>
+  );
+
+  // Phase L1: when the new-data-layer Repository is ready, wrap the tree
+  // so descendants can call useAppState / useRepository. Before bootstrap
+  // completes the tree still renders — it just doesn't have the provider
+  // yet, which is fine because nothing inside reads from it today.
+  return prRepository ? (
+    <RepositoryProvider repo={prRepository}>{reviewTree}</RepositoryProvider>
+  ) : (
+    reviewTree
   );
 }
