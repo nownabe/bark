@@ -149,6 +149,58 @@ describe("bootstrap — full happy path", () => {
     expect(drafts.map((c) => c.id)).toEqual(["draft-1"]);
   });
 
+  test("comments with an empty anchor.sha (foreign) are skipped from fileContentTargets", async () => {
+    // Foreign comments arrive from remote-fetcher with `anchor.sha = ""`
+    // because they were not authored by Bark and carry no metadata. After
+    // mergeRemoteIntoLocal they live in LocalState too, so a naive
+    // anchorTargets() would feed `{sha:"", path:"foo.md"}` to
+    // fetchFileContent — which then hits `/contents/foo.md?ref=` and 404s.
+    const storage = fakeStorage();
+    await storage.set({
+      "pr:o/r#7:state": {
+        comments: [
+          {
+            id: "foreign-review-42",
+            state: "synced",
+            remoteId: 42,
+            threadId: "foreign-thread-review-42",
+            body: "old foreign",
+            author: { login: "carol" },
+            path: "test.md",
+            anchor: { sha: "", range: { sl: 1, sc: 1, el: 1, ec: 1 }, quote: "" },
+          },
+        ],
+        threads: [],
+        fileEdits: [],
+        fileContents: [],
+        pullRequest: null,
+        viewer: null,
+      },
+    });
+
+    const contentUrls: string[] = [];
+    const fetch = makeFetch(async (req) => {
+      if (req.url.includes("/contents/")) {
+        contentUrls.push(req.url);
+        return jsonResponse({ content: btoa(""), encoding: "base64" });
+      }
+      if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
+      if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
+      if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      if (req.url.includes("/pulls/7/files")) return jsonResponse([]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+
+    await bootstrapPullRequest({ token: "t", prRef: PR, storage, fetch });
+
+    expect(contentUrls).toEqual([]);
+  });
+
   test("refresh() rebuilds isInDiff so the next sync routes correctly", async () => {
     const storage = fakeStorage();
     let phase = "initial";

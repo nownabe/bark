@@ -78,11 +78,16 @@ export async function bootstrapPullRequest(
   return { repository, refresh };
 }
 
-/** Unique `(anchor.sha, path)` pairs needed for re-anchoring derivation. */
+/** Unique `(anchor.sha, path)` pairs needed for re-anchoring derivation.
+ *  Foreign comments (not authored by Bark) carry no metadata and arrive
+ *  with `anchor.sha === ""`; some also have `path === ""` (issue
+ *  comments). Skip them — fetching `/contents/<path>?ref=` would 404,
+ *  and re-anchoring needs a concrete sha anyway. */
 function anchorTargets(local: LocalState): Array<{ sha: string; path: string }> {
   const seen = new Set<string>();
   const out: Array<{ sha: string; path: string }> = [];
   for (const c of local.comments) {
+    if (!c.anchor.sha || !c.path) continue;
     const k = `${c.anchor.sha}\0${c.path}`;
     if (!seen.has(k)) {
       seen.add(k);
