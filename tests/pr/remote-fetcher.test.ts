@@ -147,6 +147,32 @@ describe("remote-fetcher — fetchComments", () => {
     expect(out[0]?.id).toBe("foreign-review-200");
     expect(out[0]?.body).toBe("Foreign body");
     expect(out[0]?.anchor.quote).toBe("");
+    // When GitHub gives us a line number (in-diff comment), preserve it.
+    expect(out[0]?.anchor.range.el).toBe(10);
+  });
+
+  test("foreign review comment with line=null encodes 'no line' as range.el = 0", async () => {
+    // A review comment whose original line no longer exists in the head
+    // (commit history moved past it) — GitHub returns `line: null`. The
+    // UI uses range.el === 0 to mean "no line", so it can either hide
+    // the comment (Bark is line-bound only) or render it separately.
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.includes("/pulls/7/comments"))
+        return jsonResponse([
+          {
+            id: 201,
+            body: "Outdated foreign",
+            path: "src/x.md",
+            line: null,
+            user: { login: "carol", avatar_url: "" },
+          },
+        ]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchComments({ token: "t", fetch }, PR);
+    expect(out[0]?.anchor.range.sl).toBe(0);
+    expect(out[0]?.anchor.range.el).toBe(0);
   });
 
   test("a reply resolves parentLocalId from the parent's metadata when available", async () => {

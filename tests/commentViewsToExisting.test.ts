@@ -113,6 +113,25 @@ describe("commentViewsToExisting — foreign", () => {
     });
   });
 
+  test("foreign-review with range.el = 0 (no line known) emits no 'line' field", () => {
+    // remote-fetcher sets el=0 when GitHub's line is null (the comment's
+    // original line no longer exists in the head — outdated). The adapter
+    // must mirror the legacy `c.line ?? undefined` behaviour for the
+    // line-bound UI to skip the comment.
+    const v = makeView({
+      id: "foreign-review-201",
+      remoteId: 201,
+      threadId: "foreign-thread-review-201",
+      path: "doc.md",
+      anchor: { sha: "", range: { sl: 0, sc: 1, el: 0, ec: 1 }, quote: "" },
+      author: { login: "carol" },
+      body: "Outdated foreign",
+    });
+    const out = commentViewsToExisting([v])[0];
+    expect(out?.path).toBe("doc.md");
+    expect(out?.line).toBeUndefined();
+  });
+
   test("foreign-issue-* → source 'issue', meta=null, no path/line fields", () => {
     const v = makeView({
       id: "foreign-issue-50",
