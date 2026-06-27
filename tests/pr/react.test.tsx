@@ -5,13 +5,7 @@ if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
 import { describe, expect, test } from "bun:test";
 import { act, render, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import {
-  RepositoryProvider,
-  useAppState,
-  useLocalState,
-  useRemoteState,
-  useRepository,
-} from "../../lib/pr/react";
+import { RepositoryProvider, useAppState, useRepository } from "../../lib/pr/react";
 import { PullRequestRepository } from "../../lib/pr/repository";
 import { InMemoryStorageAdapter } from "../../lib/pr/storage";
 import type { Transport } from "../../lib/pr/transport";
@@ -104,31 +98,6 @@ describe("react — useRepository", () => {
   });
 });
 
-describe("react — useLocalState", () => {
-  test("returns the current LocalState and updates after a mutation", async () => {
-    const repo = makeRepo();
-    const { result } = renderHook(() => useLocalState(), { wrapper: wrap(repo) });
-    expect(result.current.comments).toEqual([]);
-    await act(async () => {
-      await repo.upsertComment(comment());
-    });
-    expect(result.current.comments).toHaveLength(1);
-    expect(result.current.comments[0]?.id).toBe("c1");
-  });
-});
-
-describe("react — useRemoteState", () => {
-  test("returns the current RemoteState and updates on setRemoteState", async () => {
-    const repo = makeRepo();
-    const { result } = renderHook(() => useRemoteState(), { wrapper: wrap(repo) });
-    expect(result.current.pullRequest).toBeNull();
-    await act(async () => {
-      await repo.setRemoteState({ ...repo.getRemoteState(), pullRequest: pr() });
-    });
-    expect(result.current.pullRequest?.headSha).toBe("h");
-  });
-});
-
 describe("react — useAppState", () => {
   test("derives AppState from LocalState + RemoteState", async () => {
     const repo = makeRepo();
@@ -156,11 +125,12 @@ describe("react — useAppState", () => {
 });
 
 describe("react — RepositoryProvider integration", () => {
-  test("children rendered with the Repository can subscribe", () => {
+  test("children rendered with the Repository can subscribe via useAppState", () => {
     const repo = makeRepo();
+    const ctx = { isInDiff: () => false };
     function Inner() {
-      const local = useLocalState();
-      return <div data-count={local.comments.length} />;
+      const state = useAppState(ctx);
+      return <div data-count={state.commentViews.size} />;
     }
     const { container } = render(
       <RepositoryProvider repo={repo}>

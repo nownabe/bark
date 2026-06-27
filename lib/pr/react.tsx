@@ -1,9 +1,13 @@
 // React integration for the PullRequestRepository.
 //
-// Components access the Repository through a Context provider and read
-// state via hooks built on `useSyncExternalStore`. `useAppState` runs the
-// pure `deriveAppState` derivation on top of the subscribed LocalState +
-// RemoteState.
+// Layered architecture (ADR 0001 §4):
+//   - React **reads** AppState only (`useAppState`).
+//   - React **writes** through the Repository (`useRepository`).
+//   - LocalState / RemoteState are Repository-internal — they MUST NOT be
+//     read from React components directly. The two `useLocal/RemoteState`
+//     hooks below are file-private helpers that exist so `useAppState` can
+//     subscribe to the underlying snapshots; they are intentionally not
+//     exported.
 
 import {
   createContext,
@@ -37,14 +41,14 @@ export function useRepository(): PullRequestRepository {
   return repo;
 }
 
-export function useLocalState(): LocalState {
+function useLocalStateInternal(): LocalState {
   const repo = useRepository();
   const subscribe = useCallback((cb: () => void) => repo.subscribe(cb), [repo]);
   const getSnapshot = useCallback(() => repo.getLocalState(), [repo]);
   return useSyncExternalStore(subscribe, getSnapshot);
 }
 
-export function useRemoteState(): RemoteState {
+function useRemoteStateInternal(): RemoteState {
   const repo = useRepository();
   const subscribe = useCallback((cb: () => void) => repo.subscribe(cb), [repo]);
   const getSnapshot = useCallback(() => repo.getRemoteState(), [repo]);
@@ -55,7 +59,7 @@ export function useRemoteState(): RemoteState {
  *  `ctx` argument should be memoised by the caller — a new identity on
  *  every render forces a re-derivation each time. */
 export function useAppState(ctx: DeriveContext): AppState {
-  const local = useLocalState();
-  const remote = useRemoteState();
+  const local = useLocalStateInternal();
+  const remote = useRemoteStateInternal();
   return useMemo(() => deriveAppState(local, remote, ctx), [local, remote, ctx]);
 }
