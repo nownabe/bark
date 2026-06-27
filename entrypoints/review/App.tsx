@@ -92,7 +92,9 @@ import { browser } from "wxt/browser";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { PullRequestRepository } from "../../lib/pr/repository";
 import { RepositoryProvider, useAppStateFromRepository } from "../../lib/pr/react";
+import type { CommentView } from "../../lib/pr/appstate";
 import { commentViewsToExisting } from "./adapters/commentViewsToExisting";
+import { displayPositionToAnchorStatus } from "./adapters/displayPositionToAnchorStatus";
 import { useAuthFlow } from "./hooks/useAuthFlow";
 import { productionAuthDeps } from "./hooks/useAuthFlow.deps";
 import { usePullRequestData } from "./hooks/usePullRequestData";
@@ -292,6 +294,17 @@ export function App() {
   // remains the source of truth for the just-submitted path until L6.
   const deriveCtx = useMemo(() => ({ isInDiff: () => false }), []);
   const repositoryAppState = useAppStateFromRepository(prRepository, deriveCtx);
+  // CommentView lookup by GitHub REST id — used by statusFor (L5) so it
+  // can read the new layer's displayPosition instead of running legacy
+  // reanchorComment on its own.
+  const commentViewByRemoteId = useMemo(() => {
+    const out = new Map<number, CommentView>();
+    if (!repositoryAppState) return out;
+    for (const v of repositoryAppState.commentViews.values()) {
+      if (v.comment.remoteId !== undefined) out.set(v.comment.remoteId, v);
+    }
+    return out;
+  }, [repositoryAppState]);
   const foreignFromAppState = useMemo(() => {
     if (!repositoryAppState) return [];
     // Bark's scope is line-bound markdown review (Design Doc §1). So
@@ -1459,6 +1472,13 @@ export function App() {
 
   const statusFor = (c: ExistingComment): AnchorStatus | null => {
     if (!c.meta || c.meta.path !== (selectedPath ?? "sample")) return null;
+    // L5: prefer the new layer's displayPosition (it already does the LCS
+    // re-anchor under the hood, with strict quote matching). Fall back to
+    // the legacy reanchorComment when AppState hasn't seen this remoteId
+    // yet (bootstrap in flight, or a draft that hasn't been submitted) —
+    // that keeps the badge stable across bootstrap.
+    const view = commentViewByRemoteId.get(c.id);
+    if (view) return displayPositionToAnchorStatus(view.displayPosition);
     return reanchorComment(source, lineStarts, c.meta, headSha ?? "", oldSourceFor(c.meta)).status;
   };
 
