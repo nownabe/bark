@@ -102,6 +102,7 @@ import { productionSuggestionEditsDeps } from "./hooks/useSuggestionEdits.deps";
 import { useDismissedSuggestions } from "./hooks/useDismissedSuggestions";
 import { productionDismissedDeps } from "./hooks/useDismissedSuggestions.deps";
 import { useSelectedFileContent } from "./hooks/useSelectedFileContent";
+import { useUiPanels } from "./hooks/useUiPanels";
 import { sampleDoc } from "./sample";
 import { DEV_ROLE_SWITCH, errMessage, installUrl, STATUS_LABEL, type ViewMode } from "./uiHelpers";
 
@@ -212,17 +213,27 @@ export function App() {
   const [emphasizedThreadId, setEmphasizedThreadId] = useState<string | null>(null);
   // The thread whose resolve/reopen request is in flight, for in-place button feedback.
   const [resolvingId, setResolvingId] = useState<string | null>(null);
-  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
-  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
-  const [showPrInfo, setShowPrInfo] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
-  const [showDebug, setShowDebug] = useState(false);
+  const uiPanels = useUiPanels();
+  const {
+    showSubmitConfirm,
+    setShowSubmitConfirm,
+    showDiscardConfirm,
+    setShowDiscardConfirm,
+    showPrInfo,
+    togglePrInfo,
+    prInfoBtnRef,
+    prInfoRef,
+    showHelp,
+    toggleHelp,
+    closeHelp,
+    helpBtnRef,
+    helpRef,
+    showDebug,
+    toggleDebug,
+    closeDebug,
+  } = uiPanels;
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const sidebarRef = useRef<HTMLElement>(null);
-  const prInfoRef = useRef<HTMLDivElement>(null);
-  const prInfoBtnRef = useRef<HTMLButtonElement>(null);
-  const helpRef = useRef<HTMLDivElement>(null);
-  const helpBtnRef = useRef<HTMLButtonElement>(null);
   // The pending-suggestion ids seen on the previous render, so a newly created
   // suggestion can be scrolled into view in the review list (see effect below).
   const seenSuggestionCids = useRef<Set<string>>(new Set());
@@ -402,29 +413,7 @@ export function App() {
       .filter((r): r is { cid: string; from: number; to: number } => Boolean(r.cid));
   }, [role, source, baseSource, pendingSuggestions]);
 
-  // Dismiss the PR details popover on a click outside it (and outside its toggle).
-  useEffect(() => {
-    if (!showPrInfo) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (prInfoRef.current?.contains(t) || prInfoBtnRef.current?.contains(t)) return;
-      setShowPrInfo(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [showPrInfo]);
-
-  // Same for the help popover: a click outside it (and outside the ? toggle) closes it.
-  useEffect(() => {
-    if (!showHelp) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (helpRef.current?.contains(t) || helpBtnRef.current?.contains(t)) return;
-      setShowHelp(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [showHelp]);
+  // (PR info / help popover outside-click handlers live in useUiPanels.)
 
   // Starting a fresh selection (new-comment composer) means focus moved off the
   // emphasized item, so drop the emphasis. Programmatic jump/emphasis selections
@@ -1687,11 +1676,11 @@ export function App() {
         onChangeViewMode={setViewMode}
         onAskSubmit={() => setShowSubmitConfirm(true)}
         onAskDiscardAll={() => setShowDiscardConfirm(true)}
-        onTogglePrInfo={() => setShowPrInfo((v) => !v)}
-        onToggleHelp={() => setShowHelp((v) => !v)}
+        onTogglePrInfo={togglePrInfo}
+        onToggleHelp={toggleHelp}
         onClearToken={() => {
           handleClearToken();
-          setShowHelp(false);
+          closeHelp();
         }}
       />
 
@@ -1757,8 +1746,8 @@ export function App() {
 
       <DebugFab
         show={showDebug}
-        onToggle={() => setShowDebug((v) => !v)}
-        onClose={() => setShowDebug(false)}
+        onToggle={toggleDebug}
+        onClose={closeDebug}
         role={role}
         viewMode={viewMode}
         headSha={headSha}
