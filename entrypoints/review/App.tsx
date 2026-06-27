@@ -835,6 +835,21 @@ export function App() {
     };
     const next = [...drafts, draft];
     await replaceAndPersistDrafts(next);
+    // L6a: also push to Repository's LocalState so a future
+    // repository.submitDrafts() emits a CreateReply step. The Reconciler
+    // needs parentLocalId (the LocalId of the thread's root Comment) —
+    // resolve it via commentViewByRemoteId when the root is a submitted
+    // comment we already track in AppState. Reply drafts whose parent
+    // is itself a draft (rootDraft only) stay legacy-only this round.
+    if (prRepository && thread.rootComment) {
+      const rootView = commentViewByRemoteId.get(thread.rootComment.id);
+      const parentLocalId = rootView?.comment.id;
+      if (parentLocalId) {
+        await prRepository.upsertComment(
+          pendingDraftToComment(draft, viewerLogin ?? "you", parentLocalId),
+        );
+      }
+    }
     cancelReply();
   };
 
