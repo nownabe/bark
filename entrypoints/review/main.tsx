@@ -1,16 +1,14 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
-import { AppV2Mount } from "./AppV2Mount";
 import "./styles.css";
 
-// V2 is the default review surface. The legacy App is still reachable via
-// `?v=1` on the URL until phase 6j removes it.
-function pickEntry() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("v") === "1" ? <App /> : <AppV2Mount />;
-}
+// Legacy App is the live review surface. AppV2 / AppV2Mount are parked on
+// disk (not mounted) while we wire the legacy UI on top of the new data
+// layer (lib/pr/). They are kept compiled so we can lift bits across.
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>{pickEntry()}</React.StrictMode>,
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
 );
