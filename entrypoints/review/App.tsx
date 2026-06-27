@@ -85,10 +85,8 @@ import {
   listDismissedSuggestions,
   listSuggestionEdits,
   saveDismissedSuggestions,
-  saveSuggestionEdits,
   type PendingDraft,
   type SuggestionDecision,
-  type SuggestionEdit,
 } from "../../lib/drafts";
 import { AuthorSubmitError, executeAuthorSubmit } from "../../lib/authorSubmit";
 import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/metadata";
@@ -101,6 +99,8 @@ import { productionAuthDeps } from "./hooks/useAuthFlow.deps";
 import { usePullRequestData } from "./hooks/usePullRequestData";
 import { useDrafts } from "./hooks/useDrafts";
 import { productionDraftsDeps } from "./hooks/useDrafts.deps";
+import { useSuggestionEdits } from "./hooks/useSuggestionEdits";
+import { productionSuggestionEditsDeps } from "./hooks/useSuggestionEdits.deps";
 import { sampleDoc } from "./sample";
 import { DEV_ROLE_SWITCH, errMessage, installUrl, STATUS_LABEL, type ViewMode } from "./uiHelpers";
 
@@ -166,14 +166,17 @@ export function App() {
   const [dismissed, setDismissed] = useState<Record<string, SuggestionDecision>>({});
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
-  // Per-suggestion attached comment, keyed by live suggestion cid (`live:sl:el`).
-  const [suggestionComments, setSuggestionComments] = useState<Record<string, string>>({});
-  // Every file's persisted suggestion edit (base→source + attached comments),
-  // keyed by path. Pending suggestions for the submit scope are recomputed from
-  // this map so they span ALL files, not just the one open in the editor — the
-  // way pending comment drafts already do. The open file's entry is kept in sync
-  // synchronously by persistSuggestionEdit.
-  const [suggestionEdits, setSuggestionEdits] = useState<Record<string, SuggestionEdit>>({});
+  const suggestionEditsApi = useSuggestionEdits(ref, productionSuggestionEditsDeps);
+  const {
+    suggestionEdits,
+    suggestionComments,
+    setSuggestionEdits,
+    setSuggestionComments,
+    persistSuggestionEdit,
+    flushPendingWrites: flushSuggestionEdits,
+    discardAllPersisted: discardAllPersistedEdits,
+    reset: resetSuggestionEdits,
+  } = suggestionEditsApi;
   const [reviewFilter, setReviewFilter] = useState<Set<ReviewFacet>>(
     () => new Set<ReviewFacet>(["pending", "submitted"]),
   );
@@ -195,12 +198,7 @@ export function App() {
   // suggestion can be scrolled into view in the review list (see effect below).
   const seenSuggestionCids = useRef<Set<string>>(new Set());
   // Per-path suggestion edits awaiting a debounced write to storage (so pending
-  // suggestions survive a reload). Accumulated by path — not a single value — so
-  // switching files mid-debounce can never drop another file's pending write.
-  // `null` means "clear this path". Flushed via read-modify-write to avoid
-  // clobbering paths edited in other ways.
-  const pendingEditWrites = useRef<Record<string, SuggestionEdit | null>>({});
-  const editSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // (Debounced per-path persist buffer + timer live in useSuggestionEdits now.)
   // Set before a programmatic "jump to item" selection so the resulting
   // selection update does not pop the new-comment composer (we are highlighting
   // an existing item, not starting a new comment).
@@ -526,13 +524,7 @@ export function App() {
   }, [comments, client, headSha, ref?.owner, ref?.repo, ref?.number]);
 
   // Drafts restore + persistence now live in useDrafts.
-
-  // All files' persisted suggestion edits, so the submit scope spans every file.
-  useEffect(() => {
-    if (ref) listSuggestionEdits(ref).then(setSuggestionEdits);
-    else setSuggestionEdits({});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ref?.owner, ref?.repo, ref?.number]);
+  // Suggestion-edits restore + persistence now live in useSuggestionEdits.
 
   // author's accept/reject decisions on submitted suggestions (R3).
   useEffect(() => {
@@ -980,15 +972,10 @@ export function App() {
       await replaceAndPersistDrafts([]);
       setSource(baseSource); // live suggestion edits are now submitted
       setSuggestionComments({});
-      // All files' suggestions just went out, so drop every persisted edit (not
-      // only the open file's) and cancel any debounced write that would revive them.
-      setSuggestionEdits({});
-      pendingEditWrites.current = {};
-      if (editSaveTimer.current) {
-        clearTimeout(editSaveTimer.current);
-        editSaveTimer.current = null;
-      }
-      await saveSuggestionEdits(ref, {});
+      // All files' suggestions just went out, so drop every persisted edit
+      // (not only the open file's) and cancel any debounced write that would
+      // revive them.
+      await discardAllPersistedEdits();
       // GitHub's GET .../comments can momentarily omit comments a just-completed
       // POST .../reviews created (read-after-write lag), which left the
       // just-submitted items invisible until the next reload. Poll until every
@@ -1183,13 +1170,7 @@ export function App() {
       // Cleanup: drop drafts, persisted edits, and the just-applied accepted
       // decisions (rejected entries persist — they keep the suggestion hidden).
       await replaceAndPersistDrafts([]);
-      setSuggestionEdits({});
-      pendingEditWrites.current = {};
-      if (editSaveTimer.current) {
-        clearTimeout(editSaveTimer.current);
-        editSaveTimer.current = null;
-      }
-      await saveSuggestionEdits(ref, {});
+      await discardAllPersistedEdits();
       if (resolvedCommentIds.length > 0) {
         await clearAcceptedDecisions(ref, resolvedCommentIds);
         setDismissed((prev) => {
@@ -1261,6 +1242,7 @@ export function App() {
     await clearAuthToken();
     resetPrData();
     resetDrafts();
+    resetSuggestionEdits();
     setSelectedPath(null);
     setSource(ref ? "" : sampleDoc);
     setBaseSource(ref ? "" : sampleDoc);
@@ -1269,49 +1251,7 @@ export function App() {
     setBubblePos(null);
   };
 
-  // Read-modify-write the accumulated per-path edits to storage, so a path edited
-  // elsewhere (or another tab) is never clobbered. Clears the pending buffer.
-  const flushSuggestionEdits = async () => {
-    if (!ref) return;
-    const writes = pendingEditWrites.current;
-    pendingEditWrites.current = {};
-    if (editSaveTimer.current) {
-      clearTimeout(editSaveTimer.current);
-      editSaveTimer.current = null;
-    }
-    if (Object.keys(writes).length === 0) return;
-    const stored = await listSuggestionEdits(ref);
-    for (const [p, edit] of Object.entries(writes)) {
-      if (edit) stored[p] = edit;
-      else delete stored[p];
-    }
-    await saveSuggestionEdits(ref, stored);
-  };
-
-  // Persist (debounced) the per-file edit: the edited document and its
-  // attached comments, so pending suggestions / author edits survive a reload.
-  // A document matching the base means no edits remain → clear the path.
-  const persistSuggestionEdit = (
-    path: string,
-    src: string,
-    base: string,
-    comments: Record<string, string>,
-  ) => {
-    if (!ref) return;
-    const edit: SuggestionEdit | null = src !== base ? { source: src, base, comments } : null;
-    // Keep the in-memory all-files map fresh immediately (storage write is
-    // debounced below) so the submit count/modal reflect the latest edit.
-    setSuggestionEdits((prev) => {
-      if (!edit && !(path in prev)) return prev;
-      const next = { ...prev };
-      if (edit) next[path] = edit;
-      else delete next[path];
-      return next;
-    });
-    pendingEditWrites.current[path] = edit;
-    if (editSaveTimer.current) clearTimeout(editSaveTimer.current);
-    editSaveTimer.current = setTimeout(() => void flushSuggestionEdits(), 400);
-  };
+  // flushSuggestionEdits / persistSuggestionEdit now live in useSuggestionEdits.
 
   const onSourceChange = (v: string) => {
     setSource(v);
@@ -1335,12 +1275,7 @@ export function App() {
     resetDrafts();
     setSource(baseSource);
     setSuggestionComments({});
-    setSuggestionEdits({});
-    pendingEditWrites.current = {};
-    if (editSaveTimer.current) {
-      clearTimeout(editSaveTimer.current);
-      editSaveTimer.current = null;
-    }
+    resetSuggestionEdits();
     if (ref) await discardAllDrafts(ref);
     if (role === "author") {
       // Clear the "accepted" decisions so the topbar count drops to 0 and the
