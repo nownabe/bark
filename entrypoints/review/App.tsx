@@ -95,6 +95,7 @@ import { RepositoryProvider, useAppStateFromRepository } from "../../lib/pr/reac
 import type { CommentView } from "../../lib/pr/appstate";
 import { commentViewsToExisting } from "./adapters/commentViewsToExisting";
 import { displayPositionToAnchorStatus } from "./adapters/displayPositionToAnchorStatus";
+import { pendingDraftToComment } from "./adapters/pendingDraftToComment";
 import { useAuthFlow } from "./hooks/useAuthFlow";
 import { productionAuthDeps } from "./hooks/useAuthFlow.deps";
 import { usePullRequestData } from "./hooks/usePullRequestData";
@@ -711,6 +712,12 @@ export function App() {
     };
     const next = [...drafts, draft];
     await replaceAndPersistDrafts(next);
+    // L4: also push to the new data layer's LocalState so a future
+    // repository.submitDrafts() (L6) finds the same draft. Double-write
+    // only for now; legacy useDrafts still owns the rendered list.
+    if (prRepository) {
+      await prRepository.upsertComment(pendingDraftToComment(draft, viewerLogin ?? "you"));
+    }
     setCommentBody("");
     collapseSelection(); // deselect; the pending highlight stays
     setAnchor(null);
@@ -932,6 +939,8 @@ export function App() {
   const removeDraft = async (cidToRemove: string) => {
     const next = drafts.filter((d) => d.cid !== cidToRemove);
     await replaceAndPersistDrafts(next);
+    // L4: keep Repository's LocalState in sync.
+    if (prRepository) await prRepository.discardComment(cidToRemove);
   };
 
   // Materialize the reviewer's live suggestion edits into real drafts at submit
@@ -1315,11 +1324,17 @@ export function App() {
   // suggestion decisions stay — they keep the suggestion hidden, not pending.
   const discardAllPending = async () => {
     setShowDiscardConfirm(false);
+    // L4: discard the same draft cids in Repository's LocalState (top-
+    // level new-comment drafts only — replies go through L6).
+    const localCids = drafts.map((d) => d.cid);
     resetDrafts();
     setSource(baseSource);
     setSuggestionComments({});
     resetSuggestionEdits();
     if (ref) await discardAllDrafts(ref);
+    if (prRepository) {
+      for (const cid of localCids) await prRepository.discardComment(cid);
+    }
     if (role === "author") {
       // Clear the "accepted" decisions so the topbar count drops to 0 and the
       // next Submit wouldn't try to resolve threads the author no longer wants.
