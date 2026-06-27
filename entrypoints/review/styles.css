@@ -1326,6 +1326,252 @@ select.input:focus {
   text-align: left;
 }
 
+/* AppV2 main review surface — a single column of panels (PR header,
+   source viewer, new-comment form, threads) on the page canvas. Sticks
+   to the design tokens; each panel is an elevated card. */
+.appv2 {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px 22px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.appv2__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.appv2__pr-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.appv2__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+}
+.appv2__meta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.appv2__header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.appv2__section-title {
+  margin: 0 0 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+}
+
+.appv2__source,
+.appv2__new-comment,
+.appv2__threads {
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+}
+.appv2__source-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.appv2__source-head .appv2__section-title {
+  margin: 0;
+}
+.appv2__editor {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.appv2__editor .cm-editor {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.appv2__empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.appv2__selection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--fg-soft);
+}
+.appv2__selection strong {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.appv2__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.appv2__field > span {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+}
+.appv2__field--narrow {
+  flex: 1;
+}
+.appv2__range {
+  display: flex;
+  gap: 8px;
+}
+
+.appv2__thread-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.appv2__thread {
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: var(--shadow-sm);
+}
+.appv2__thread-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.appv2__thread-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.appv2__comment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.appv2__comment {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+}
+.appv2__author {
+  font-weight: 600;
+  color: var(--fg);
+}
+.appv2__location {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg-inset);
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  font-variant-numeric: tabular-nums;
+}
+.appv2__body {
+  grid-column: 1 / -1;
+  white-space: pre-wrap;
+  color: var(--fg-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Badges — same shape as the legacy `.badge--*` set but namespaced to
+   AppV2 so future refactors can move them in one place. Each variant
+   pairs a soft tint with the matching saturated text (design.md §2). */
+.appv2__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg-inset);
+  color: var(--fg-soft);
+}
+.appv2__badge--resolved {
+  background: var(--brand-tint);
+  color: var(--brand-strong);
+}
+.appv2__badge--syncing {
+  background: var(--amber-tint);
+  color: var(--amber);
+}
+.appv2__badge--draft {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+.appv2__badge--suggestion {
+  background: var(--brand-tint);
+  color: var(--brand-strong);
+}
+.appv2__badge--error {
+  background: var(--red-tint);
+  color: var(--red-strong);
+}
+
+.appv2__thread-actions {
+  display: flex;
+  gap: 8px;
+}
+.appv2__reply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.appv2__reply-actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* Snackbar — global error / warning surface (ADR 0005 §4).
    Stacks bottom-center; semantic palette drives severity. */
 .snackbar-stack {

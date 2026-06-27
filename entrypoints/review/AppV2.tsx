@@ -321,7 +321,7 @@ function ReplyForm({
   return (
     <form className="appv2__reply" onSubmit={onSubmit} data-testid={`reply-form-${thread.id}`}>
       <textarea
-        className="input"
+        className="field"
         rows={2}
         value={body}
         onChange={(e) => setBody(e.target.value)}
@@ -550,7 +550,7 @@ function NewCommentForm({
           <label className="appv2__field">
             <span>Path</span>
             <input
-              className="input"
+              className="field"
               type="text"
               value={path}
               onChange={(e) => setPath(e.target.value)}
@@ -560,7 +560,7 @@ function NewCommentForm({
             <label className="appv2__field appv2__field--narrow">
               <span>sl</span>
               <input
-                className="input"
+                className="field"
                 type="number"
                 min="1"
                 value={sl}
@@ -570,7 +570,7 @@ function NewCommentForm({
             <label className="appv2__field appv2__field--narrow">
               <span>sc</span>
               <input
-                className="input"
+                className="field"
                 type="number"
                 min="1"
                 value={sc}
@@ -580,7 +580,7 @@ function NewCommentForm({
             <label className="appv2__field appv2__field--narrow">
               <span>el</span>
               <input
-                className="input"
+                className="field"
                 type="number"
                 min="1"
                 value={el}
@@ -590,7 +590,7 @@ function NewCommentForm({
             <label className="appv2__field appv2__field--narrow">
               <span>ec</span>
               <input
-                className="input"
+                className="field"
                 type="number"
                 min="1"
                 value={ec}
@@ -601,7 +601,7 @@ function NewCommentForm({
           <label className="appv2__field">
             <span>Quote</span>
             <input
-              className="input"
+              className="field"
               type="text"
               value={quote}
               onChange={(e) => setQuote(e.target.value)}
@@ -612,7 +612,7 @@ function NewCommentForm({
       <label className="appv2__field">
         <span>Body</span>
         <textarea
-          className="input"
+          className="field"
           rows={3}
           value={body}
           onChange={(e) => setBody(e.target.value)}
