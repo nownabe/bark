@@ -76,7 +76,6 @@ import {
   type ChangedFile,
   type PrRef,
   type PullInfo,
-  type PullStatus,
   type ReviewCommentInput,
 } from "../../lib/github";
 import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
@@ -109,42 +108,14 @@ import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { PullRequestRepository } from "../../lib/pr/repository";
 import { RepositoryProvider } from "../../lib/pr/react";
 import { sampleDoc } from "./sample";
-
-type ViewMode = "raw" | "preview";
-
-function errMessage(e: unknown): string {
-  if (e instanceof GitHubApiError) {
-    if (e.status === 401 || e.status === 403) {
-      return `Authentication error (${e.status}). Check the token's permissions/expiry.`;
-    }
-    if (e.status === 404) return "Not Found (404). Check the repository / PR / token permissions.";
-    return e.message;
-  }
-  return e instanceof Error ? e.message : String(e);
-}
-
-// Show only states that are meaningful to the user (current = normal is hidden).
-const STATUS_LABEL: Partial<Record<AnchorStatus, string>> = {
-  reanchored: "position shifted",
-  outdated: "position not found",
-};
-
-const PR_STATUS_LABEL: Record<PullStatus, string> = {
-  open: "Open",
-  merged: "Merged",
-  draft: "Draft",
-  closed: "Closed",
-};
-
-// The author/reviewer switch is a development aid only. It renders as a floating
-// control bottom-right exclusively in builds where BARK_DEV_ROLE_SWITCH is set;
-// normal builds hide it and keep the default role.
-const DEV_ROLE_SWITCH = Boolean(import.meta.env.BARK_DEV_ROLE_SWITCH);
-
-// Public slug of the Bark GitHub App; used to build its install URL so a 404/403
-// (likely "not installed on this repo") can offer a one-click install (§7.6).
-const APP_SLUG = import.meta.env.BARK_GITHUB_APP_SLUG;
-const installUrl = APP_SLUG ? `https://github.com/apps/${APP_SLUG}/installations/new` : null;
+import {
+  DEV_ROLE_SWITCH,
+  errMessage,
+  installUrl,
+  PR_STATUS_LABEL,
+  STATUS_LABEL,
+  type ViewMode,
+} from "./uiHelpers";
 
 export function App() {
   const params = new URLSearchParams(window.location.search);
