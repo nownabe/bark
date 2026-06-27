@@ -57,10 +57,50 @@ describe("metadata — extraction edge cases", () => {
     expect(out.body).toBe("Just a comment.");
   });
 
-  test("a legacy v1 marker is ignored (treated as foreign)", () => {
-    const out = extractMetadata("body\n\n<!-- bark:v1 SOMEPAYLOAD -->");
+  test("a legacy bark:v1 fence is upgraded to the v2 shape (thread -> threadId, anchor reshape)", () => {
+    const v1 = {
+      cid: "c-1",
+      thread: "t-1",
+      path: "src/x.md",
+      sha: "abcdef",
+      quote: "hello",
+      range: { sl: 5, sc: 1, el: 5, ec: 6 },
+      kind: "comment",
+    };
+    const encoded = btoa(JSON.stringify(v1));
+    const out = extractMetadata(`body\n\n<!-- bark:v1 ${encoded} -->`);
+    expect(out.meta).toEqual({
+      cid: "c-1",
+      threadId: "t-1",
+      path: "src/x.md",
+      anchor: {
+        sha: "abcdef",
+        range: { sl: 5, sc: 1, el: 5, ec: 6 },
+        quote: "hello",
+      },
+    });
+    expect(out.body).toBe("body");
+  });
+
+  test("the legacy 'docreview:v1' marker alias is also accepted", () => {
+    const v1 = {
+      cid: "c-2",
+      thread: "t-2",
+      path: "x.md",
+      sha: "h",
+      quote: "q",
+      range: { sl: 1, sc: 1, el: 1, ec: 2 },
+    };
+    const encoded = btoa(JSON.stringify(v1));
+    const out = extractMetadata(`body\n\n<!-- docreview:v1 ${encoded} -->`);
+    expect(out.meta?.threadId).toBe("t-2");
+  });
+
+  test("a malformed v1 payload (missing required field) yields { meta: null }", () => {
+    const broken = { cid: "c", path: "p", sha: "s", quote: "q" }; // no thread, no range
+    const encoded = btoa(JSON.stringify(broken));
+    const out = extractMetadata(`body\n\n<!-- bark:v1 ${encoded} -->`);
     expect(out.meta).toBeNull();
-    expect(out.body).toBe("body\n\n<!-- bark:v1 SOMEPAYLOAD -->");
   });
 
   test("a corrupt base64 payload yields { meta: null }", () => {

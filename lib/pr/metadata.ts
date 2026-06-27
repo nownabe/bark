@@ -3,14 +3,22 @@
 // metadata is embedded in the posted comment body as a trailing
 // HTML comment, then extracted on fetch.
 //
-// Marker: "bark:v2". Older "bark:v1" payloads are intentionally
-// discarded — per ADR 0003 §7 Bark is pre-release and legacy data is
-// not migrated.
+// Write format: "bark:v2".
+//
+// Read format: "bark:v2" preferred, "bark:v1" (and the original
+// "docreview:v1" alias) accepted as backward compatibility. ADR 0003 §7
+// says legacy *local* data isn't migrated — but comment metadata lives
+// on github.com, where it CAN'T be migrated, so the new fetcher has to
+// keep reading it. v1 → v2 mapping rewrites field names and reshapes
+// the anchor inline; `kind` is re-derived from the body downstream and
+// `event` (legacy resolve-event marker comments) is intentionally
+// dropped because v2 represents resolved state on Thread directly.
 
 import type { Anchor } from "./types";
 
 const MARKER = "bark:v2";
-const FENCE_RE = /\n*<!--\s+bark:v2\s+([A-Za-z0-9+/=]+)\s+-->\s*$/;
+const FENCE_RE_V2 = /\n*<!--\s+bark:v2\s+([A-Za-z0-9+/=]+)\s+-->\s*$/;
+const FENCE_RE_V1 = /\n*<!--\s*(?:bark|docreview):v1\s+([A-Za-z0-9+/=]+)\s*-->\s*$/;
 
 export type WireMetadata = {
   cid: string;
@@ -30,26 +38,81 @@ export function embedMetadata(body: string, meta: WireMetadata): string {
 }
 
 /** Split a comment body into its visible portion and the parsed metadata.
- *  Returns `meta: null` for foreign comments, legacy markers, or any
- *  payload that fails to validate as `WireMetadata`. */
+ *  Returns `meta: null` for foreign comments or any payload that fails
+ *  to validate. Tries the v2 fence first; falls back to v1 (`bark:v1`
+ *  and the legacy `docreview:v1` alias) so comments posted by the
+ *  legacy App are still recognised after the data-layer rewrite. */
 export function extractMetadata(body: string): {
   body: string;
   meta: WireMetadata | null;
 } {
-  const match = FENCE_RE.exec(body);
-  if (!match) return { body, meta: null };
+  const v2 = readFence(body, FENCE_RE_V2, parseV2);
+  if (v2) return v2;
+  const v1 = readFence(body, FENCE_RE_V1, parseV1);
+  if (v1) return v1;
+  return { body, meta: null };
+}
+
+function readFence(
+  body: string,
+  re: RegExp,
+  parse: (payload: string) => WireMetadata | null,
+): { body: string; meta: WireMetadata } | null {
+  const match = re.exec(body);
+  if (!match) return null;
   const payload = match[1];
-  if (!payload) return { body, meta: null };
+  if (!payload) return null;
   try {
-    const parsed = JSON.parse(base64Decode(payload)) as unknown;
-    if (!isValidWireMetadata(parsed)) {
-      return { body, meta: null };
-    }
+    const decoded = base64Decode(payload);
+    const parsed = parse(decoded);
+    if (!parsed) return null;
     const cleaned = body.slice(0, match.index).replace(/\s*$/, "");
     return { body: cleaned, meta: parsed };
   } catch {
-    return { body, meta: null };
+    return null;
   }
+}
+
+function parseV2(decoded: string): WireMetadata | null {
+  const value: unknown = JSON.parse(decoded);
+  return isValidWireMetadata(value) ? value : null;
+}
+
+/** v1 payload shape (lib/metadata.ts in the legacy App):
+ *  `{ cid, path, range, quote, sha, thread, kind?, event? }`. */
+function parseV1(decoded: string): WireMetadata | null {
+  const v = JSON.parse(decoded) as unknown;
+  if (!v || typeof v !== "object") return null;
+  const m = v as Record<string, unknown>;
+  if (
+    typeof m.cid !== "string" ||
+    typeof m.thread !== "string" ||
+    typeof m.path !== "string" ||
+    typeof m.sha !== "string" ||
+    typeof m.quote !== "string"
+  )
+    return null;
+  if (!m.range || typeof m.range !== "object") return null;
+  const r = m.range as Record<string, unknown>;
+  if (
+    typeof r.sl !== "number" ||
+    typeof r.sc !== "number" ||
+    typeof r.el !== "number" ||
+    typeof r.ec !== "number"
+  )
+    return null;
+  // Drop `kind` (re-derived from body downstream) and `event` (legacy
+  // resolution markers — v2 carries resolved state on Thread).
+  return {
+    cid: m.cid,
+    threadId: m.thread,
+    path: m.path,
+    anchor: {
+      sha: m.sha,
+      range: { sl: r.sl, sc: r.sc, el: r.el, ec: r.ec },
+      quote: m.quote,
+    },
+  };
 }
 
 function isValidWireMetadata(x: unknown): x is WireMetadata {
