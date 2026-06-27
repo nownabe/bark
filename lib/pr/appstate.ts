@@ -28,6 +28,12 @@ export type AppState = {
 
   /** Threads grouped with their Comments (preserves LocalState ordering). */
   threadGroups: ThreadGroup[];
+
+  /** Files available at the PR's current head SHA, sorted by path. The UI
+   *  reads its source-viewer file list from here so it never touches
+   *  RemoteState directly. Empty until both PullRequest and matching
+   *  FileContent entries are present. */
+  currentFiles: FileContent[];
 };
 
 export type CommentView = {
@@ -67,6 +73,7 @@ export function deriveAppState(
   }
 
   const threadGroups = buildThreadGroups(local.threads, commentViews);
+  const currentFiles = buildCurrentFiles(remote.fileContents, headSha);
 
   return {
     role: computeRole(remote.viewer, remote.pullRequest),
@@ -74,7 +81,20 @@ export function deriveAppState(
     viewer: remote.viewer,
     commentViews,
     threadGroups,
+    currentFiles,
   };
+}
+
+function buildCurrentFiles(files: FileContent[], headSha: string | null): FileContent[] {
+  if (!headSha) return [];
+  const seen = new Set<string>();
+  const out: FileContent[] = [];
+  for (const f of files) {
+    if (f.sha !== headSha || seen.has(f.path)) continue;
+    seen.add(f.path);
+    out.push(f);
+  }
+  return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
 // ---- Body parsing -------------------------------------------------------

@@ -15,9 +15,9 @@ import { markdown } from "@codemirror/lang-markdown";
 import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ThreadGroup } from "../../lib/pr/appstate";
-import { RepositoryProvider, useAppState, useRemoteState, useRepository } from "../../lib/pr/react";
+import { RepositoryProvider, useAppState, useRepository } from "../../lib/pr/react";
 import type { PullRequestRepository } from "../../lib/pr/repository";
-import type { Comment, LocalId } from "../../lib/pr/types";
+import type { Comment, FileContent, LocalId } from "../../lib/pr/types";
 import { SnackbarProvider, useSnackbar } from "./components/Snackbar";
 
 /** Live editor selection — sufficient to construct a Comment.anchor. */
@@ -121,7 +121,7 @@ function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
       </header>
 
       {state.pullRequest && (
-        <SourceViewer headSha={state.pullRequest.headSha} onSelectionChange={setSelection} />
+        <SourceViewer currentFiles={state.currentFiles} onSelectionChange={setSelection} />
       )}
 
       {state.pullRequest && (
@@ -340,29 +340,22 @@ function ReplyForm({
   );
 }
 
-/** CodeMirror-backed source viewer (read-only). Lists the files for
- *  which we have FileContent at `headSha`, lets the viewer pick one,
- *  shows the source with Markdown syntax highlighting, and reports
- *  selection changes upward so the comment form can pick them up. */
+/** CodeMirror-backed source viewer (read-only). Reads the currently-
+ *  available files from AppState (`currentFiles`, already scoped to the
+ *  PR's head SHA and sorted), lets the viewer pick one, shows the source
+ *  with Markdown syntax highlighting, and reports selection changes
+ *  upward so the comment form can pick them up.
+ *
+ *  Layered architecture: this component never reaches into Repository or
+ *  RemoteState — it receives a derived snapshot from its parent. */
 function SourceViewer({
-  headSha,
+  currentFiles,
   onSelectionChange,
 }: {
-  headSha: string;
+  currentFiles: FileContent[];
   onSelectionChange: (selection: EditorSelection | null) => void;
 }) {
-  const remote = useRemoteState();
-  const availablePaths = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const fc of remote.fileContents) {
-      if (fc.sha === headSha && !seen.has(fc.path)) {
-        seen.add(fc.path);
-        out.push(fc.path);
-      }
-    }
-    return out.sort();
-  }, [remote.fileContents, headSha]);
+  const availablePaths = useMemo(() => currentFiles.map((f) => f.path), [currentFiles]);
 
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const selected =
@@ -372,10 +365,8 @@ function SourceViewer({
 
   const source = useMemo(() => {
     if (selected === null) return null;
-    return (
-      remote.fileContents.find((f) => f.sha === headSha && f.path === selected)?.source ?? null
-    );
-  }, [remote.fileContents, headSha, selected]);
+    return currentFiles.find((f) => f.path === selected)?.source ?? null;
+  }, [currentFiles, selected]);
 
   // Clear the parent's captured selection whenever the active path
   // changes, because the anchor would refer to a different file.

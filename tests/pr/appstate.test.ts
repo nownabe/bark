@@ -274,3 +274,35 @@ describe("appstate — deriveAppState: threadGroups", () => {
     ]);
   });
 });
+
+describe("appstate — deriveAppState: currentFiles", () => {
+  test("surfaces head-sha FileContents deduped and sorted by path", () => {
+    const out = deriveAppState(
+      localState(),
+      remoteState({
+        pullRequest: pr({ headSha: "head" }),
+        fileContents: [
+          fileContent("head", "z.md", "Z"),
+          fileContent("old", "skip.md", "old"),
+          fileContent("head", "a.md", "A"),
+          // Duplicate (sha, path) keeps only the first seen entry.
+          fileContent("head", "a.md", "A-dupe"),
+        ],
+      }),
+      { isInDiff: () => false },
+    );
+    expect(out.currentFiles.map((f) => f.path)).toEqual(["a.md", "z.md"]);
+    expect(out.currentFiles.find((f) => f.path === "a.md")?.source).toBe("A");
+  });
+
+  test("is empty when no PullRequest is loaded yet", () => {
+    const out = deriveAppState(
+      localState(),
+      remoteState({
+        fileContents: [fileContent("anything", "a.md", "A")],
+      }),
+      { isInDiff: () => false },
+    );
+    expect(out.currentFiles).toEqual([]);
+  });
+});
