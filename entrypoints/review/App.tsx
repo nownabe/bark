@@ -73,12 +73,9 @@ import {
   buildBlobPermalink,
   buildSuggestionBlock,
   findThreadNodeId,
-  GitHubApiError,
   GitHubClient,
   pullStatus,
-  type ChangedFile,
   type PrRef,
-  type PullInfo,
   type ReviewCommentInput,
 } from "../../lib/github";
 import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
@@ -103,6 +100,7 @@ import type { PullRequestRepository } from "../../lib/pr/repository";
 import { RepositoryProvider } from "../../lib/pr/react";
 import { useAuthFlow } from "./hooks/useAuthFlow";
 import { productionAuthDeps } from "./hooks/useAuthFlow.deps";
+import { usePullRequestData } from "./hooks/usePullRequestData";
 import { sampleDoc } from "./sample";
 import { DEV_ROLE_SWITCH, errMessage, installUrl, STATUS_LABEL, type ViewMode } from "./uiHelpers";
 
@@ -125,21 +123,27 @@ export function App() {
     completeAuth,
     clearToken: clearAuthToken,
   } = auth;
-  // Set when the initial repo/PR load fails with 404/403 — most often the GitHub
-  // App is not installed on this repository; we show a dedicated install gate.
-  const [needsInstall, setNeedsInstall] = useState(false);
-  // Bumped to re-run the initial load (e.g. after the user installs the App).
-  const [reloadKey, setReloadKey] = useState(0);
+  const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
+  const prData = usePullRequestData(client, ref);
+  const {
+    pull,
+    files,
+    headSha,
+    headRef,
+    viewerLogin,
+    needsInstall,
+    error,
+    loading,
+    reload: retryLoad,
+    reset: resetPrData,
+    setHeadSha,
+    setLoading,
+    setError,
+  } = prData;
 
-  const [files, setFiles] = useState<ChangedFile[]>([]);
-  const [pull, setPull] = useState<PullInfo | null>(null);
-  const [headSha, setHeadSha] = useState<string | null>(null);
-  const [headRef, setHeadRef] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [source, setSource] = useState<string>(ref ? "" : sampleDoc);
   const [baseSource, setBaseSource] = useState<string>(ref ? "" : sampleDoc);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const [role, setRole] = useState<Role>("reviewer");
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
@@ -200,8 +204,6 @@ export function App() {
   // selection update does not pop the new-comment composer (we are highlighting
   // an existing item, not starting a new comment).
   const suppressNextAnchor = useRef(false);
-
-  const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
 
   // New data layer (lib/pr/) — phase L1 of the legacy-on-new-data-layer plan.
   // We bootstrap a Repository as soon as we have a token + PR ref so the
@@ -372,14 +374,6 @@ export function App() {
       .filter((r): r is { cid: string; from: number; to: number } => Boolean(r.cid));
   }, [role, source, baseSource, pendingSuggestions]);
 
-  // Surface an error from the initial load and flag the likely "app not
-  // installed" case (404/403) so we can route to the dedicated install gate.
-  const reportError = (e: unknown) => {
-    setError(errMessage(e));
-    setNeedsInstall(e instanceof GitHubApiError && (e.status === 404 || e.status === 403));
-  };
-  const retryLoad = () => setReloadKey((k) => k + 1);
-
   // Dismiss the PR details popover on a click outside it (and outside its toggle).
   useEffect(() => {
     if (!showPrInfo) return;
@@ -412,43 +406,16 @@ export function App() {
   }, [anchor]);
 
   // Restore + device-flow polling now live in useAuthFlow.
-
+  // Initial PR fetch (pull / files / head SHA + ref / viewer) now lives in
+  // usePullRequestData. Pick the first file once the file list arrives, and
+  // derive role once we know both the viewer and the PR author.
   useEffect(() => {
-    if (!client || !ref) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setNeedsInstall(false);
-    (async () => {
-      try {
-        const info = await client.getPull(ref);
-        const md = await client.listMarkdownFiles(ref);
-        if (cancelled) return;
-        setPull(info);
-        setHeadSha(info.headSha);
-        setHeadRef(info.headRef);
-        setFiles(md);
-        setSelectedPath((prev) => prev ?? md[0]?.path ?? null);
-        try {
-          const viewer = await client.getAuthenticatedUser();
-          if (!cancelled) setRole(deriveRole(viewer.login, info.author));
-        } catch (identityError) {
-          // Identity lookup failed (network / missing scope). Stay reviewer:
-          // only the author-only commit affordance is withheld; the reviewer
-          // flow is unaffected. (#83)
-          console.warn("Bark: author-role lookup failed", identityError);
-        }
-      } catch (e) {
-        if (!cancelled) reportError(e);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, ref?.owner, ref?.repo, ref?.number, reloadKey]);
+    if (files.length === 0) return;
+    setSelectedPath((prev) => prev ?? files[0]?.path ?? null);
+  }, [files]);
+  useEffect(() => {
+    if (viewerLogin && pull) setRole(deriveRole(viewerLogin, pull.author));
+  }, [viewerLogin, pull]);
 
   useEffect(() => {
     if (!client || !ref || !headSha || !selectedPath) return;
@@ -1299,8 +1266,7 @@ export function App() {
   // legacy in-line implementation did).
   const handleClearToken = async () => {
     await clearAuthToken();
-    setFiles([]);
-    setHeadSha(null);
+    resetPrData();
     setSelectedPath(null);
     setSource(ref ? "" : sampleDoc);
     setBaseSource(ref ? "" : sampleDoc);
