@@ -214,21 +214,31 @@ function threadPos(rootComment: ExistingComment | null, rootDraft: PendingDraft 
 }
 
 /**
- * Compute the set of thread ids whose latest resolution event is "resolve".
- * Bark tracks resolution via embedded `event: "resolve" | "unresolve"`
- * metadata comments (a comment with the highest GitHub id wins per thread);
- * this is the same logic `buildThreads` uses to mark threads resolved, and
- * `buildSuggestionMarks` consults it so the in-editor overlay matches the
- * sidebar's resolved-state view.
+ * Compute the set of thread ids whose resolved state should be reflected in
+ * the sidebar. Two sources are unioned:
+ *
+ *   1. The caller-provided `resolvedKeys` (the new data layer's
+ *      `Thread.resolved`, mapped to reviewItems thread keys). This is the
+ *      source of truth for current data — both Bark-authored and foreign.
+ *   2. Legacy event-marker comments (`meta.event === "resolve" | "unresolve"`,
+ *      highest GitHub id wins per thread). Only old PRs predating the
+ *      data-layer rewrite still carry these; the new fetcher drops `event`
+ *      because v2 represents resolved state on Thread directly.
+ *
+ * `buildSuggestionMarks` consults this so the in-editor overlay matches
+ * the sidebar's resolved-state view.
  */
-export function resolvedThreadIds(comments: ExistingComment[]): Set<string> {
+export function resolvedThreadIds(
+  comments: ExistingComment[],
+  opts?: { resolvedKeys?: ReadonlySet<string> },
+): Set<string> {
   const latest = new Map<string, { id: number; event: "resolve" | "unresolve" }>();
   for (const c of comments) {
     if (!c.meta?.event) continue;
     const prev = latest.get(c.meta.thread);
     if (!prev || c.id > prev.id) latest.set(c.meta.thread, { id: c.id, event: c.meta.event });
   }
-  const resolved = new Set<string>();
+  const resolved = new Set<string>(opts?.resolvedKeys ?? []);
   for (const [thread, e] of latest) if (e.event === "resolve") resolved.add(thread);
   return resolved;
 }
@@ -242,7 +252,12 @@ export function buildThreads(
   comments: ExistingComment[],
   drafts: PendingDraft[],
   currentPath: string,
-  opts?: { accepted?: (commentId: number) => boolean },
+  opts?: {
+    accepted?: (commentId: number) => boolean;
+    /** Thread keys reported resolved by the new data layer. Unioned with
+     *  the legacy event-marker derivation. */
+    resolvedKeys?: ReadonlySet<string>;
+  },
 ): ReviewThread[] {
   const order: string[] = [];
   const groups = new Map<string, { submitted: ExistingComment[]; pending: PendingDraft[] }>();
@@ -280,6 +295,7 @@ export function buildThreads(
       ...pending.map((draft): ThreadMessage => ({ kind: "pending", draft })),
     ];
     const resolvedByEvent = latestEvent.get(id)?.event === "resolve";
+    const resolvedByRepository = opts?.resolvedKeys?.has(id) ?? false;
     const acceptedSuggestion =
       rootComment?.meta?.kind === "suggestion" && (opts?.accepted?.(rootComment.id) ?? false);
     return {
@@ -292,7 +308,7 @@ export function buildThreads(
       quote: rootComment?.meta?.quote ?? rootDraft?.quote,
       hasPending: pending.length > 0,
       hasSubmitted: submitted.length > 0,
-      resolved: resolvedByEvent || acceptedSuggestion,
+      resolved: resolvedByRepository || resolvedByEvent || acceptedSuggestion,
     };
   });
   list.sort((a, b) => rank(a.path, currentPath) - rank(b.path, currentPath) || a.pos - b.pos);
@@ -552,10 +568,21 @@ export function buildSuggestionMarks(args: {
   dismissed: Record<string, unknown>;
   /** createdAtSha source per `${sha}:${path}`, for diff-based re-anchoring. */
   oldSources?: Record<string, string>;
+  /** Thread keys reported resolved by the new data layer. */
+  resolvedKeys?: ReadonlySet<string>;
 }): SuggestionRender[] {
-  const { comments, source, lineStarts, headSha, currentPath, dismissed, oldSources } = args;
+  const {
+    comments,
+    source,
+    lineStarts,
+    headSha,
+    currentPath,
+    dismissed,
+    oldSources,
+    resolvedKeys,
+  } = args;
   const docLen = source.length;
-  const resolved = resolvedThreadIds(comments);
+  const resolved = resolvedThreadIds(comments, { resolvedKeys });
   return comments
     .filter(
       (c) =>
