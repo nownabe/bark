@@ -487,6 +487,38 @@ export function App() {
     if (viewerLogin && pull) setRole(deriveRole(viewerLogin, pull.author));
   }, [viewerLogin, pull]);
 
+  // L6d-1: while we are author, mirror suggestionEdits into Repository's
+  // LocalState as FileEdits so a future repository.submitDrafts() (L6d-3)
+  // can emit one Commit step for all pending edits. Reviewer doesn't need
+  // this — their edits become suggestion-block Comments at submit time
+  // (L6c). Effect upserts every (path, source) pair that diverges from
+  // base; drafts no longer represented get discarded.
+  useEffect(() => {
+    if (!prRepository || !headSha || role !== "author") return;
+    void (async () => {
+      const wanted = new Map<string, { path: string; source: string }>();
+      for (const [path, edit] of Object.entries(suggestionEdits)) {
+        if (edit.source === edit.base) continue;
+        wanted.set(`fileedit-${path}`, { path, source: edit.source });
+      }
+      for (const [id, { path, source }] of wanted) {
+        await prRepository.upsertFileEdit({
+          id,
+          state: "draft",
+          path,
+          baseSha: headSha,
+          editedSource: source,
+        });
+      }
+      const existing = prRepository.getLocalState().fileEdits;
+      for (const fe of existing) {
+        if (fe.state === "draft" && !wanted.has(fe.id)) {
+          await prRepository.discardFileEdit(fe.id);
+        }
+      }
+    })();
+  }, [suggestionEdits, prRepository, headSha, role]);
+
   // Per-file content load now lives in useSelectedFileContent.
 
   // Fetch the PR's review + issue comments and rebuild local state. Exposed as a
