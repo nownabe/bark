@@ -1185,6 +1185,135 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
+      if (prRepository) {
+        // L6d-3: new write path — drafts (in-diff) + FileEdits + thread
+        // resolves all go through Repository.submitDrafts(). Out-of-diff
+        // drafts still use the legacy issue-comment path (see L6c).
+        const inDiffDrafts = drafts.filter((d) => d.inDiff);
+        const outOfDiffDrafts = drafts.filter((d) => !d.inDiff);
+
+        // 1. Drafts → Repository (in-diff only; same shape as L6c).
+        const inRepo = new Set(prRepository.getLocalState().comments.map((c) => c.id));
+        for (const d of inDiffDrafts) {
+          if (inRepo.has(d.cid)) continue;
+          const body =
+            d.kind === "suggestion"
+              ? `${d.body}\n\n${buildSuggestionBlock(d.suggestion ?? "")}`
+              : d.body;
+          const thread = threads.find((t) => t.id === d.thread);
+          const parentLocalId =
+            d.cid === d.thread
+              ? undefined
+              : thread?.rootComment
+                ? commentViewByRemoteId.get(thread.rootComment.id)?.comment.id
+                : (thread?.rootDraft?.cid ?? undefined);
+          await prRepository.upsertComment(
+            pendingDraftToComment({ ...d, body }, viewerLogin ?? "you", parentLocalId),
+          );
+        }
+
+        // 2. Re-sync FileEdits authoritatively (the L6d-1 effect is best-
+        //    effort; this is the source of truth for the impending commit).
+        const wantedFileEdits = new Map<string, { path: string; source: string }>();
+        for (const [path, edit] of Object.entries(suggestionEdits)) {
+          if (edit.source === edit.base) continue;
+          wantedFileEdits.set(`fileedit-${path}`, { path, source: edit.source });
+        }
+        for (const [id, { path, source }] of wantedFileEdits) {
+          await prRepository.upsertFileEdit({
+            id,
+            state: "draft",
+            path,
+            baseSha: headSha,
+            editedSource: source,
+          });
+        }
+        for (const fe of prRepository.getLocalState().fileEdits) {
+          if (fe.state === "draft" && !wantedFileEdits.has(fe.id)) {
+            await prRepository.discardFileEdit(fe.id);
+          }
+        }
+
+        // 3. Accepted-suggestion threads → resolved. setThreadResolved runs
+        //    its own sync cycle (immediate GraphQL mutation). The Commit
+        //    step in submitDrafts (next) lands the accepted source change
+        //    in the same commit as any other edits.
+        const acceptedResolvedRemoteIds: number[] = [];
+        for (const info of acceptedSuggestionInfos) {
+          const view = commentViewByRemoteId.get(info.commentId);
+          if (!view) continue;
+          await prRepository.setThreadResolved(view.comment.threadId, true);
+          acceptedResolvedRemoteIds.push(info.commentId);
+        }
+
+        // 4. Submit — Reconciler emits PostReviewBatch / PostReply +
+        //    one Commit step for the FileEdits.
+        await prRepository.submitDrafts();
+        const newHeadSha = prRepository.getRemoteState().pullRequest?.headSha ?? headSha;
+
+        // 5. Out-of-diff drafts still go through the legacy
+        //    createIssueComment path (quoted-body UX extension).
+        for (const d of outOfDiffDrafts) {
+          const suggestion =
+            d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
+          const quoted = d.quote
+            .split("\n")
+            .map((l) => `> ${l}`)
+            .join("\n");
+          const note =
+            d.kind === "suggestion"
+              ? "\n\n(Out of diff: this suggestion will not show an Apply button.)"
+              : "";
+          const visible =
+            `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
+          const dmeta: CommentMetadata = {
+            cid: d.cid,
+            path: d.path,
+            range: d.range,
+            quote: d.quote,
+            sha: d.sha,
+            thread: d.thread,
+            kind: d.kind,
+          };
+          await client.createIssueComment(ref, embedMetadata(visible, dmeta));
+        }
+
+        // 6. Legacy state cleanup — same as the legacy success path.
+        await replaceAndPersistDrafts([]);
+        await discardAllPersistedEdits();
+        if (acceptedResolvedRemoteIds.length > 0) {
+          await clearAcceptedDecisions(ref, acceptedResolvedRemoteIds);
+          setDismissed((prev) => {
+            const drop = new Set(acceptedResolvedRemoteIds.map((id) => String(id)));
+            const next: Record<string, SuggestionDecision> = {};
+            for (const [k, v] of Object.entries(prev)) {
+              if (v === "accepted" && drop.has(k)) continue;
+              next[k] = v;
+            }
+            return next;
+          });
+        }
+
+        // 7. New head SHA → reload the open file.
+        if (newHeadSha !== headSha) {
+          setHeadSha(newHeadSha);
+          if (selectedPath) {
+            const newText = await client.getFileContent(ref, selectedPath, newHeadSha);
+            setSource(newText);
+            setBaseSource(newText);
+            setSuggestionComments({});
+          }
+        }
+
+        // 8. Refresh legacy comments state. Repository already has
+        //    synced state from its own sync cycle, so no extra polling
+        //    cids are required — fall back to a single reloadComments.
+        await reloadComments();
+        setReviewFilter(revealSubmittedFacets);
+        setEmphasizedThreadId(null);
+        return;
+      }
+      // ---- Pre-bootstrap fallback: original legacy path -----------------
       // Drafts → comments / replies. A draft is a reply when its thread id
       // matches an existing submitted comment's thread (and its own cid !==
       // thread, i.e. it isn't the new-thread root).
