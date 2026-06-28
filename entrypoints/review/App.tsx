@@ -309,6 +309,35 @@ export function App() {
     if (!repositoryAppState) return [];
     return commentViewsToExisting(repositoryAppState.commentViews.values());
   }, [repositoryAppState]);
+  // Resolved-thread mapping into the reviewItems thread-key space:
+  //   - Bark-authored: thread key = comment.id (cid), same as Repository
+  //     Thread.id.
+  //   - Foreign: reviewItems keys each foreign comment by `solo:${source}:
+  //     ${remoteId}` (legacy "one-comment-per-thread" shape), so the
+  //     same resolved Thread surfaces as one entry per foreign comment.
+  const resolvedThreadKeys = useMemo(() => {
+    const out = new Set<string>();
+    if (!prRepository || !repositoryAppState) return out;
+    const resolvedIds = new Set(
+      prRepository
+        .getLocalState()
+        .threads.filter((t) => t.resolved)
+        .map((t) => t.id),
+    );
+    if (resolvedIds.size === 0) return out;
+    for (const v of repositoryAppState.commentViews.values()) {
+      if (!resolvedIds.has(v.comment.threadId)) continue;
+      const cid = v.comment.id;
+      if (cid.startsWith("foreign-review-")) {
+        if (v.comment.remoteId !== undefined) out.add(`solo:review:${v.comment.remoteId}`);
+      } else if (cid.startsWith("foreign-issue-")) {
+        if (v.comment.remoteId !== undefined) out.add(`solo:issue:${v.comment.remoteId}`);
+      } else {
+        out.add(cid);
+      }
+    }
+    return out;
+  }, [prRepository, repositoryAppState]);
 
   const lineStarts = useMemo(() => buildLineIndex(source), [source]);
   const diffRanges = useMemo(
@@ -362,7 +391,10 @@ export function App() {
   // in one sorted list.
   const threads = useMemo(
     () =>
-      buildThreads(comments, drafts, curPath, { accepted: (id) => dismissed[id] === "accepted" }),
+      buildThreads(comments, drafts, curPath, {
+        accepted: (id) => dismissed[id] === "accepted",
+        resolvedKeys: resolvedThreadKeys,
+      }),
     [comments, drafts, curPath, dismissed],
   );
   const entries = useMemo(
@@ -614,9 +646,19 @@ export function App() {
       currentPath: curPath,
       dismissed,
       oldSources,
+      resolvedKeys: resolvedThreadKeys,
     });
     view.dispatch({ effects: setSuggestionMarks.of(marks) });
-  }, [comments, source, lineStarts, headSha, selectedPath, dismissed, oldSources]);
+  }, [
+    comments,
+    source,
+    lineStarts,
+    headSha,
+    selectedPath,
+    dismissed,
+    oldSources,
+    resolvedThreadKeys,
+  ]);
 
   // Scroll the emphasized item (e.g. after clicking its highlighted text in the
   // body) into view in the sidebar. The id is a thread id or a live-suggestion
