@@ -79,9 +79,7 @@ import {
 import { isRangeInDiff, parseRightRanges } from "../../lib/pr/diff";
 import {
   clearAcceptedDecisions,
-  listDrafts,
   listSuggestionEdits,
-  saveDrafts,
   saveSuggestionEdits,
   type PendingDraft,
   type SuggestionDecision,
@@ -266,36 +264,6 @@ export function App() {
           prRef: ref,
           storage: browser.storage.local,
         });
-        // L7d-1 one-time migration: any drafts still living in legacy
-        // chrome.storage (pre-Repository persistence) move into Repository
-        // LocalState here, then the legacy key is cleared. Idempotent —
-        // already-migrated cids are filtered out by id-equality with the
-        // current LocalState. Best-effort: failure leaves both stores
-        // intact so a later boot can retry.
-        try {
-          const legacy = await listDrafts(ref);
-          if (legacy.length > 0) {
-            const known = new Set(repository.getLocalState().comments.map((c) => c.id));
-            // Insert top-level drafts (cid === thread) before replies so each
-            // reply's parent is already present in LocalState. viewerLogin
-            // isn't loaded yet at bootstrap; the author field on a draft
-            // Comment isn't surfaced (it's "yours"), so an empty placeholder
-            // is fine until submit overwrites it.
-            const sorted = [...legacy].sort((a, b) => {
-              const ar = a.cid === a.thread ? 0 : 1;
-              const br = b.cid === b.thread ? 0 : 1;
-              return ar - br;
-            });
-            for (const d of sorted) {
-              if (known.has(d.cid)) continue;
-              const parentLocalId = d.cid === d.thread ? undefined : d.thread;
-              await repository.upsertComment(pendingDraftToComment(d, "", parentLocalId));
-            }
-            await saveDrafts(ref, []);
-          }
-        } catch {
-          // ignored on purpose — the migration runs again next bootstrap.
-        }
         if (!cancelled) {
           setPrRepository(repository);
           setRefreshPr(() => refresh);
