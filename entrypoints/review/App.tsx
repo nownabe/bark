@@ -1003,6 +1003,27 @@ export function App() {
       };
     });
 
+  // Compose the visible body for a submitted draft:
+  //   in-diff:     <body> + (suggestion block if any)
+  //   out-of-diff: <body> + (suggestion block if any) + note + quoted + permalink
+  // The new layer's Comment.body is the *visible* body — the Executor appends
+  // the metadata fence at post time, so the wire format matches the legacy
+  // path exactly.
+  const composeDraftBody = (d: PendingDraft): string => {
+    const suggestion =
+      d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
+    if (d.inDiff) return `${d.body}${suggestion}`;
+    const quoted = d.quote
+      .split("\n")
+      .map((l) => `> ${l}`)
+      .join("\n");
+    const note =
+      d.kind === "suggestion"
+        ? "\n\n(Out of diff: this suggestion will not show an Apply button.)"
+        : "";
+    return `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
+  };
+
   const submitReview = async () => {
     if (!client || !ref) return;
     if (!prRepository) {
@@ -1014,65 +1035,33 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      // In-diff drafts go through Repository.submitDrafts (new write path).
-      // Out-of-diff drafts keep the legacy createIssueComment path because
-      // their body composition (quoted block + permalink) is a Bark-specific
-      // UX extension that lives outside the new layer's Comment.body contract
-      // (ADR 0001 §3: body is the visible body only). L7b folds them in.
-      const inDiffDrafts = toSubmit.filter((d) => d.inDiff);
-      const outOfDiffDrafts = toSubmit.filter((d) => !d.inDiff);
-
-      if (inDiffDrafts.length > 0) {
-        const inRepo = new Set(prRepository.getLocalState().comments.map((c) => c.id));
-        for (const d of inDiffDrafts) {
-          if (inRepo.has(d.cid)) continue; // already double-written by L4/L6a
-          const body =
-            d.kind === "suggestion"
-              ? `${d.body}\n\n${buildSuggestionBlock(d.suggestion ?? "")}`
-              : d.body;
-          // parentLocalId: top-level (d.cid === d.thread) → undefined;
-          // reply to a submitted thread → root comment's LocalId via
-          // commentViewByRemoteId; reply to a still-draft thread →
-          // rootDraft.cid (same as draft.thread).
-          const thread = threads.find((t) => t.id === d.thread);
-          const parentLocalId =
-            d.cid === d.thread
-              ? undefined
-              : thread?.rootComment
-                ? commentViewByRemoteId.get(thread.rootComment.id)?.comment.id
-                : (thread?.rootDraft?.cid ?? undefined);
-          await prRepository.upsertComment(
-            pendingDraftToComment({ ...d, body }, viewerLogin ?? "you", parentLocalId),
-          );
-        }
-        await prRepository.submitDrafts();
+      // In-diff and out-of-diff drafts both go through Repository.submitDrafts.
+      // The Planner routes Comments based on the bootstrap's isInDiff predicate:
+      // in-diff → PostReviewBatch, out-of-diff → PostIssueComment. The Bark-
+      // specific quoted-body / permalink composition for out-of-diff lives on
+      // Comment.body (ADR 0001 §3: body is the visible body only), so the new
+      // layer's wire format (visible body + metadata fence) carries it as-is.
+      const inRepo = new Set(prRepository.getLocalState().comments.map((c) => c.id));
+      for (const d of toSubmit) {
+        if (inRepo.has(d.cid)) continue; // already double-written by L4/L6a
+        const body = composeDraftBody(d);
+        // parentLocalId: top-level (d.cid === d.thread) → undefined;
+        // reply to a submitted thread → root comment's LocalId via
+        // commentViewByRemoteId; reply to a still-draft thread →
+        // rootDraft.cid (same as draft.thread).
+        const thread = threads.find((t) => t.id === d.thread);
+        const parentLocalId =
+          d.cid === d.thread
+            ? undefined
+            : thread?.rootComment
+              ? commentViewByRemoteId.get(thread.rootComment.id)?.comment.id
+              : (thread?.rootDraft?.cid ?? undefined);
+        await prRepository.upsertComment(
+          pendingDraftToComment({ ...d, body }, viewerLogin ?? "you", parentLocalId),
+        );
       }
+      await prRepository.submitDrafts();
 
-      // ---- out-of-diff: legacy path with the rich quoted body ---------
-      for (const d of outOfDiffDrafts) {
-        const suggestion =
-          d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
-        const quoted = d.quote
-          .split("\n")
-          .map((l) => `> ${l}`)
-          .join("\n");
-        const note =
-          d.kind === "suggestion"
-            ? "\n\n(Out of diff: this suggestion will not show an Apply button.)"
-            : "";
-        const visible =
-          `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
-        const dmeta: CommentMetadata = {
-          cid: d.cid,
-          path: d.path,
-          range: d.range,
-          quote: d.quote,
-          sha: d.sha,
-          thread: d.thread,
-          kind: d.kind,
-        };
-        await client.createIssueComment(ref, embedMetadata(visible, dmeta));
-      }
       await replaceAndPersistDrafts([]);
       setSource(baseSource); // live suggestion edits are now submitted
       setSuggestionComments({});
@@ -1096,10 +1085,9 @@ export function App() {
     }
   };
 
-  // Author Submit: flush every staged action together — drafts, file edits,
-  // and accepted-suggestion thread resolves — through Repository.submitDrafts.
-  // Out-of-diff drafts still go via the legacy createIssueComment path (folded
-  // in L7b).
+  // Author Submit: flush every staged action together — drafts (in-diff and
+  // out-of-diff), file edits, and accepted-suggestion thread resolves —
+  // through Repository.submitDrafts.
   const submitAuthor = async () => {
     if (!client || !ref || !headRef || !headSha) return;
     if (!prRepository) {
@@ -1109,20 +1097,16 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      // In-diff drafts + FileEdits + accepted-thread resolves go through
-      // Repository.submitDrafts(). Out-of-diff drafts still use the legacy
-      // issue-comment path (quoted-body UX extension — folded in L7b).
-      const inDiffDrafts = drafts.filter((d) => d.inDiff);
-      const outOfDiffDrafts = drafts.filter((d) => !d.inDiff);
+      // Drafts + FileEdits + accepted-thread resolves all go through
+      // Repository.submitDrafts(). Planner routes Comments to PostReviewBatch
+      // (in-diff) or PostIssueComment (out-of-diff); body composition lives
+      // on Comment.body via composeDraftBody.
 
-      // 1. Drafts → Repository (in-diff only).
+      // 1. Drafts → Repository.
       const inRepo = new Set(prRepository.getLocalState().comments.map((c) => c.id));
-      for (const d of inDiffDrafts) {
+      for (const d of drafts) {
         if (inRepo.has(d.cid)) continue;
-        const body =
-          d.kind === "suggestion"
-            ? `${d.body}\n\n${buildSuggestionBlock(d.suggestion ?? "")}`
-            : d.body;
+        const body = composeDraftBody(d);
         const thread = threads.find((t) => t.id === d.thread);
         const parentLocalId =
           d.cid === d.thread
@@ -1169,39 +1153,12 @@ export function App() {
         acceptedResolvedRemoteIds.push(info.commentId);
       }
 
-      // 4. Submit — Reconciler emits PostReviewBatch / PostReply +
-      //    one Commit step for the FileEdits.
+      // 4. Submit — Reconciler emits PostReviewBatch / PostIssueComment /
+      //    PostReply + one Commit step for the FileEdits.
       await prRepository.submitDrafts();
       const newHeadSha = prRepository.getRemoteState().pullRequest?.headSha ?? headSha;
 
-      // 5. Out-of-diff drafts still go through the legacy
-      //    createIssueComment path (quoted-body UX extension).
-      for (const d of outOfDiffDrafts) {
-        const suggestion =
-          d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
-        const quoted = d.quote
-          .split("\n")
-          .map((l) => `> ${l}`)
-          .join("\n");
-        const note =
-          d.kind === "suggestion"
-            ? "\n\n(Out of diff: this suggestion will not show an Apply button.)"
-            : "";
-        const visible =
-          `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
-        const dmeta: CommentMetadata = {
-          cid: d.cid,
-          path: d.path,
-          range: d.range,
-          quote: d.quote,
-          sha: d.sha,
-          thread: d.thread,
-          kind: d.kind,
-        };
-        await client.createIssueComment(ref, embedMetadata(visible, dmeta));
-      }
-
-      // 6. Legacy state cleanup.
+      // 5. Legacy state cleanup.
       await replaceAndPersistDrafts([]);
       await discardAllPersistedEdits();
       if (acceptedResolvedRemoteIds.length > 0) {
@@ -1217,7 +1174,7 @@ export function App() {
         });
       }
 
-      // 7. New head SHA → reload the open file.
+      // 6. New head SHA → reload the open file.
       if (newHeadSha !== headSha) {
         setHeadSha(newHeadSha);
         if (selectedPath) {
@@ -1228,7 +1185,7 @@ export function App() {
         }
       }
 
-      // 8. Repository.submitDrafts already updated LocalState with the synced
+      // 7. Repository.submitDrafts already updated LocalState with the synced
       //    comments + threads (via Reconciler / apply), so commentViews
       //    reflects them without an extra fetch.
       setReviewFilter(revealSubmittedFacets);
