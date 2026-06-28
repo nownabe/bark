@@ -76,7 +76,7 @@ import {
   pullStatus,
   type PrRef,
 } from "../../lib/github";
-import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
+import { isRangeInDiff, parseRightRanges } from "../../lib/pr/diff";
 import {
   clearAcceptedDecisions,
   listDrafts,
