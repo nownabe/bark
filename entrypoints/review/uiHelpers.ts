@@ -4,7 +4,7 @@
 // for the UI lives here. No React state, no fetchers, no side effects.
 
 import { GitHubApiError, type PullStatus } from "../../lib/github";
-import type { AnchorStatus } from "../../lib/reanchor";
+import type { AnchorStatus } from "./adapters/displayPositionToAnchorStatus";
 
 /** Preview = rendered Markdown view; Raw = source / line-numbered view. */
 export type ViewMode = "raw" | "preview";
