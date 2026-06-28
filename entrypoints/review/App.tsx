@@ -80,8 +80,10 @@ import {
 import { isRangeInDiff, parseRightRanges } from "../../lib/diff";
 import {
   clearAcceptedDecisions,
-  discardAllDrafts,
+  listDrafts,
   listSuggestionEdits,
+  saveDrafts,
+  saveSuggestionEdits,
   type PendingDraft,
   type SuggestionDecision,
 } from "../../lib/drafts";
@@ -97,8 +99,6 @@ import { pendingDraftToComment } from "./adapters/pendingDraftToComment";
 import { useAuthFlow } from "./hooks/useAuthFlow";
 import { productionAuthDeps } from "./hooks/useAuthFlow.deps";
 import { usePullRequestData } from "./hooks/usePullRequestData";
-import { useDrafts } from "./hooks/useDrafts";
-import { productionDraftsDeps } from "./hooks/useDrafts.deps";
 import { useSuggestionEdits } from "./hooks/useSuggestionEdits";
 import { productionSuggestionEditsDeps } from "./hooks/useSuggestionEdits.deps";
 import { useDismissedSuggestions } from "./hooks/useDismissedSuggestions";
@@ -163,8 +163,6 @@ export function App() {
   // (lib/reanchor diff path). Populated lazily; a missing entry just means
   // re-anchoring falls back to quote search.
   const [oldSources, setOldSources] = useState<Record<string, string>>({});
-  const draftsApi = useDrafts(ref, productionDraftsDeps);
-  const { drafts, replaceAndPersist: replaceAndPersistDrafts, reset: resetDrafts } = draftsApi;
   const dismissedApi = useDismissedSuggestions(ref, productionDismissedDeps);
   const { dismissed, setDismissed, setDecision, reset: resetDismissed } = dismissedApi;
   const threadActions = useThreadActions();
@@ -271,6 +269,36 @@ export function App() {
           prRef: ref,
           storage: browser.storage.local,
         });
+        // L7d-1 one-time migration: any drafts still living in legacy
+        // chrome.storage (pre-Repository persistence) move into Repository
+        // LocalState here, then the legacy key is cleared. Idempotent —
+        // already-migrated cids are filtered out by id-equality with the
+        // current LocalState. Best-effort: failure leaves both stores
+        // intact so a later boot can retry.
+        try {
+          const legacy = await listDrafts(ref);
+          if (legacy.length > 0) {
+            const known = new Set(repository.getLocalState().comments.map((c) => c.id));
+            // Insert top-level drafts (cid === thread) before replies so each
+            // reply's parent is already present in LocalState. viewerLogin
+            // isn't loaded yet at bootstrap; the author field on a draft
+            // Comment isn't surfaced (it's "yours"), so an empty placeholder
+            // is fine until submit overwrites it.
+            const sorted = [...legacy].sort((a, b) => {
+              const ar = a.cid === a.thread ? 0 : 1;
+              const br = b.cid === b.thread ? 0 : 1;
+              return ar - br;
+            });
+            for (const d of sorted) {
+              if (known.has(d.cid)) continue;
+              const parentLocalId = d.cid === d.thread ? undefined : d.thread;
+              await repository.upsertComment(pendingDraftToComment(d, "", parentLocalId));
+            }
+            await saveDrafts(ref, []);
+          }
+        } catch {
+          // ignored on purpose — the migration runs again next bootstrap.
+        }
         if (!cancelled) {
           setPrRepository(repository);
           setRefreshPr(() => refresh);
@@ -344,6 +372,46 @@ export function App() {
     () => parseRightRanges(files.find((f) => f.path === selectedPath)?.patch),
     [files, selectedPath],
   );
+  // Per-file diff ranges; the drafts derivation below uses this to compute
+  // each draft's inDiff at display time (rather than persisting the bit on
+  // the Comment, which has no such field).
+  const diffRangesByPath = useMemo(() => {
+    const out = new Map<string, ReturnType<typeof parseRightRanges>>();
+    for (const f of files) if (f.patch) out.set(f.path, parseRightRanges(f.patch));
+    return out;
+  }, [files]);
+  // Drafts derived from Repository LocalState (Comment.state === "draft").
+  // The PendingDraft shape's derivable fields:
+  //   - inDiff: from diffRangesByPath + anchor range
+  //   - permalink: rebuilt for out-of-diff drafts
+  //   - kind: always "comment" — suggestion-typed drafts are transient (built
+  //     by suggestionsToDrafts at submit time only).
+  const drafts = useMemo<PendingDraft[]>(() => {
+    if (!repositoryAppState || !ref) return [];
+    const out: PendingDraft[] = [];
+    for (const v of repositoryAppState.commentViews.values()) {
+      const c = v.comment;
+      if (c.state !== "draft") continue;
+      const ranges = diffRangesByPath.get(c.path);
+      const inDiff = ranges ? isRangeInDiff(ranges, c.anchor.range.sl, c.anchor.range.el) : false;
+      out.push({
+        cid: c.id,
+        path: c.path,
+        inDiff,
+        range: c.anchor.range,
+        quote: c.anchor.quote,
+        sha: c.anchor.sha,
+        thread: c.threadId,
+        body: c.body,
+        kind: "comment",
+        permalink:
+          !inDiff && c.anchor.sha
+            ? buildBlobPermalink(ref, c.path, c.anchor.sha, c.anchor.range.sl, c.anchor.range.el)
+            : undefined,
+      });
+    }
+    return out;
+  }, [repositoryAppState, diffRangesByPath, ref]);
   const suggestionHunks = useMemo(
     () =>
       role === "reviewer" && source !== baseSource ? diffToSuggestions(baseSource, source) : [],
@@ -726,7 +794,7 @@ export function App() {
   };
 
   const addDraft = async () => {
-    if (!anchor || !ref) return;
+    if (!anchor || !ref || !prRepository) return;
     const inDiff = isRangeInDiff(diffRanges, anchor.startLine, anchor.endLine);
     const path = selectedPath ?? "sample";
     const id = crypto.randomUUID();
@@ -745,14 +813,7 @@ export function App() {
           ? buildBlobPermalink(ref, path, headSha, anchor.startLine, anchor.endLine)
           : undefined,
     };
-    const next = [...drafts, draft];
-    await replaceAndPersistDrafts(next);
-    // L4: also push to the new data layer's LocalState so a future
-    // repository.submitDrafts() (L6) finds the same draft. Double-write
-    // only for now; legacy useDrafts still owns the rendered list.
-    if (prRepository) {
-      await prRepository.upsertComment(pendingDraftToComment(draft, viewerLogin ?? "you"));
-    }
+    await prRepository.upsertComment(pendingDraftToComment(draft, viewerLogin ?? "you"));
     setCommentBody("");
     collapseSelection(); // deselect; the pending highlight stays
     setAnchor(null);
@@ -868,23 +929,18 @@ export function App() {
           ? buildBlobPermalink(ref, a.path, headSha, a.range.sl, a.range.el)
           : undefined,
     };
-    const next = [...drafts, draft];
-    await replaceAndPersistDrafts(next);
-    // L6a: also push to Repository's LocalState so a future
-    // repository.submitDrafts() emits a CreateReply step. The Reconciler
-    // needs parentLocalId (the LocalId of the thread's root Comment) —
-    // resolve it via commentViewByRemoteId when the root is a submitted
-    // comment we already track in AppState. Reply drafts whose parent
-    // is itself a draft (rootDraft only) stay legacy-only this round.
-    if (prRepository && thread.rootComment) {
-      const rootView = commentViewByRemoteId.get(thread.rootComment.id);
-      const parentLocalId = rootView?.comment.id;
-      if (parentLocalId) {
-        await prRepository.upsertComment(
-          pendingDraftToComment(draft, viewerLogin ?? "you", parentLocalId),
-        );
-      }
-    }
+    if (!prRepository) return;
+    // parentLocalId resolves the reply's target inside Repository.LocalState:
+    //  - reply to a submitted thread → root Comment's LocalId via remoteId
+    //  - reply to a still-draft thread → the root draft's cid (== its
+    //    LocalState Comment.id)
+    const parentLocalId = thread.rootComment
+      ? commentViewByRemoteId.get(thread.rootComment.id)?.comment.id
+      : (thread.rootDraft?.cid ?? undefined);
+    if (!parentLocalId) return;
+    await prRepository.upsertComment(
+      pendingDraftToComment(draft, viewerLogin ?? "you", parentLocalId),
+    );
     cancelReply();
   };
 
@@ -974,10 +1030,8 @@ export function App() {
   };
 
   const removeDraft = async (cidToRemove: string) => {
-    const next = drafts.filter((d) => d.cid !== cidToRemove);
-    await replaceAndPersistDrafts(next);
-    // L4: keep Repository's LocalState in sync.
-    if (prRepository) await prRepository.discardComment(cidToRemove);
+    if (!prRepository) return;
+    await prRepository.discardComment(cidToRemove);
   };
 
   // Materialize the reviewer's live suggestion edits into real drafts at submit
@@ -1061,8 +1115,9 @@ export function App() {
         );
       }
       await prRepository.submitDrafts();
-
-      await replaceAndPersistDrafts([]);
+      // No explicit draft clear is needed — submitDrafts flips each draft
+      // Comment from "draft" → "syncing" → "synced", so they fall out of
+      // the drafts useMemo automatically.
       setSource(baseSource); // live suggestion edits are now submitted
       setSuggestionComments({});
       // All files' suggestions just went out, so drop every persisted edit
@@ -1158,8 +1213,9 @@ export function App() {
       await prRepository.submitDrafts();
       const newHeadSha = prRepository.getRemoteState().pullRequest?.headSha ?? headSha;
 
-      // 5. Legacy state cleanup.
-      await replaceAndPersistDrafts([]);
+      // 5. Legacy state cleanup. Drafts auto-fall-out of the drafts useMemo
+      //    once submitDrafts flips them past "draft"; only suggestionEdits +
+      //    accepted-decision state still own their own storage.
       await discardAllPersistedEdits();
       if (acceptedResolvedRemoteIds.length > 0) {
         await clearAcceptedDecisions(ref, acceptedResolvedRemoteIds);
@@ -1204,7 +1260,10 @@ export function App() {
   const handleClearToken = async () => {
     await clearAuthToken();
     resetPrData();
-    resetDrafts();
+    // Drafts live in Repository.LocalState; resetPrData → setPrRepository(null)
+    // drops the in-memory view. Storage is not cleared (consistent with
+    // logging back in as the same user). Suggestion edits + dismissed still
+    // own their own legacy state.
     resetSuggestionEdits();
     resetDismissed();
     setSelectedPath(null);
@@ -1236,15 +1295,14 @@ export function App() {
   // suggestion decisions stay — they keep the suggestion hidden, not pending.
   const discardAllPending = async () => {
     setShowDiscardConfirm(false);
-    // L4: discard the same draft cids in Repository's LocalState (top-
-    // level new-comment drafts only — replies go through L6).
-    const localCids = drafts.map((d) => d.cid);
-    resetDrafts();
     setSource(baseSource);
     setSuggestionComments({});
     resetSuggestionEdits();
-    if (ref) await discardAllDrafts(ref);
+    // Clear the persisted suggestion-edits key for this PR (drafts are
+    // owned by Repository now and discarded individually below).
+    if (ref) await saveSuggestionEdits(ref, {});
     if (prRepository) {
+      const localCids = drafts.map((d) => d.cid);
       for (const cid of localCids) await prRepository.discardComment(cid);
     }
     if (role === "author") {
