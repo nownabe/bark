@@ -20,13 +20,10 @@ mock.module("wxt/browser", () => ({
 }));
 
 const {
-  listDrafts,
-  saveDrafts,
   listSuggestionEdits,
   saveSuggestionEdits,
   listDismissedSuggestions,
   saveDismissedSuggestions,
-  discardAllDrafts,
   clearAcceptedDecisions,
 } = await import("../lib/drafts");
 
@@ -63,50 +60,6 @@ describe("suggestion-edit persistence", () => {
   test("is scoped per PR", async () => {
     await saveSuggestionEdits(ref, { "a.md": { source: "x", base: "x0", comments: {} } });
     expect(await listSuggestionEdits({ owner: "o", repo: "r", number: 2 })).toEqual({});
-  });
-});
-
-describe("discardAllDrafts", () => {
-  const draft = {
-    cid: "d1",
-    path: "a.md",
-    inDiff: true,
-    range: { sl: 1, sc: 1, el: 1, ec: 5 },
-    quote: "q",
-    sha: "sha",
-    thread: "d1",
-    body: "body",
-    kind: "comment" as const,
-  };
-
-  test("clears every pending comment draft and suggestion edit", async () => {
-    await saveDrafts(ref, [draft]);
-    await saveSuggestionEdits(ref, { "a.md": { source: "x", base: "x0", comments: {} } });
-
-    await discardAllDrafts(ref);
-
-    expect(await listDrafts(ref)).toEqual([]);
-    expect(await listSuggestionEdits(ref)).toEqual({});
-  });
-
-  test("preserves the author's accept/reject decisions (not pending review state)", async () => {
-    await saveDrafts(ref, [draft]);
-    await saveDismissedSuggestions(ref, { "123": "accepted" });
-
-    await discardAllDrafts(ref);
-
-    expect(await listDismissedSuggestions(ref)).toEqual({ "123": "accepted" });
-  });
-
-  test("only discards the given PR's drafts", async () => {
-    const other = { owner: "o", repo: "r", number: 2 };
-    await saveDrafts(ref, [draft]);
-    await saveDrafts(other, [draft]);
-
-    await discardAllDrafts(ref);
-
-    expect(await listDrafts(ref)).toEqual([]);
-    expect(await listDrafts(other)).toEqual([draft]);
   });
 });
 

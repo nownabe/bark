@@ -1,7 +1,8 @@
-// Local drafts (pending) — Design Doc §7.2 / §7.7 / R4.
-// Accumulate comments locally as "pending" and flush them to GitHub in bulk on Submit.
-// v1 holds lightweight data in chrome.storage.local (IndexedDB is introduced in a later
-// slice that handles large data such as snapshots). Key: pr:{owner}/{repo}#{n}:drafts.
+// Per-PR client state still owned by chrome.storage: the reviewer's
+// in-progress suggestion edits and the author's accept/reject decisions
+// on submitted suggestions. Pending comment drafts moved to Repository in
+// L7d-1; suggestion edits are scheduled to follow in L7d-2 and dismissed
+// in L7d-3.
 import { browser } from "wxt/browser";
 import { storageKeys } from "./storage";
 import type { AnchorRange } from "./metadata";
@@ -25,20 +26,6 @@ export interface PendingDraft {
   suggestion?: string;
   /** Blob permalink for out-of-diff comments. */
   permalink?: string;
-}
-
-function draftsKey(ref: PrRef): string {
-  return `${storageKeys.pr(ref.owner, ref.repo, ref.number)}:drafts`;
-}
-
-export async function listDrafts(ref: PrRef): Promise<PendingDraft[]> {
-  const key = draftsKey(ref);
-  const result = await browser.storage.local.get(key);
-  return (result[key] as PendingDraft[] | undefined) ?? [];
-}
-
-export async function saveDrafts(ref: PrRef, drafts: PendingDraft[]): Promise<void> {
-  await browser.storage.local.set({ [draftsKey(ref)]: drafts });
 }
 
 /**
@@ -111,14 +98,4 @@ export async function clearAcceptedDecisions(ref: PrRef, commentIds: number[]): 
     next[id] = decision;
   }
   await saveDismissedSuggestions(ref, next);
-}
-
-/**
- * Discard every pending review item for a PR: the reviewer's comment/suggestion
- * drafts and their in-progress suggestion edits. The author's accept/reject
- * decisions (dismissed suggestions) are deliberately left intact — they reflect
- * already-submitted suggestions, not pending review state.
- */
-export async function discardAllDrafts(ref: PrRef): Promise<void> {
-  await Promise.all([saveDrafts(ref, []), saveSuggestionEdits(ref, {})]);
 }
