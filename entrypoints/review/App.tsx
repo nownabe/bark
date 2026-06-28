@@ -67,7 +67,7 @@ import {
 } from "../../lib/suggest";
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
 import type { ExistingComment } from "../../lib/comments";
-import { reanchorComment, type AnchorStatus } from "../../lib/reanchor";
+import type { AnchorStatus } from "../../lib/reanchor";
 import {
   avatarUrl,
   buildBlobPermalink,
@@ -328,6 +328,18 @@ export function App() {
     }
     return out;
   }, [repositoryAppState]);
+  // CommentView lookup by cid (Bark-authored Comment.id). Used by the
+  // editor-highlight / thread-range / jumpTo paths to read each Bark
+  // comment's reanchored displayPosition (ADR 0004) without re-running
+  // the legacy reanchorComment inline.
+  const commentViewByCid = useMemo(() => {
+    const out = new Map<string, CommentView>();
+    if (!repositoryAppState) return out;
+    for (const v of repositoryAppState.commentViews.values()) {
+      out.set(v.comment.id, v);
+    }
+    return out;
+  }, [repositoryAppState]);
   // Comments now come entirely from the Repository's AppState. CommentViews
   // carries Bark-authored synced comments (via LocalState) and foreign comments
   // (via RemoteState). The downstream reviewItems pipeline filters out C/D
@@ -523,16 +535,12 @@ export function App() {
       let from: number;
       let to: number;
       if (t.rootComment?.meta) {
-        const r = reanchorComment(
-          source,
-          lineStarts,
-          t.rootComment.meta,
-          headSha ?? "",
-          oldSourceFor(t.rootComment.meta),
-        );
-        if (r.status === "outdated") continue;
-        from = r.startOffset;
-        to = r.endOffset;
+        // L7e-1: read the reanchored position from the new layer's
+        // CommentView instead of running legacy reanchorComment inline.
+        const dp = commentViewByCid.get(t.rootComment.meta.cid)?.displayPosition;
+        if (!dp || dp.status === "outdated") continue;
+        from = lineColToOffset(dp.range.sl, dp.range.sc, lineStarts);
+        to = lineColToOffset(dp.range.el, dp.range.ec, lineStarts);
       } else if (t.rootDraft) {
         from = lineColToOffset(t.rootDraft.range.sl, t.rootDraft.range.sc, lineStarts);
         to = lineColToOffset(t.rootDraft.range.el, t.rootDraft.range.ec, lineStarts);
@@ -542,7 +550,7 @@ export function App() {
       if (from >= 0 && to <= docLen && from < to) res.push({ id: t.id, from, to });
     }
     return res;
-  }, [threads, visibleThreadIds, source, lineStarts, headSha, curPath, oldSources]);
+  }, [threads, visibleThreadIds, source, lineStarts, curPath, commentViewByCid]);
 
   // The current-doc char span of each pending suggestion's edited text, so a
   // click on the suggested text in the editor maps back to its review item. The
@@ -668,9 +676,9 @@ export function App() {
     // thread is currently visible (per the filter) are highlighted, so resolved
     // threads light up exactly when the Resolved facet is selected. Resolution-
     // event markers carry the root's anchor but aren't real messages → excluded.
+    // L7e-1: each visible comment's editor position comes from the
+    // CommentView's displayPosition (new layer's reanchor result).
     const existing = comments
-      // Suggestions render via their own strikethrough/insert view, not the plain
-      // comment highlight — don't double up.
       .filter(
         (c) =>
           c.meta &&
@@ -679,17 +687,16 @@ export function App() {
           !c.meta.event &&
           visibleThreadIds.has(c.meta.thread),
       )
-      .map((c) =>
-        reanchorComment(
-          source,
-          lineStarts,
-          c.meta as CommentMetadata,
-          headSha ?? "",
-          oldSourceFor(c.meta as CommentMetadata),
-        ),
-      )
-      .filter((r) => r.status !== "outdated")
-      .map((r) => ({ from: r.startOffset, to: r.endOffset }))
+      .flatMap((c) => {
+        const dp = commentViewByCid.get((c.meta as CommentMetadata).cid)?.displayPosition;
+        if (!dp || dp.status === "outdated") return [];
+        return [
+          {
+            from: lineColToOffset(dp.range.sl, dp.range.sc, lineStarts),
+            to: lineColToOffset(dp.range.el, dp.range.ec, lineStarts),
+          },
+        ];
+      })
       .filter(clip);
     const pending = drafts
       .filter((d) => d.path === curPath && visibleThreadIds.has(d.thread))
@@ -700,7 +707,7 @@ export function App() {
       }))
       .filter(clip);
     view.dispatch({ effects: setCommentHighlights.of([...existing, ...pending]) });
-  }, [comments, drafts, visibleThreadIds, source, lineStarts, headSha, selectedPath, oldSources]);
+  }, [comments, drafts, visibleThreadIds, source, lineStarts, selectedPath, commentViewByCid]);
 
   // Render submitted suggestions in the body as tracked changes (old = strikethrough / new = green block).
   useEffect(() => {
@@ -760,11 +767,13 @@ export function App() {
       setSelectedPath(c.meta.path);
       return;
     }
-    const r = reanchorComment(source, lineStarts, c.meta, headSha ?? "", oldSourceFor(c.meta));
-    if (r.status === "outdated") return;
+    const dp = commentViewByCid.get(c.meta.cid)?.displayPosition;
+    if (!dp || dp.status === "outdated") return;
+    const from = lineColToOffset(dp.range.sl, dp.range.sc, lineStarts);
+    const to = lineColToOffset(dp.range.el, dp.range.ec, lineStarts);
     suppressNextAnchor.current = true;
     view.dispatch({
-      selection: { anchor: r.startOffset, head: r.endOffset },
+      selection: { anchor: from, head: to },
       scrollIntoView: true,
     });
     suppressNextAnchor.current = false; // update listener already ran synchronously
@@ -1457,14 +1466,11 @@ export function App() {
 
   const statusFor = (c: ExistingComment): AnchorStatus | null => {
     if (!c.meta || c.meta.path !== (selectedPath ?? "sample")) return null;
-    // L5: prefer the new layer's displayPosition (it already does the LCS
-    // re-anchor under the hood, with strict quote matching). Fall back to
-    // the legacy reanchorComment when AppState hasn't seen this remoteId
-    // yet (bootstrap in flight, or a draft that hasn't been submitted) —
-    // that keeps the badge stable across bootstrap.
-    const view = commentViewByRemoteId.get(c.id);
-    if (view) return displayPositionToAnchorStatus(view.displayPosition);
-    return reanchorComment(source, lineStarts, c.meta, headSha ?? "", oldSourceFor(c.meta)).status;
+    // Read the displayPosition from the new layer. Bark comments are
+    // keyed by cid (covers drafts + synced); foreign comments only by
+    // remoteId.
+    const view = commentViewByCid.get(c.meta.cid) ?? commentViewByRemoteId.get(c.id);
+    return view ? displayPositionToAnchorStatus(view.displayPosition) : null;
   };
 
   // ---- unified review-list item renderers ----
