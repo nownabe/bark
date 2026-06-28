@@ -10,6 +10,8 @@
     "zip": "wxt zip",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:e2e": "wxt build && playwright test",
+    "test:e2e:install": "PLAYWRIGHT_BROWSERS_PATH=$PWD/.local/playwright-browsers playwright install chromium",
     "fmt": "oxfmt --write",
     "postinstall": "wxt prepare",
     "check:format": "oxfmt --check",
@@ -30,6 +32,7 @@
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.4",
+    "@playwright/test": "^1.61.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/bun": "^1.3.14",
