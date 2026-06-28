@@ -66,7 +66,7 @@ import {
   suggestionEditRanges,
 } from "../../lib/suggest";
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
-import { normalizeComments, reloadCommentsUntil, type ExistingComment } from "../../lib/comments";
+import type { ExistingComment } from "../../lib/comments";
 import { reanchorComment, type AnchorStatus } from "../../lib/reanchor";
 import {
   avatarUrl,
@@ -158,12 +158,6 @@ export function App() {
   const [selection, setSelection] = useState<SourceAnchor | null>(null);
   const [bubblePos, setBubblePos] = useState<BubblePos | null>(null);
   const [commentBody, setCommentBody] = useState("");
-  // Legacy comments fetcher: the GitHub REST normaliser still owns the
-  // submit-time read-after-write polling (reloadCommentsUntil). The
-  // derived `comments` value below merges in foreign comments surfaced by
-  // the new data layer — those couldn't be seen at all through the legacy
-  // path because the normaliser doesn't carry foreign-id conventions.
-  const [legacyComments, setLegacyComments] = useState<ExistingComment[]>([]);
   // Source of each commented file as of its createdAtSha, keyed `${sha}:${path}`,
   // so re-anchoring can diff against the exact revision a comment was made on
   // (lib/reanchor diff path). Populated lazily; a missing entry just means
@@ -266,17 +260,21 @@ export function App() {
   // paths are untouched; if bootstrap fails, the rest of App keeps working
   // through its own fetchers.
   const [prRepository, setPrRepository] = useState<PullRequestRepository | null>(null);
+  const [refreshPr, setRefreshPr] = useState<(() => Promise<void>) | null>(null);
   useEffect(() => {
     if (!token || !ref) return;
     let cancelled = false;
     void (async () => {
       try {
-        const { repository } = await bootstrapPullRequest({
+        const { repository, refresh } = await bootstrapPullRequest({
           token,
           prRef: ref,
           storage: browser.storage.local,
         });
-        if (!cancelled) setPrRepository(repository);
+        if (!cancelled) {
+          setPrRepository(repository);
+          setRefreshPr(() => refresh);
+        }
       } catch (e) {
         if (!cancelled) setError(errMessage(e));
       }
@@ -286,11 +284,9 @@ export function App() {
     };
   }, [token, ref?.owner, ref?.repo, ref?.number]);
 
-  // L2 of the legacy-on-new-data-layer plan: read the Repository's AppState
-  // and pull foreign comments (which the legacy normaliser can't see) into
-  // the rendered comment list. Bark-authored ids still come through the
-  // legacy fetcher — its read-after-write polling (reloadCommentsUntil)
-  // remains the source of truth for the just-submitted path until L6.
+  // Read the Repository's AppState: Bark-authored and foreign comments alike
+  // flow through commentViews, so the rendered comment list is fully driven
+  // by the new data layer (no legacy REST polling).
   const deriveCtx = useMemo(() => ({ isInDiff: () => false }), []);
   const repositoryAppState = useAppStateFromRepository(prRepository, deriveCtx);
   // CommentView lookup by GitHub REST id — used by statusFor (L5) so it
@@ -304,21 +300,44 @@ export function App() {
     }
     return out;
   }, [repositoryAppState]);
-  const foreignFromAppState = useMemo(() => {
+  // Comments now come entirely from the Repository's AppState. CommentViews
+  // carries Bark-authored synced comments (via LocalState) and foreign comments
+  // (via RemoteState). The downstream reviewItems pipeline filters out C/D
+  // (foreign issue / out-of-diff review) since Bark's scope is line-bound
+  // markdown review (Design Doc §1).
+  const comments = useMemo<ExistingComment[]>(() => {
     if (!repositoryAppState) return [];
-    // Bark's scope is line-bound markdown review (Design Doc §1). So
-    // foreign comments we surface are limited to GitHub review comments
-    // that DO have a line in the head (i.e. the diff-inside ones).
-    // - issue comments (source === "issue")          → handled in GitHub
-    // - review comments without a line (outdated)    → handled in GitHub
-    return commentViewsToExisting(repositoryAppState.commentViews.values()).filter(
-      (c) => c.meta === null && c.source === "review" && c.line !== undefined,
-    );
+    return commentViewsToExisting(repositoryAppState.commentViews.values());
   }, [repositoryAppState]);
-  const comments = useMemo(() => {
-    const seen = new Set(legacyComments.map((c) => c.id));
-    return [...legacyComments, ...foreignFromAppState.filter((c) => !seen.has(c.id))];
-  }, [legacyComments, foreignFromAppState]);
+  // Resolved-thread mapping into the reviewItems thread-key space:
+  //   - Bark-authored: thread key = comment.id (cid), same as Repository
+  //     Thread.id.
+  //   - Foreign: reviewItems keys each foreign comment by `solo:${source}:
+  //     ${remoteId}` (legacy "one-comment-per-thread" shape), so the
+  //     same resolved Thread surfaces as one entry per foreign comment.
+  const resolvedThreadKeys = useMemo(() => {
+    const out = new Set<string>();
+    if (!prRepository || !repositoryAppState) return out;
+    const resolvedIds = new Set(
+      prRepository
+        .getLocalState()
+        .threads.filter((t) => t.resolved)
+        .map((t) => t.id),
+    );
+    if (resolvedIds.size === 0) return out;
+    for (const v of repositoryAppState.commentViews.values()) {
+      if (!resolvedIds.has(v.comment.threadId)) continue;
+      const cid = v.comment.id;
+      if (cid.startsWith("foreign-review-")) {
+        if (v.comment.remoteId !== undefined) out.add(`solo:review:${v.comment.remoteId}`);
+      } else if (cid.startsWith("foreign-issue-")) {
+        if (v.comment.remoteId !== undefined) out.add(`solo:issue:${v.comment.remoteId}`);
+      } else {
+        out.add(cid);
+      }
+    }
+    return out;
+  }, [prRepository, repositoryAppState]);
 
   const lineStarts = useMemo(() => buildLineIndex(source), [source]);
   const diffRanges = useMemo(
@@ -372,7 +391,10 @@ export function App() {
   // in one sorted list.
   const threads = useMemo(
     () =>
-      buildThreads(comments, drafts, curPath, { accepted: (id) => dismissed[id] === "accepted" }),
+      buildThreads(comments, drafts, curPath, {
+        accepted: (id) => dismissed[id] === "accepted",
+        resolvedKeys: resolvedThreadKeys,
+      }),
     [comments, drafts, curPath, dismissed],
   );
   const entries = useMemo(
@@ -519,33 +541,6 @@ export function App() {
 
   // Per-file content load now lives in useSelectedFileContent.
 
-  // Fetch the PR's review + issue comments and rebuild local state. Exposed as a
-  // callback so actions that mutate comments on GitHub (resolve / reopen) can
-  // refresh immediately instead of waiting for a full page reload.
-  const reloadComments = useCallback(async () => {
-    if (!client || !ref) return;
-    const [reviews, issues] = await Promise.all([
-      client.listReviewComments(ref),
-      client.listIssueComments(ref),
-    ]);
-    setLegacyComments(normalizeComments(reviews, issues));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, ref?.owner, ref?.repo, ref?.number]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        if (!cancelled) await reloadComments();
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadComments]);
-
   // Fetch each commented file as of its createdAtSha so re-anchoring can diff
   // against the exact revision the comment was made on (Design Doc §7.8). Only
   // missing `${sha}:${path}` keys are fetched (cached across renders), and a
@@ -651,9 +646,19 @@ export function App() {
       currentPath: curPath,
       dismissed,
       oldSources,
+      resolvedKeys: resolvedThreadKeys,
     });
     view.dispatch({ effects: setSuggestionMarks.of(marks) });
-  }, [comments, source, lineStarts, headSha, selectedPath, dismissed, oldSources]);
+  }, [
+    comments,
+    source,
+    lineStarts,
+    headSha,
+    selectedPath,
+    dismissed,
+    oldSources,
+    resolvedThreadKeys,
+  ]);
 
   // Scroll the emphasized item (e.g. after clicking its highlighted text in the
   // body) into view in the sidebar. The id is a thread id or a live-suggestion
@@ -909,15 +914,20 @@ export function App() {
     setResolvingId(t.id);
     setError(null);
     try {
+      if (!prRepository) {
+        setError("Data layer is not ready yet. Try again in a moment.");
+        return;
+      }
       if (root.meta) {
         // ---- Bark-authored path (A) -------------------------------------
-        if (!prRepository) {
-          setError("Data layer is not ready yet. Try again in a moment.");
-          return;
-        }
+        // setThreadResolved updates LocalState immediately and runs its own
+        // sync cycle (GraphQL resolveReviewThread). commentViews picks up
+        // the new state via the listener — no extra refresh needed.
         await prRepository.setThreadResolved(t.id, resolved);
       } else if (root.source === "review") {
         // ---- Foreign review path (B) ------------------------------------
+        // GraphQL mutation happens outside the Repository. Refresh
+        // RemoteState afterwards so commentViews reflects the change.
         const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
         if (!nodeId) {
           setError("Could not find the GitHub review thread for this comment.");
@@ -925,13 +935,9 @@ export function App() {
         }
         if (resolved) await client.resolveReviewThread(nodeId);
         else await client.unresolveReviewThread(nodeId);
-      } else {
-        // Issue comments (D) are filtered out in L3a; nothing to do.
-        return;
+        if (refreshPr) await refreshPr();
       }
-      // Refresh comments now so the thread's resolved state reflects immediately
-      // (the reloadKey path only reloads PR info/files, not comments).
-      await reloadComments();
+      // Issue comments (D) are filtered out in L3a; nothing to do.
     } catch (e) {
       setError(errMessage(e));
     } finally {
@@ -1074,19 +1080,9 @@ export function App() {
       // (not only the open file's) and cancel any debounced write that would
       // revive them.
       await discardAllPersistedEdits();
-      // GitHub's GET .../comments can momentarily omit comments a just-completed
-      // POST .../reviews created (read-after-write lag), which left the
-      // just-submitted items invisible until the next reload. Poll until every
-      // submitted cid is back before rebuilding the list.
-      const submittedCids = toSubmit.map((d) => d.cid);
-      const comments = await reloadCommentsUntil(async () => {
-        const [reviews, issues] = await Promise.all([
-          client.listReviewComments(ref),
-          client.listIssueComments(ref),
-        ]);
-        return normalizeComments(reviews, issues);
-      }, submittedCids);
-      setLegacyComments(comments);
+      // Repository.submitDrafts already updated LocalState with the synced
+      // comments (via Reconciler / apply), so commentViews reflects the
+      // just-submitted items without an extra fetch.
       // The pending items just became submitted; if the list was filtered to
       // "Pending" it would now look empty, so make sure "submitted" is on —
       // without forcing the user's "resolved" preference on.
@@ -1232,10 +1228,9 @@ export function App() {
         }
       }
 
-      // 8. Refresh legacy comments state. Repository already has synced
-      //    state from its own sync cycle, so no extra polling cids are
-      //    required — fall back to a single reloadComments.
-      await reloadComments();
+      // 8. Repository.submitDrafts already updated LocalState with the synced
+      //    comments + threads (via Reconciler / apply), so commentViews
+      //    reflects them without an extra fetch.
       setReviewFilter(revealSubmittedFacets);
       setEmphasizedThreadId(null);
     } catch (e) {
