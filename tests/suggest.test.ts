@@ -188,20 +188,28 @@ describe("applyAcceptedSuggestion", () => {
     };
   }
 
+  // The new layer's CommentView.displayPosition is what the caller supplies.
+  // For anchors at the current head, that mirrors the meta's own range.
+  const dpCurrent = (range: { sl: number; sc: number; el: number; ec: number }) => ({
+    status: "current" as const,
+    range,
+  });
+
   test("single-line accept REPLACES the quoted text (regression: was concatenating)", () => {
     // Bug repro: source has "line two" on its own line. The stored anchor is
-    // line-based (sc=1, ec=1) and the meta's sha matches headSha, so
-    // reanchorComment returns the stored range as-is → startOffset === endOffset.
-    // Before the fix, slice(0,from) + repl + slice(end) inserted the
-    // replacement next to the original instead of overwriting it.
+    // line-based (sc=1, ec=1) and the displayPosition collapses to zero
+    // width for a single-line replacement. Before the fix, slice(0,from) +
+    // repl + slice(end) inserted the replacement next to the original
+    // instead of overwriting it.
     const source = "line one\nline two\nline three\n";
     const lineStarts = buildLineIndex(source);
+    const meta = suggestionMeta();
     const out = applyAcceptedSuggestion({
       source,
       lineStarts,
-      meta: suggestionMeta(),
+      meta,
       replacement: "LINE TWO",
-      headSha: "HEAD",
+      displayPosition: dpCurrent(meta.range),
     });
     expect(out).toBe("line one\nLINE TWO\nline three\n");
     // The pre-fix output would have been: "line one\nLINE TWOline two\nline three\n"
@@ -211,35 +219,36 @@ describe("applyAcceptedSuggestion", () => {
   test("multi-line accept replaces every quoted line", () => {
     const source = "h1\nx\ny\nz\nh2\n";
     const lineStarts = buildLineIndex(source);
+    const meta = suggestionMeta({
+      range: { sl: 2, sc: 1, el: 4, ec: 1 },
+      quote: "x\ny\nz",
+    });
     const out = applyAcceptedSuggestion({
       source,
       lineStarts,
-      meta: suggestionMeta({
-        range: { sl: 2, sc: 1, el: 4, ec: 1 },
-        quote: "x\ny\nz",
-      }),
+      meta,
       replacement: "X\nY",
-      headSha: "HEAD",
+      displayPosition: dpCurrent(meta.range),
     });
     expect(out).toBe("h1\nX\nY\nh2\n");
   });
 
-  test("re-anchored: source shifted, locate via quote search", () => {
-    // Source has a line inserted before the suggestion's target line; the
-    // stored line numbers no longer match but the quote still matches.
+  test("uses the displayPosition range (re-anchored to a shifted line)", () => {
+    // The new layer already reanchored the comment to a shifted line; the
+    // caller passes that displayPosition through.
     const source = "INSERTED\nline one\nline two\nline three\n";
     const lineStarts = buildLineIndex(source);
     const out = applyAcceptedSuggestion({
       source,
       lineStarts,
-      meta: suggestionMeta({ sha: "OLD" }), // different from headSha → re-anchor
+      meta: suggestionMeta({ sha: "OLD" }),
       replacement: "LINE TWO",
-      headSha: "HEAD",
+      displayPosition: { status: "mapped", range: { sl: 3, sc: 1, el: 3, ec: 1 } },
     });
     expect(out).toBe("INSERTED\nline one\nLINE TWO\nline three\n");
   });
 
-  test("outdated (quote not found) returns null and leaves the source untouched", () => {
+  test("outdated displayPosition returns null and leaves the source untouched", () => {
     const source = "totally different content\n";
     const lineStarts = buildLineIndex(source);
     const out = applyAcceptedSuggestion({
@@ -247,7 +256,7 @@ describe("applyAcceptedSuggestion", () => {
       lineStarts,
       meta: suggestionMeta({ sha: "OLD", quote: "not present" }),
       replacement: "anything",
-      headSha: "HEAD",
+      displayPosition: { status: "outdated" },
     });
     expect(out).toBeNull();
   });
@@ -255,12 +264,13 @@ describe("applyAcceptedSuggestion", () => {
   test("empty replacement = line deletion", () => {
     const source = "a\nb\nc\n";
     const lineStarts = buildLineIndex(source);
+    const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "b" });
     const out = applyAcceptedSuggestion({
       source,
       lineStarts,
-      meta: suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "b" }),
+      meta,
       replacement: "",
-      headSha: "HEAD",
+      displayPosition: dpCurrent(meta.range),
     });
     // Replaces "b" with "" — the trailing newline before "c" remains.
     expect(out).toBe("a\n\nc\n");

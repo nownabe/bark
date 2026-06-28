@@ -67,7 +67,6 @@ import {
 } from "../../lib/suggest";
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
 import type { ExistingComment } from "../../lib/comments";
-import type { AnchorStatus } from "../../lib/reanchor";
 import {
   avatarUrl,
   buildBlobPermalink,
@@ -94,7 +93,10 @@ import type { PullRequestRepository } from "../../lib/pr/repository";
 import { RepositoryProvider, useAppStateFromRepository } from "../../lib/pr/react";
 import type { CommentView } from "../../lib/pr/appstate";
 import { commentViewsToExisting } from "./adapters/commentViewsToExisting";
-import { displayPositionToAnchorStatus } from "./adapters/displayPositionToAnchorStatus";
+import {
+  type AnchorStatus,
+  displayPositionToAnchorStatus,
+} from "./adapters/displayPositionToAnchorStatus";
 import { pendingDraftToComment } from "./adapters/pendingDraftToComment";
 import { useAuthFlow } from "./hooks/useAuthFlow";
 import { productionAuthDeps } from "./hooks/useAuthFlow.deps";
@@ -158,11 +160,6 @@ export function App() {
   const [selection, setSelection] = useState<SourceAnchor | null>(null);
   const [bubblePos, setBubblePos] = useState<BubblePos | null>(null);
   const [commentBody, setCommentBody] = useState("");
-  // Source of each commented file as of its createdAtSha, keyed `${sha}:${path}`,
-  // so re-anchoring can diff against the exact revision a comment was made on
-  // (lib/reanchor diff path). Populated lazily; a missing entry just means
-  // re-anchoring falls back to quote search.
-  const [oldSources, setOldSources] = useState<Record<string, string>>({});
   const dismissedApi = useDismissedSuggestions(ref, productionDismissedDeps);
   const { dismissed, setDismissed, setDecision, reset: resetDismissed } = dismissedApi;
   const threadActions = useThreadActions();
@@ -519,8 +516,6 @@ export function App() {
 
   // The createdAtSha source for a comment, if we've fetched it — feeds the
   // diff-based re-anchoring path (undefined → quote-search fallback).
-  const oldSourceFor = (meta: CommentMetadata): string | undefined =>
-    meta.sha ? oldSources[`${meta.sha}:${meta.path}`] : undefined;
 
   // Highlighted span of each thread on the current file, so clicking commented
   // text in the body can map back to its thread.
@@ -616,42 +611,9 @@ export function App() {
   }, [suggestionEdits, prRepository, headSha, role]);
 
   // Per-file content load now lives in useSelectedFileContent.
-
-  // Fetch each commented file as of its createdAtSha so re-anchoring can diff
-  // against the exact revision the comment was made on (Design Doc §7.8). Only
-  // missing `${sha}:${path}` keys are fetched (cached across renders), and a
-  // failed fetch is skipped so that comment falls back to quote search.
-  useEffect(() => {
-    if (!client || !ref || !headSha) return;
-    const needed = new Map<string, { path: string; sha: string }>();
-    for (const c of comments) {
-      const m = c.meta;
-      if (!m?.sha || !m.path || m.sha === headSha) continue;
-      const key = `${m.sha}:${m.path}`;
-      if (!(key in oldSources)) needed.set(key, { path: m.path, sha: m.sha });
-    }
-    if (needed.size === 0) return;
-    let cancelled = false;
-    (async () => {
-      const fetched: Record<string, string> = {};
-      await Promise.all(
-        [...needed].map(async ([key, { path, sha }]) => {
-          try {
-            fetched[key] = await client.getFileContent(ref, path, sha);
-          } catch {
-            /* leave unset → re-anchoring falls back to quote search */
-          }
-        }),
-      );
-      if (!cancelled && Object.keys(fetched).length > 0) {
-        setOldSources((prev) => ({ ...prev, ...fetched }));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comments, client, headSha, ref?.owner, ref?.repo, ref?.number]);
+  // Re-anchoring file content (per createdAtSha) is fetched by the new
+  // layer's bootstrap/refresh via fileContentTargets — App.tsx no longer
+  // maintains its own oldSources cache.
 
   // Drafts restore + persistence now live in useDrafts.
   // Suggestion-edits restore + persistence now live in useSuggestionEdits.
@@ -1010,13 +972,14 @@ export function App() {
   // manual edits and other accepts in a single batched commit on Submit.
   const acceptSuggestion = async (c: ExistingComment) => {
     if (!c.meta) return;
+    const view = commentViewByCid.get(c.meta.cid);
+    if (!view) return; // not yet in commentViews (bootstrap in flight)
     const newSource = applyAcceptedSuggestion({
       source,
       lineStarts,
       meta: c.meta,
       replacement: extractSuggestionBlock(c.body) ?? "",
-      headSha: headSha ?? "",
-      oldSource: oldSourceFor(c.meta),
+      displayPosition: view.displayPosition,
     });
     if (newSource === null) return; // can't locate the target text anymore
     setSource(newSource);

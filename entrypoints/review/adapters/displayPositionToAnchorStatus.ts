@@ -9,7 +9,9 @@
 // (it can't tell `mapped` from `shifted` apart anyway).
 
 import type { DisplayPosition } from "../../../lib/pr/reanchor";
-import type { AnchorStatus } from "../../../lib/reanchor";
+
+/** Anchor-status badge state surfaced in the sidebar / status indicator. */
+export type AnchorStatus = "current" | "reanchored" | "outdated";
 
 export function displayPositionToAnchorStatus(p: DisplayPosition): AnchorStatus {
   switch (p.status) {
