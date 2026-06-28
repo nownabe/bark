@@ -10,11 +10,12 @@
 // A header filter narrows the list to all / pending / submitted.
 //
 // Everything here is pure so it can be unit-tested without React/CodeMirror.
+import { lineColToOffset } from "../../lib/anchor";
 import type { ExistingComment } from "../../lib/comments";
 import type { PendingDraft, SuggestionEdit } from "../../lib/drafts";
 import type { AnchorRange, CommentMetadata } from "../../lib/metadata";
+import type { DisplayPosition } from "../../lib/pr/reanchor";
 import { diffToSuggestions, extractSuggestionBlock, type SuggestionHunk } from "../../lib/suggest";
-import { reanchorComment } from "../../lib/reanchor";
 
 /** The viewer's capability in the review UI. */
 export type Role = "author" | "reviewer";
@@ -563,44 +564,38 @@ export function buildSuggestionMarks(args: {
   comments: ExistingComment[];
   source: string;
   lineStarts: number[];
-  headSha: string;
   currentPath: string;
   dismissed: Record<string, unknown>;
-  /** createdAtSha source per `${sha}:${path}`, for diff-based re-anchoring. */
-  oldSources?: Record<string, string>;
+  /** Lookup each Bark comment's reanchored position (new layer's CommentView
+   *  .displayPosition). Returns null when the cid has no view, which is
+   *  treated the same as "outdated". */
+  displayPositionFor: (cid: string) => DisplayPosition | null | undefined;
   /** Thread keys reported resolved by the new data layer. */
   resolvedKeys?: ReadonlySet<string>;
 }): SuggestionRender[] {
-  const {
-    comments,
-    source,
-    lineStarts,
-    headSha,
-    currentPath,
-    dismissed,
-    oldSources,
-    resolvedKeys,
-  } = args;
+  const { comments, source, lineStarts, currentPath, dismissed, displayPositionFor, resolvedKeys } =
+    args;
   const docLen = source.length;
   const resolved = resolvedThreadIds(comments, { resolvedKeys });
-  return comments
-    .filter(
-      (c) =>
-        c.meta?.kind === "suggestion" &&
-        c.meta.path === currentPath &&
-        !dismissed[c.id] &&
-        !resolved.has(c.meta.thread),
-    )
-    .map((c) => {
-      const meta = c.meta as CommentMetadata;
-      const oldSource = meta.sha ? oldSources?.[`${meta.sha}:${meta.path}`] : undefined;
-      const r = reanchorComment(source, lineStarts, meta, headSha, oldSource);
-      const from = r.startOffset;
-      const to = r.startOffset + (meta.quote?.length ?? 0);
-      return { from, to, status: r.status, replacement: extractSuggestionBlock(c.body) ?? "" };
-    })
-    .filter((m) => m.status !== "outdated" && m.from >= 0 && m.to <= docLen && m.from < m.to)
-    .map(({ from, to, replacement }): SuggestionRender => ({ from, to, replacement }));
+  const out: SuggestionRender[] = [];
+  for (const c of comments) {
+    if (c.meta?.kind !== "suggestion") continue;
+    if (c.meta.path !== currentPath) continue;
+    if (dismissed[c.id]) continue;
+    if (resolved.has(c.meta.thread)) continue;
+    const meta = c.meta as CommentMetadata;
+    const dp = displayPositionFor(meta.cid);
+    if (!dp || dp.status === "outdated") continue;
+    // Suggestions store a line-based anchor (sc=1, ec=1), so the
+    // displayPosition collapses to zero width on the start line. Size the
+    // highlight by the quoted old text — covers exactly the replaced lines
+    // and stays correct after a re-anchor shift.
+    const from = lineColToOffset(dp.range.sl, dp.range.sc, lineStarts);
+    const to = from + (meta.quote?.length ?? 0);
+    if (from < 0 || to > docLen || from >= to) continue;
+    out.push({ from, to, replacement: extractSuggestionBlock(c.body) ?? "" });
+  }
+  return out;
 }
 
 /**

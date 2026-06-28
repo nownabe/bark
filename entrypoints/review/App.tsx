@@ -717,23 +717,13 @@ export function App() {
       comments,
       source,
       lineStarts,
-      headSha: headSha ?? "",
       currentPath: curPath,
       dismissed,
-      oldSources,
+      displayPositionFor: (cid) => commentViewByCid.get(cid)?.displayPosition ?? null,
       resolvedKeys: resolvedThreadKeys,
     });
     view.dispatch({ effects: setSuggestionMarks.of(marks) });
-  }, [
-    comments,
-    source,
-    lineStarts,
-    headSha,
-    selectedPath,
-    dismissed,
-    oldSources,
-    resolvedThreadKeys,
-  ]);
+  }, [comments, source, lineStarts, selectedPath, dismissed, commentViewByCid, resolvedThreadKeys]);
 
   // Scroll the emphasized item (e.g. after clicking its highlighted text in the
   // body) into view in the sidebar. The id is a thread id or a live-suggestion
