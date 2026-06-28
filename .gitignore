@@ -3,6 +3,10 @@ node_modules/
 .output/
 .wxt/
 
+# playwright
+test-results/
+playwright-report/
+
 # misc
 *.log
 .DS_Store
