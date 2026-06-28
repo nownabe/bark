@@ -126,15 +126,29 @@ describe("buildSuggestionMarks", () => {
       },
     };
   }
+  // The new layer's CommentView.displayPosition is what App.tsx feeds in.
+  // For these tests, anchors live at the current head, so the position
+  // mirrors the anchor's own range.
+  const dpFromAnchor = (comments: ExistingComment[]) => {
+    const byCid = new Map<string, { sl: number; sc: number; el: number; ec: number }>();
+    for (const c of comments) {
+      if (c.meta) byCid.set(c.meta.cid, c.meta.range);
+    }
+    return (cid: string) => {
+      const range = byCid.get(cid);
+      return range ? { status: "current" as const, range } : null;
+    };
+  };
 
   test("renders a single-line submitted suggestion (regression: was zero-width)", () => {
+    const comments = [suggestionComment()];
     const marks = buildSuggestionMarks({
-      comments: [suggestionComment()],
+      comments,
       source,
       lineStarts,
-      headSha: "HEAD", // sha matches → previously used the collapsed line range
       currentPath: "a.md",
       dismissed: {},
+      displayPositionFor: dpFromAnchor(comments),
     });
     expect(marks).toHaveLength(1);
     expect(marks[0].to).toBeGreaterThan(marks[0].from);
@@ -143,13 +157,14 @@ describe("buildSuggestionMarks", () => {
   });
 
   test("skips non-suggestion comments, other files, and dismissed suggestions", () => {
+    const comments = [suggestionComment({ path: "other.md" }), suggestionComment()];
     const marks = buildSuggestionMarks({
-      comments: [suggestionComment({ path: "other.md" }), suggestionComment()],
+      comments,
       source,
       lineStarts,
-      headSha: "HEAD",
       currentPath: "a.md",
       dismissed: { "1": "accepted" },
+      displayPositionFor: dpFromAnchor(comments),
     });
     expect(marks).toHaveLength(0);
   });
@@ -175,13 +190,14 @@ describe("buildSuggestionMarks", () => {
         event: "resolve",
       },
     };
+    const comments = [suggestionComment(), resolveEvent];
     const marks = buildSuggestionMarks({
-      comments: [suggestionComment(), resolveEvent],
+      comments,
       source,
       lineStarts,
-      headSha: "HEAD",
       currentPath: "a.md",
       dismissed: {},
+      displayPositionFor: dpFromAnchor(comments),
     });
     expect(marks).toHaveLength(0);
   });
@@ -203,14 +219,15 @@ describe("buildSuggestionMarks", () => {
         event,
       },
     });
+    // Latest event (highest id) wins: resolve(id=2) then unresolve(id=3) → reopened
+    const comments = [suggestionComment(), ev(2, "resolve"), ev(3, "unresolve")];
     const marks = buildSuggestionMarks({
-      // Latest event (highest id) wins: resolve(id=2) then unresolve(id=3) → reopened
-      comments: [suggestionComment(), ev(2, "resolve"), ev(3, "unresolve")],
+      comments,
       source,
       lineStarts,
-      headSha: "HEAD",
       currentPath: "a.md",
       dismissed: {},
+      displayPositionFor: dpFromAnchor(comments),
     });
     expect(marks).toHaveLength(1);
   });
