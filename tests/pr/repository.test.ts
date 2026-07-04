@@ -74,9 +74,11 @@ function happyTransport(
   opts: {
     remoteThreadIdForBatch?: string;
   } = {},
-): { transport: Transport; calls: string[] } {
+): { transport: Transport; calls: string[]; commitBaseShas: string[] } {
   const calls: string[] = [];
+  const commitBaseShas: string[] = [];
   let nextRemoteId = 100;
+  let headSeq = 1;
   const transport: Transport = {
     async postReviewBatch(step): Promise<PostReviewBatchOutcome> {
       calls.push("post-review-batch");
@@ -107,12 +109,13 @@ function happyTransport(
       calls.push("unresolve-review-thread");
       return { ok: true };
     },
-    async commit(): Promise<CommitOutcome> {
+    async commit(step): Promise<CommitOutcome> {
       calls.push("commit");
-      return { ok: true, newHeadSha: "h2" };
+      commitBaseShas.push(step.baseSha);
+      return { ok: true, newHeadSha: `h${++headSeq}` };
     },
   };
-  return { transport, calls };
+  return { transport, calls, commitBaseShas };
 }
 
 function makeRepo(transport: Transport, isInDiff: (c: Comment) => boolean = () => true) {
@@ -263,6 +266,68 @@ describe("repository — submitDrafts pipeline", () => {
     expect(r.getLocalState().fileEdits).toEqual([]);
   });
 
+  test("submitDrafts mirrors posted comments and new threads into RemoteState", async () => {
+    const { transport } = happyTransport({ remoteThreadIdForBatch: "PRT_new" });
+    const r = makeRepo(transport);
+    await r.setRemoteState({ ...r.getRemoteState(), pullRequest: pr() });
+    await r.upsertThread(thread({ id: "t1", state: "draft" }));
+    await r.upsertComment(comment({ id: "c1", state: "draft", threadId: "t1" }));
+
+    await r.submitDrafts();
+
+    expect(r.getRemoteState().comments).toContainEqual(
+      expect.objectContaining({ id: "c1", state: "synced", remoteId: 100 }),
+    );
+    expect(r.getRemoteState().threads).toContainEqual(
+      expect.objectContaining({ id: "t1", state: "synced", remoteThreadId: "PRT_new" }),
+    );
+  });
+
+  test("Commit success advances RemoteState's head SHA to newHeadSha", async () => {
+    const { transport } = happyTransport();
+    const r = makeRepo(transport);
+    await r.setRemoteState({ ...r.getRemoteState(), pullRequest: pr() });
+    await r.upsertFileEdit(fileEdit({ id: "f1", state: "draft" }));
+
+    await r.submitDrafts();
+
+    expect(r.getRemoteState().pullRequest?.headSha).toBe("h2");
+  });
+
+  test("a second submit commits on top of the advanced head, not the stale one", async () => {
+    const { transport, commitBaseShas } = happyTransport();
+    const r = makeRepo(transport);
+    await r.setRemoteState({ ...r.getRemoteState(), pullRequest: pr() });
+
+    await r.upsertFileEdit(fileEdit({ id: "f1", state: "draft" }));
+    await r.submitDrafts();
+
+    await r.upsertFileEdit(fileEdit({ id: "f2", state: "draft", editedSource: "edited again" }));
+    await r.submitDrafts();
+
+    // Second commit must be parented on the head created by the first commit;
+    // a stale "h" base makes GitHub reject the ref update as non-fast-forward.
+    expect(commitBaseShas).toEqual(["h", "h2"]);
+    expect(r.getRemoteState().pullRequest?.headSha).toBe("h3");
+  });
+
+  test("Commit failure leaves the head SHA unchanged", async () => {
+    const failingTransport: Transport = {
+      ...happyTransport().transport,
+      async commit(): Promise<CommitOutcome> {
+        return { ok: false, error: { message: "422 Update is not a fast forward" } };
+      },
+    };
+    const r = makeRepo(failingTransport);
+    await r.setRemoteState({ ...r.getRemoteState(), pullRequest: pr() });
+    await r.upsertFileEdit(fileEdit({ id: "f1", state: "draft" }));
+
+    await r.submitDrafts();
+
+    expect(r.getRemoteState().pullRequest?.headSha).toBe("h");
+    expect(r.getLocalState().fileEdits[0]?.state).toBe("draft");
+  });
+
   test("no PullRequest in RemoteState → sync is a no-op (does not throw)", async () => {
     const { transport, calls } = happyTransport();
     const r = makeRepo(transport);
@@ -290,6 +355,26 @@ describe("repository — setThreadResolved", () => {
     expect(calls).toEqual(["resolve-review-thread"]);
     expect(r.getLocalState().threads[0]?.state).toBe("synced");
     expect(r.getLocalState().threads[0]?.resolved).toBe(true);
+  });
+
+  test("resolve then unresolve in one session both reach GitHub", async () => {
+    const { transport, calls } = happyTransport();
+    const r = makeRepo(transport);
+    await r.setRemoteState({
+      ...r.getRemoteState(),
+      pullRequest: pr(),
+      threads: [thread({ id: "t1", state: "synced", remoteThreadId: "PRT", resolved: false })],
+    });
+    await r.upsertThread(thread({ id: "t1", state: "synced", remoteThreadId: "PRT" }));
+
+    await r.setThreadResolved("t1", true);
+    await r.setThreadResolved("t1", false);
+
+    // Without mirroring the resolve into RemoteState, the reconciler sees
+    // desired=false vs remote=false on the second toggle, emits nothing, and
+    // the thread is stuck syncing forever.
+    expect(calls).toEqual(["resolve-review-thread", "unresolve-review-thread"]);
+    expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: false });
   });
 
   test("a draft Thread just updates the field without dispatching", async () => {

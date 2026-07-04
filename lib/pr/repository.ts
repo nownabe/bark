@@ -14,6 +14,7 @@ import { planExecution, type PlannerContext } from "./planner";
 import { reconcile } from "./reconciler";
 import {
   applyStepResults,
+  applyStepResultsToRemote,
   flipDraftsToSyncing,
   mergeRemoteIntoLocal,
   setThreadResolvedToSyncing,
@@ -185,15 +186,20 @@ export class PullRequestRepository {
   }
 
   private async runSyncCycles(): Promise<void> {
-    const ctx = this.plannerContext();
-    if (!ctx) return;
     for (let i = 0; i < this.maxSyncCycles; i++) {
+      // Recompute per cycle: a successful Commit advances the head SHA and the
+      // next cycle (and the next submit) must plan against it.
+      const ctx = this.plannerContext();
+      if (!ctx) return;
       const ops = reconcile(this.localState, this.remoteState);
       if (ops.length === 0) break;
       const steps = planExecution(ops, ctx);
       if (steps.length === 0) break;
       const results = await execute(steps, this.transport);
+      // Every result lands in both stores: entity transitions in LocalState,
+      // confirmed GitHub writes in the RemoteState mirror.
       this.localState = applyStepResults(this.localState, results);
+      this.remoteState = applyStepResultsToRemote(this.remoteState, results);
       this.notify();
       await this.persist();
     }
