@@ -29,6 +29,11 @@ export function extractSuggestionBlock(body: string): string | null {
  * concatenated old+new text on commit. Size the replaced span from
  * `meta.quote.length` instead — the same approach `buildSuggestionMarks`
  * already uses for rendering.
+ *
+ * The replaced span is applied only when it is byte-identical to
+ * `meta.quote` (ADR 0004's quote-match check): a "shifted" target — the
+ * document changed under the suggestion — would otherwise be cut mid-line
+ * and stage corrupted content into the commit (issue #176).
  */
 export function applyAcceptedSuggestion(args: {
   source: string;
@@ -43,7 +48,9 @@ export function applyAcceptedSuggestion(args: {
   const { source, lineStarts, meta, replacement, displayPosition } = args;
   if (displayPosition.status === "outdated") return null;
   const from = lineColToOffset(displayPosition.range.sl, displayPosition.range.sc, lineStarts);
-  const to = from + (meta.quote?.length ?? 0);
+  const quote = meta.quote ?? "";
+  const to = from + quote.length;
+  if (source.slice(from, to) !== quote) return null;
   return source.slice(0, from) + replacement + source.slice(to);
 }
 

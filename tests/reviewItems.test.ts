@@ -202,6 +202,26 @@ describe("buildSuggestionMarks", () => {
     expect(marks).toHaveLength(0);
   });
 
+  test("skips the mark when the target text no longer matches the quote (issue #176)", () => {
+    // The target line changed since the suggestion was written ("shifted"
+    // position). Sizing the strikethrough by quote.length there would
+    // overlay the wrong text — the mark must be skipped instead.
+    const altered = "line one\nline 2!!\nline three\n";
+    const comments = [suggestionComment({ sha: "OLD" })]; // quote: "line two"
+    const marks = buildSuggestionMarks({
+      comments,
+      source: altered,
+      lineStarts: buildLineIndex(altered),
+      currentPath: "a.md",
+      dismissed: {},
+      displayPositionFor: () => ({
+        status: "shifted" as const,
+        range: { sl: 2, sc: 1, el: 2, ec: 1 },
+      }),
+    });
+    expect(marks).toHaveLength(0);
+  });
+
   test("restores the overlay when the latest event is 'unresolve'", () => {
     const ev = (id: number, event: "resolve" | "unresolve"): ExistingComment => ({
       id,

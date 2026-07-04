@@ -107,7 +107,14 @@ import { useSelectedFileContent } from "./hooks/useSelectedFileContent";
 import { useUiPanels } from "./hooks/useUiPanels";
 import { useThreadActions } from "./hooks/useThreadActions";
 import { sampleDoc } from "./sample";
-import { DEV_ROLE_SWITCH, errMessage, installUrl, STATUS_LABEL, type ViewMode } from "./uiHelpers";
+import {
+  canAcceptSuggestion,
+  DEV_ROLE_SWITCH,
+  errMessage,
+  installUrl,
+  STATUS_LABEL,
+  type ViewMode,
+} from "./uiHelpers";
 
 export function App() {
   const params = new URLSearchParams(window.location.search);
@@ -949,7 +956,15 @@ export function App() {
       replacement: extractSuggestionBlock(c.body) ?? "",
       displayPosition: view.displayPosition,
     });
-    if (newSource === null) return; // can't locate the target text anymore
+    if (newSource === null) {
+      // The target text moved or changed since the suggestion was written
+      // (quote no longer matches at the reanchored position) — applying
+      // would corrupt the document (issue #176).
+      setError(
+        "Can't apply this suggestion: the document changed and its target text no longer matches.",
+      );
+      return;
+    }
     setSource(newSource);
     persistSuggestionEdit(curPath, newSource, baseSource, suggestionComments);
     await setDecision(c.id, "accepted");
@@ -1518,6 +1533,14 @@ export function App() {
     const root = t.rootComment;
     const st = root ? statusFor(root) : null;
     const showAuthorActions = root?.meta?.kind === "suggestion" && role === "author";
+    // Accept is gated on the reanchored position still matching the quoted
+    // text — a shifted/outdated target would be corrupted by the apply
+    // (issue #176).
+    const acceptable = showAuthorActions
+      ? canAcceptSuggestion(
+          root?.meta ? commentViewByCid.get(root.meta.cid)?.displayPosition : null,
+        )
+      : false;
     // Resolvable when:
     //  - A: Bark-authored thread (root.meta present), not via accepted-suggestion
     //  - B: foreign in-diff review thread (root.meta null, source review). L3a's
@@ -1580,6 +1603,12 @@ export function App() {
                 <button
                   type="button"
                   className="btn btn--primary btn--sm"
+                  disabled={!acceptable}
+                  title={
+                    acceptable
+                      ? undefined
+                      : "The document changed since this suggestion was written — its target text can't be safely replaced."
+                  }
                   onClick={() => acceptSuggestion(root)}
                 >
                   Accept

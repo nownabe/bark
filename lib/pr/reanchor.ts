@@ -51,10 +51,30 @@ export function reanchor(
     ec: anchor.range.ec,
   };
 
-  const extracted = extractTextAtRange(currentSource, newRange);
-  return extracted === anchor.quote
-    ? { status: "mapped", range: newRange }
-    : { status: "shifted", range: newRange };
+  if (extractTextAtRange(currentSource, newRange) === anchor.quote) {
+    return { status: "mapped", range: newRange };
+  }
+  // Suggestion anchors are stored line-based (sc=1, ec=1) with quote = the
+  // full lines sl..el. The char-based extraction above can never reproduce
+  // such a quote (it collapses to zero width on a single line and drops the
+  // end line on multi-line ranges), which left the quote check inert for
+  // suggestions and misclassified byte-identical targets as "shifted"
+  // (issue #176). Compare against the whole-line extraction too.
+  if (
+    newRange.sc === 1 &&
+    newRange.ec === 1 &&
+    extractLinesAtRange(currentSource, newRange) === anchor.quote
+  ) {
+    return { status: "mapped", range: newRange };
+  }
+  return { status: "shifted", range: newRange };
+}
+
+function extractLinesAtRange(source: string, range: Range): string {
+  return source
+    .split("\n")
+    .slice(range.sl - 1, range.el)
+    .join("\n");
 }
 
 function extractTextAtRange(source: string, range: Range): string {
