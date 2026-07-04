@@ -218,6 +218,23 @@ function applyCommitFailure(
   };
 }
 
+/** Advance RemoteState's head SHA from successful Commit outcomes, so the
+ *  editor sees the new head and the next Commit is parented on it instead of
+ *  the pre-commit head (which GitHub rejects as non-fast-forward). */
+export function applyCommitResultsToRemote(
+  remote: RemoteState,
+  results: StepResult[],
+): RemoteState {
+  let next = remote;
+  for (const result of results) {
+    if (result.step.kind !== "commit") continue;
+    const o = result.outcome as CommitOutcome;
+    if (!o.ok || !next.pullRequest) continue;
+    next = { ...next, pullRequest: { ...next.pullRequest, headSha: o.newHeadSha } };
+  }
+  return next;
+}
+
 /** Conflict policy for refresh: RemoteState wins for synced items, drafts and
  *  syncing items are protected. Synced local items absent from remote are
  *  silently dropped (GitHub deleted them).

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { StepResult } from "../../lib/pr/executor";
+import type { CommitOutcome } from "../../lib/pr/transport";
 import {
+  applyCommitResultsToRemote,
   applyStepResults,
   flipDraftsToSyncing,
   mergeRemoteIntoLocal,
@@ -331,6 +333,37 @@ describe("state-machine — applyStepResults: Commit", () => {
     ];
     const out = applyStepResults(localState({ fileEdits: [f] }), results);
     expect(out.fileEdits[0]).toMatchObject({ state: "draft", lastError: err });
+  });
+});
+
+describe("state-machine — applyCommitResultsToRemote", () => {
+  const commitResult = (outcome: CommitOutcome): StepResult => ({
+    step: { kind: "commit", baseSha: "h", headRef: "topic", fileEdits: [fileEdit()] },
+    outcome,
+  });
+
+  test("Commit success advances the head SHA", () => {
+    const remote = remoteState({ pullRequest: pr({ headSha: "h" }) });
+    const out = applyCommitResultsToRemote(remote, [commitResult({ ok: true, newHeadSha: "h2" })]);
+    expect(out.pullRequest?.headSha).toBe("h2");
+  });
+
+  test("Commit failure and non-commit results leave the head SHA unchanged", () => {
+    const remote = remoteState({ pullRequest: pr({ headSha: "h" }) });
+    const out = applyCommitResultsToRemote(remote, [
+      commitResult({ ok: false, error: { message: "non-fast-forward" } }),
+      {
+        step: { kind: "post-issue-comment", comment: comment() },
+        outcome: { ok: true, mapping: { cid: "c1", remoteId: 1 } },
+      },
+    ]);
+    expect(out).toBe(remote);
+  });
+
+  test("no PullRequest in RemoteState is a no-op", () => {
+    const remote = remoteState();
+    const out = applyCommitResultsToRemote(remote, [commitResult({ ok: true, newHeadSha: "h2" })]);
+    expect(out.pullRequest).toBeNull();
   });
 });
 

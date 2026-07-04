@@ -74,9 +74,11 @@ function happyTransport(
   opts: {
     remoteThreadIdForBatch?: string;
   } = {},
-): { transport: Transport; calls: string[] } {
+): { transport: Transport; calls: string[]; commitBaseShas: string[] } {
   const calls: string[] = [];
+  const commitBaseShas: string[] = [];
   let nextRemoteId = 100;
+  let headSeq = 1;
   const transport: Transport = {
     async postReviewBatch(step): Promise<PostReviewBatchOutcome> {
       calls.push("post-review-batch");
@@ -107,12 +109,13 @@ function happyTransport(
       calls.push("unresolve-review-thread");
       return { ok: true };
     },
-    async commit(): Promise<CommitOutcome> {
+    async commit(step): Promise<CommitOutcome> {
       calls.push("commit");
-      return { ok: true, newHeadSha: "h2" };
+      commitBaseShas.push(step.baseSha);
+      return { ok: true, newHeadSha: `h${++headSeq}` };
     },
   };
-  return { transport, calls };
+  return { transport, calls, commitBaseShas };
 }
 
 function makeRepo(transport: Transport, isInDiff: (c: Comment) => boolean = () => true) {
@@ -261,6 +264,51 @@ describe("repository — submitDrafts pipeline", () => {
     await r.submitDrafts();
 
     expect(r.getLocalState().fileEdits).toEqual([]);
+  });
+
+  test("Commit success advances RemoteState's head SHA to newHeadSha", async () => {
+    const { transport } = happyTransport();
+    const r = makeRepo(transport);
+    await r.setRemoteState({ ...r.getRemoteState(), pullRequest: pr() });
+    await r.upsertFileEdit(fileEdit({ id: "f1", state: "draft" }));
+
+    await r.submitDrafts();
+
+    expect(r.getRemoteState().pullRequest?.headSha).toBe("h2");
+  });
+
+  test("a second submit commits on top of the advanced head, not the stale one", async () => {
+    const { transport, commitBaseShas } = happyTransport();
+    const r = makeRepo(transport);
+    await r.setRemoteState({ ...r.getRemoteState(), pullRequest: pr() });
+
+    await r.upsertFileEdit(fileEdit({ id: "f1", state: "draft" }));
+    await r.submitDrafts();
+
+    await r.upsertFileEdit(fileEdit({ id: "f2", state: "draft", editedSource: "edited again" }));
+    await r.submitDrafts();
+
+    // Second commit must be parented on the head created by the first commit;
+    // a stale "h" base makes GitHub reject the ref update as non-fast-forward.
+    expect(commitBaseShas).toEqual(["h", "h2"]);
+    expect(r.getRemoteState().pullRequest?.headSha).toBe("h3");
+  });
+
+  test("Commit failure leaves the head SHA unchanged", async () => {
+    const failingTransport: Transport = {
+      ...happyTransport().transport,
+      async commit(): Promise<CommitOutcome> {
+        return { ok: false, error: { message: "422 Update is not a fast forward" } };
+      },
+    };
+    const r = makeRepo(failingTransport);
+    await r.setRemoteState({ ...r.getRemoteState(), pullRequest: pr() });
+    await r.upsertFileEdit(fileEdit({ id: "f1", state: "draft" }));
+
+    await r.submitDrafts();
+
+    expect(r.getRemoteState().pullRequest?.headSha).toBe("h");
+    expect(r.getLocalState().fileEdits[0]?.state).toBe("draft");
   });
 
   test("no PullRequest in RemoteState → sync is a no-op (does not throw)", async () => {
