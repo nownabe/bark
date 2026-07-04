@@ -593,6 +593,10 @@ export function buildSuggestionMarks(args: {
     const from = lineColToOffset(dp.range.sl, dp.range.sc, lineStarts);
     const to = from + (meta.quote?.length ?? 0);
     if (from < 0 || to > docLen || from >= to) continue;
+    // Overlay only a target that is still byte-identical to the quoted
+    // text — a "shifted" target would strike through the wrong characters
+    // (issue #176).
+    if (source.slice(from, to) !== meta.quote) continue;
     out.push({ from, to, replacement: extractSuggestionBlock(c.body) ?? "" });
   }
   return out;

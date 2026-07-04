@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  canAcceptSuggestion,
   errMessage,
   installUrl,
   PR_STATUS_LABEL,
@@ -61,6 +62,25 @@ describe("PR_STATUS_LABEL", () => {
       draft: "Draft",
       closed: "Closed",
     });
+  });
+});
+
+describe("canAcceptSuggestion", () => {
+  const range = { sl: 2, sc: 1, el: 2, ec: 1 };
+
+  test("current and mapped positions are acceptable", () => {
+    expect(canAcceptSuggestion({ status: "current", range })).toBe(true);
+    expect(canAcceptSuggestion({ status: "mapped", range })).toBe(true);
+  });
+
+  test("shifted and outdated positions are refused (issue #176)", () => {
+    expect(canAcceptSuggestion({ status: "shifted", range })).toBe(false);
+    expect(canAcceptSuggestion({ status: "outdated" })).toBe(false);
+  });
+
+  test("missing view (bootstrap in flight) is refused", () => {
+    expect(canAcceptSuggestion(null)).toBe(false);
+    expect(canAcceptSuggestion(undefined)).toBe(false);
   });
 });
 

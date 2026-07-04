@@ -261,6 +261,63 @@ describe("applyAcceptedSuggestion", () => {
     expect(out).toBeNull();
   });
 
+  // Issue #176: applyAcceptedSuggestion replaced quote.length chars at the
+  // mapped position without checking the text there still matches the quote,
+  // so a suggestion whose target changed since it was written cut mid-line
+  // and staged corrupted content into the commit.
+  describe("quote verification (issue #176)", () => {
+    test("refuses when the target's interior changed (shifted position)", () => {
+      // The suggestion targets "x\ny\nz" but "y" changed since. The mapped
+      // endpoints still exist so reanchor reports "shifted"; slicing
+      // quote.length chars there would cut mid-line.
+      const source = "h1\nx\nY-CHANGED\nz\nh2\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({
+        sha: "OLD",
+        range: { sl: 2, sc: 1, el: 4, ec: 1 },
+        quote: "x\ny\nz",
+      });
+      const out = applyAcceptedSuggestion({
+        source,
+        lineStarts,
+        meta,
+        replacement: "X\nY",
+        displayPosition: { status: "shifted", range: { sl: 2, sc: 1, el: 4, ec: 1 } },
+      });
+      expect(out).toBeNull();
+    });
+
+    test("refuses a mapped position whose text was altered (defense in depth)", () => {
+      const source = "line one\nline 2!!\nline three\n";
+      const lineStarts = buildLineIndex(source);
+      const out = applyAcceptedSuggestion({
+        source,
+        lineStarts,
+        meta: suggestionMeta({ sha: "OLD" }), // quote: "line two"
+        replacement: "LINE TWO",
+        displayPosition: { status: "mapped", range: { sl: 2, sc: 1, el: 2, ec: 1 } },
+      });
+      expect(out).toBeNull();
+    });
+
+    test("applies a shifted position when the target text is byte-identical", () => {
+      // States persisted before the reanchor fix may still carry "shifted"
+      // for intact targets (line-based anchors were misclassified). The
+      // quote check is the gate, not the status label.
+      const source = "line one\nline two\nline three\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ sha: "OLD" });
+      const out = applyAcceptedSuggestion({
+        source,
+        lineStarts,
+        meta,
+        replacement: "LINE TWO",
+        displayPosition: { status: "shifted", range: meta.range },
+      });
+      expect(out).toBe("line one\nLINE TWO\nline three\n");
+    });
+  });
+
   test("empty replacement = line deletion", () => {
     const source = "a\nb\nc\n";
     const lineStarts = buildLineIndex(source);

@@ -4,6 +4,7 @@
 // for the UI lives here. No React state, no fetchers, no side effects.
 
 import { GitHubApiError, type PullStatus } from "../../lib/github";
+import type { DisplayPosition } from "../../lib/pr/reanchor";
 import type { AnchorStatus } from "./adapters/displayPositionToAnchorStatus";
 
 /** Preview = rendered Markdown view; Raw = source / line-numbered view. */
@@ -33,6 +34,15 @@ export const STATUS_LABEL: Partial<Record<AnchorStatus, string>> = {
   reanchored: "position shifted",
   outdated: "position not found",
 };
+
+/** Whether a submitted suggestion may be accepted given its reanchored
+ *  position. `shifted` means the target text no longer matches the quote and
+ *  `outdated` means it can't be located at all — applying either would
+ *  corrupt the document (issue #176). A missing view (bootstrap in flight)
+ *  is refused the same way. */
+export function canAcceptSuggestion(dp: DisplayPosition | null | undefined): boolean {
+  return dp?.status === "current" || dp?.status === "mapped";
+}
 
 /** Capitalised display labels for the PR's lifecycle state. */
 export const PR_STATUS_LABEL: Record<PullStatus, string> = {
