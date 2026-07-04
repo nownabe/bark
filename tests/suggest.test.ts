@@ -206,6 +206,7 @@ describe("applyAcceptedSuggestion", () => {
     const meta = suggestionMeta();
     const out = applyAcceptedSuggestion({
       source,
+      baseSource: source,
       lineStarts,
       meta,
       replacement: "LINE TWO",
@@ -225,6 +226,7 @@ describe("applyAcceptedSuggestion", () => {
     });
     const out = applyAcceptedSuggestion({
       source,
+      baseSource: source,
       lineStarts,
       meta,
       replacement: "X\nY",
@@ -240,6 +242,7 @@ describe("applyAcceptedSuggestion", () => {
     const lineStarts = buildLineIndex(source);
     const out = applyAcceptedSuggestion({
       source,
+      baseSource: source,
       lineStarts,
       meta: suggestionMeta({ sha: "OLD" }),
       replacement: "LINE TWO",
@@ -253,6 +256,7 @@ describe("applyAcceptedSuggestion", () => {
     const lineStarts = buildLineIndex(source);
     const out = applyAcceptedSuggestion({
       source,
+      baseSource: source,
       lineStarts,
       meta: suggestionMeta({ sha: "OLD", quote: "not present" }),
       replacement: "anything",
@@ -279,6 +283,7 @@ describe("applyAcceptedSuggestion", () => {
       });
       const out = applyAcceptedSuggestion({
         source,
+        baseSource: source,
         lineStarts,
         meta,
         replacement: "X\nY",
@@ -292,6 +297,7 @@ describe("applyAcceptedSuggestion", () => {
       const lineStarts = buildLineIndex(source);
       const out = applyAcceptedSuggestion({
         source,
+        baseSource: source,
         lineStarts,
         meta: suggestionMeta({ sha: "OLD" }), // quote: "line two"
         replacement: "LINE TWO",
@@ -309,6 +315,7 @@ describe("applyAcceptedSuggestion", () => {
       const meta = suggestionMeta({ sha: "OLD" });
       const out = applyAcceptedSuggestion({
         source,
+        baseSource: source,
         lineStarts,
         meta,
         replacement: "LINE TWO",
@@ -324,6 +331,7 @@ describe("applyAcceptedSuggestion", () => {
     const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "b" });
     const out = applyAcceptedSuggestion({
       source,
+      baseSource: source,
       lineStarts,
       meta,
       replacement: "",
@@ -331,5 +339,105 @@ describe("applyAcceptedSuggestion", () => {
     });
     // Replaces "b" with "" — the trailing newline before "c" remains.
     expect(out).toBe("a\n\nc\n");
+  });
+
+  // Issue #177: displayPosition is computed against the head-SHA file
+  // (baseSource), but the accept applies it to the author's locally edited
+  // source. After an earlier accept or manual edit changed the line count,
+  // the head-space line number pointed at the wrong local line — replacing
+  // the wrong text when the quote happened to match there, or refusing a
+  // perfectly valid accept when it didn't. The target line must be re-mapped
+  // from head coordinates to edited coordinates before applying.
+  describe("composing accepts / local edits (issue #177)", () => {
+    // Head file: suggestion B targets line 5 ("old2"). An earlier accept
+    // grew line 2 into two lines, shifting everything below down by one.
+    const baseSource = "intro\nold1\nsame\nsame\nold2\nsame\n";
+
+    test("applies at the re-mapped line after an earlier accept shifted lines down", () => {
+      const source = "intro\nAAA\nBBB\nsame\nsame\nold2\nsame\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 1 }, quote: "old2" });
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource,
+        lineStarts,
+        meta,
+        replacement: "NEW2",
+        displayPosition: dpCurrent(meta.range),
+      });
+      expect(out).toBe("intro\nAAA\nBBB\nsame\nsame\nNEW2\nsame\n");
+    });
+
+    test("does NOT replace a coincidentally matching wrong line after lines shifted up", () => {
+      // Head file: an earlier accept collapsed lines 2-4 into one line,
+      // shifting everything below up by two. Suggestion B targets head
+      // line 5 (the first "dup"); the unmapped head line number now lands
+      // on the LAST "dup" — the quote matches there, so before the fix the
+      // wrong occurrence was silently replaced.
+      const base = "h\nx\ny\nz\ndup\ndup\ndup\nend\n";
+      const source = "h\nX\ndup\ndup\ndup\nend\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 1 }, quote: "dup" });
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource: base,
+        lineStarts,
+        meta,
+        replacement: "DUP!",
+        displayPosition: dpCurrent(meta.range),
+      });
+      // The first dup (head line 5 → edited line 3) is replaced, not the last.
+      expect(out).toBe("h\nX\nDUP!\ndup\ndup\nend\n");
+    });
+
+    test("refuses when a local edit changed the target line itself", () => {
+      const source = "intro\nold1\nsame\nsame\nold2-EDITED\nsame\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 1 }, quote: "old2" });
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource,
+        lineStarts,
+        meta,
+        replacement: "NEW2",
+        displayPosition: dpCurrent(meta.range),
+      });
+      expect(out).toBeNull();
+    });
+
+    test("refuses when an earlier accept deleted the target line", () => {
+      // Head lines 4-6 were collapsed to one line by an earlier multi-line
+      // accept; suggestion B's target (head line 5) no longer exists.
+      const base = "a\nb\nc\nx\ny\nz\nd\n";
+      const source = "a\nb\nc\nX\nd\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 1 }, quote: "y" });
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource: base,
+        lineStarts,
+        meta,
+        replacement: "Y",
+        displayPosition: dpCurrent(meta.range),
+      });
+      expect(out).toBeNull();
+    });
+
+    test("multi-line accept re-maps and applies after an upstream line-count change", () => {
+      const base = "top\nold\nx\ny\nz\nbottom\n";
+      // Earlier accept turned "old" into three lines (+2).
+      const source = "top\nn1\nn2\nn3\nx\ny\nz\nbottom\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ range: { sl: 3, sc: 1, el: 5, ec: 1 }, quote: "x\ny\nz" });
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource: base,
+        lineStarts,
+        meta,
+        replacement: "X\nY",
+        displayPosition: dpCurrent(meta.range),
+      });
+      expect(out).toBe("top\nn1\nn2\nn3\nX\nY\nbottom\n");
+    });
   });
 });

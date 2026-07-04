@@ -4,6 +4,7 @@
 import { diff_match_patch } from "diff-match-patch";
 import { lineColToOffset } from "./anchor";
 import type { CommentMetadata } from "./metadata";
+import { buildLineMap } from "./pr/linemap";
 import type { DisplayPosition } from "./pr/reanchor";
 
 /** Extract the replacement text of a ```suggestion block from a comment body (null if absent).
@@ -34,9 +35,20 @@ export function extractSuggestionBlock(body: string): string | null {
  * `meta.quote` (ADR 0004's quote-match check): a "shifted" target — the
  * document changed under the suggestion — would otherwise be cut mid-line
  * and stage corrupted content into the commit (issue #176).
+ *
+ * `displayPosition` is expressed in head-SHA coordinates (`baseSource`),
+ * but the accept applies to the author's locally edited `source`. When the
+ * two differ — an earlier accept or manual edit changed the line count —
+ * the head-space line number is translated to its edited-space position via
+ * the LCS line map before applying; an unmapped line (deleted or modified
+ * locally) aborts the apply (issue #177).
  */
 export function applyAcceptedSuggestion(args: {
   source: string;
+  /** The head-SHA file content that `displayPosition`'s coordinates refer
+   *  to. Equal to `source` when the author has no local edits. */
+  baseSource: string;
+  /** Line index of `source` (NOT `baseSource`). */
   lineStarts: number[];
   meta: CommentMetadata;
   replacement: string;
@@ -45,9 +57,15 @@ export function applyAcceptedSuggestion(args: {
    *  text is no longer locatable). */
   displayPosition: DisplayPosition;
 }): string | null {
-  const { source, lineStarts, meta, replacement, displayPosition } = args;
+  const { source, baseSource, lineStarts, meta, replacement, displayPosition } = args;
   if (displayPosition.status === "outdated") return null;
-  const from = lineColToOffset(displayPosition.range.sl, displayPosition.range.sc, lineStarts);
+  let targetLine = displayPosition.range.sl;
+  if (source !== baseSource) {
+    const mapped = buildLineMap(baseSource, source).get(targetLine);
+    if (mapped === undefined) return null;
+    targetLine = mapped;
+  }
+  const from = lineColToOffset(targetLine, displayPosition.range.sc, lineStarts);
   const quote = meta.quote ?? "";
   const to = from + quote.length;
   if (source.slice(from, to) !== quote) return null;

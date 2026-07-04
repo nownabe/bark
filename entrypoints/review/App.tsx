@@ -951,6 +951,7 @@ export function App() {
     if (!view) return; // not yet in commentViews (bootstrap in flight)
     const newSource = applyAcceptedSuggestion({
       source,
+      baseSource,
       lineStarts,
       meta: c.meta,
       replacement: extractSuggestionBlock(c.body) ?? "",
