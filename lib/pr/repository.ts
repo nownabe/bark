@@ -13,8 +13,8 @@ import { execute } from "./executor";
 import { planExecution, type PlannerContext } from "./planner";
 import { reconcile } from "./reconciler";
 import {
-  applyCommitResultsToRemote,
   applyStepResults,
+  applyStepResultsToRemote,
   flipDraftsToSyncing,
   mergeRemoteIntoLocal,
   setThreadResolvedToSyncing,
@@ -196,8 +196,10 @@ export class PullRequestRepository {
       const steps = planExecution(ops, ctx);
       if (steps.length === 0) break;
       const results = await execute(steps, this.transport);
+      // Every result lands in both stores: entity transitions in LocalState,
+      // confirmed GitHub writes in the RemoteState mirror.
       this.localState = applyStepResults(this.localState, results);
-      this.remoteState = applyCommitResultsToRemote(this.remoteState, results);
+      this.remoteState = applyStepResultsToRemote(this.remoteState, results);
       this.notify();
       await this.persist();
     }

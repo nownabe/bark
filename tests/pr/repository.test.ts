@@ -266,6 +266,23 @@ describe("repository — submitDrafts pipeline", () => {
     expect(r.getLocalState().fileEdits).toEqual([]);
   });
 
+  test("submitDrafts mirrors posted comments and new threads into RemoteState", async () => {
+    const { transport } = happyTransport({ remoteThreadIdForBatch: "PRT_new" });
+    const r = makeRepo(transport);
+    await r.setRemoteState({ ...r.getRemoteState(), pullRequest: pr() });
+    await r.upsertThread(thread({ id: "t1", state: "draft" }));
+    await r.upsertComment(comment({ id: "c1", state: "draft", threadId: "t1" }));
+
+    await r.submitDrafts();
+
+    expect(r.getRemoteState().comments).toContainEqual(
+      expect.objectContaining({ id: "c1", state: "synced", remoteId: 100 }),
+    );
+    expect(r.getRemoteState().threads).toContainEqual(
+      expect.objectContaining({ id: "t1", state: "synced", remoteThreadId: "PRT_new" }),
+    );
+  });
+
   test("Commit success advances RemoteState's head SHA to newHeadSha", async () => {
     const { transport } = happyTransport();
     const r = makeRepo(transport);
@@ -338,6 +355,26 @@ describe("repository — setThreadResolved", () => {
     expect(calls).toEqual(["resolve-review-thread"]);
     expect(r.getLocalState().threads[0]?.state).toBe("synced");
     expect(r.getLocalState().threads[0]?.resolved).toBe(true);
+  });
+
+  test("resolve then unresolve in one session both reach GitHub", async () => {
+    const { transport, calls } = happyTransport();
+    const r = makeRepo(transport);
+    await r.setRemoteState({
+      ...r.getRemoteState(),
+      pullRequest: pr(),
+      threads: [thread({ id: "t1", state: "synced", remoteThreadId: "PRT", resolved: false })],
+    });
+    await r.upsertThread(thread({ id: "t1", state: "synced", remoteThreadId: "PRT" }));
+
+    await r.setThreadResolved("t1", true);
+    await r.setThreadResolved("t1", false);
+
+    // Without mirroring the resolve into RemoteState, the reconciler sees
+    // desired=false vs remote=false on the second toggle, emits nothing, and
+    // the thread is stuck syncing forever.
+    expect(calls).toEqual(["resolve-review-thread", "unresolve-review-thread"]);
+    expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: false });
   });
 
   test("a draft Thread just updates the field without dispatching", async () => {

@@ -218,21 +218,96 @@ function applyCommitFailure(
   };
 }
 
-/** Advance RemoteState's head SHA from successful Commit outcomes, so the
- *  editor sees the new head and the next Commit is parented on it instead of
- *  the pre-commit head (which GitHub rejects as non-fast-forward). */
-export function applyCommitResultsToRemote(
-  remote: RemoteState,
-  results: StepResult[],
-): RemoteState {
+/** Apply step results to RemoteState, the last-known GitHub mirror — the
+ *  counterpart of applyStepResults for LocalState. Every successful step is a
+ *  confirmed GitHub write, so it is reflected into the mirror per ADR 0001's
+ *  lifecycle sequence ("update RemoteState" on Submit): posted comments and threads
+ *  are upserted as synced, resolved toggles update the mirrored thread (the
+ *  Reconciler diffs against it), and a Commit advances the head SHA (the next
+ *  Commit is parented on it, and the editor reloads the new head). Failed
+ *  steps changed nothing on GitHub and change nothing here. */
+export function applyStepResultsToRemote(remote: RemoteState, results: StepResult[]): RemoteState {
   let next = remote;
   for (const result of results) {
-    if (result.step.kind !== "commit") continue;
-    const o = result.outcome as CommitOutcome;
-    if (!o.ok || !next.pullRequest) continue;
-    next = { ...next, pullRequest: { ...next.pullRequest, headSha: o.newHeadSha } };
+    next = applyStepResultToRemote(next, result);
   }
   return next;
+}
+
+function applyStepResultToRemote(remote: RemoteState, result: StepResult): RemoteState {
+  switch (result.step.kind) {
+    case "post-review-batch": {
+      const o = result.outcome as PostReviewBatchOutcome;
+      return o.ok ? applyReviewBatchSuccessToRemote(remote, result.step, o.mappings) : remote;
+    }
+    case "post-reply":
+    case "post-issue-comment": {
+      const o = result.outcome as PostReplyOutcome | PostIssueCommentOutcome;
+      if (!o.ok) return remote;
+      const synced: Comment = {
+        ...result.step.comment,
+        state: "synced",
+        remoteId: o.mapping.remoteId,
+        lastError: undefined,
+      };
+      return { ...remote, comments: upsertRemoteComment(remote.comments, synced) };
+    }
+    case "resolve-review-thread":
+    case "unresolve-review-thread": {
+      const o = result.outcome as ResolveOutcome;
+      if (!o.ok) return remote;
+      const threadId = result.step.threadId;
+      const resolved = result.step.kind === "resolve-review-thread";
+      return {
+        ...remote,
+        threads: remote.threads.map((t) => (t.id === threadId ? { ...t, resolved } : t)),
+      };
+    }
+    case "commit": {
+      const o = result.outcome as CommitOutcome;
+      if (!o.ok || !remote.pullRequest) return remote;
+      return { ...remote, pullRequest: { ...remote.pullRequest, headSha: o.newHeadSha } };
+    }
+  }
+}
+
+function applyReviewBatchSuccessToRemote(
+  remote: RemoteState,
+  step: PostReviewBatchStep,
+  mappings: CommentRemoteMapping[],
+): RemoteState {
+  const byCid = new Map(mappings.map((m) => [m.cid, m]));
+  let comments = remote.comments;
+  const threadRemotes = new Map<LocalId, string>();
+  for (const c of step.comments) {
+    const m = byCid.get(c.id);
+    if (!m) continue;
+    comments = upsertRemoteComment(comments, {
+      ...c,
+      state: "synced",
+      remoteId: m.remoteId,
+      lastError: undefined,
+    });
+    if (m.remoteThreadId) threadRemotes.set(c.threadId, m.remoteThreadId);
+  }
+  let threads = remote.threads;
+  for (const [threadId, remoteThreadId] of threadRemotes) {
+    threads = threads.some((t) => t.id === threadId)
+      ? threads.map((t) =>
+          t.id === threadId ? { ...t, state: "synced", remoteThreadId, lastError: undefined } : t,
+        )
+      : // A thread just created on GitHub starts unresolved.
+        [...threads, { id: threadId, state: "synced", resolved: false, remoteThreadId }];
+  }
+  return { ...remote, comments, threads };
+}
+
+function upsertRemoteComment(comments: Comment[], next: Comment): Comment[] {
+  const idx = comments.findIndex((c) => c.id === next.id);
+  if (idx === -1) return [...comments, next];
+  const out = comments.slice();
+  out[idx] = next;
+  return out;
 }
 
 /** Conflict policy for refresh: RemoteState wins for synced items, drafts and

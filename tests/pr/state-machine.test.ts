@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { StepResult } from "../../lib/pr/executor";
 import type { CommitOutcome } from "../../lib/pr/transport";
 import {
-  applyCommitResultsToRemote,
   applyStepResults,
+  applyStepResultsToRemote,
   flipDraftsToSyncing,
   mergeRemoteIntoLocal,
   setThreadResolvedToSyncing,
@@ -336,7 +336,7 @@ describe("state-machine — applyStepResults: Commit", () => {
   });
 });
 
-describe("state-machine — applyCommitResultsToRemote", () => {
+describe("state-machine — applyStepResultsToRemote", () => {
   const commitResult = (outcome: CommitOutcome): StepResult => ({
     step: { kind: "commit", baseSha: "h", headRef: "topic", fileEdits: [fileEdit()] },
     outcome,
@@ -344,26 +344,90 @@ describe("state-machine — applyCommitResultsToRemote", () => {
 
   test("Commit success advances the head SHA", () => {
     const remote = remoteState({ pullRequest: pr({ headSha: "h" }) });
-    const out = applyCommitResultsToRemote(remote, [commitResult({ ok: true, newHeadSha: "h2" })]);
+    const out = applyStepResultsToRemote(remote, [commitResult({ ok: true, newHeadSha: "h2" })]);
     expect(out.pullRequest?.headSha).toBe("h2");
   });
 
-  test("Commit failure and non-commit results leave the head SHA unchanged", () => {
-    const remote = remoteState({ pullRequest: pr({ headSha: "h" }) });
-    const out = applyCommitResultsToRemote(remote, [
+  test("Commit success with no PullRequest in RemoteState is a no-op", () => {
+    const remote = remoteState();
+    const out = applyStepResultsToRemote(remote, [commitResult({ ok: true, newHeadSha: "h2" })]);
+    expect(out.pullRequest).toBeNull();
+  });
+
+  test("PostReviewBatch success upserts synced comments and the new thread into the mirror", () => {
+    const c = comment({ id: "c1", state: "syncing", threadId: "t1" });
+    const remote = remoteState({ pullRequest: pr() });
+    const out = applyStepResultsToRemote(remote, [
+      {
+        step: { kind: "post-review-batch", commitId: "h", comments: [c] },
+        outcome: {
+          ok: true,
+          mappings: [{ cid: "c1", remoteId: 11, remoteThreadId: "PRT_new" }],
+        },
+      },
+    ]);
+    expect(out.comments).toContainEqual(
+      expect.objectContaining({ id: "c1", state: "synced", remoteId: 11 }),
+    );
+    expect(out.threads).toContainEqual(
+      expect.objectContaining({
+        id: "t1",
+        state: "synced",
+        resolved: false,
+        remoteThreadId: "PRT_new",
+      }),
+    );
+  });
+
+  test("PostIssueComment success upserts the synced comment into the mirror", () => {
+    const c = comment({ id: "c1", state: "syncing" });
+    const out = applyStepResultsToRemote(remoteState({ pullRequest: pr() }), [
+      {
+        step: { kind: "post-issue-comment", comment: c },
+        outcome: { ok: true, mapping: { cid: "c1", remoteId: 22 } },
+      },
+    ]);
+    expect(out.comments).toContainEqual(
+      expect.objectContaining({ id: "c1", state: "synced", remoteId: 22 }),
+    );
+  });
+
+  test("Resolve / Unresolve success updates the mirrored thread's resolved", () => {
+    const t = thread({ id: "t1", state: "synced", remoteThreadId: "PRT", resolved: false });
+    const resolved = applyStepResultsToRemote(remoteState({ threads: [t] }), [
+      {
+        step: { kind: "resolve-review-thread", threadId: "t1", remoteThreadId: "PRT" },
+        outcome: { ok: true },
+      },
+    ]);
+    expect(resolved.threads[0]?.resolved).toBe(true);
+
+    const unresolved = applyStepResultsToRemote(resolved, [
+      {
+        step: { kind: "unresolve-review-thread", threadId: "t1", remoteThreadId: "PRT" },
+        outcome: { ok: true },
+      },
+    ]);
+    expect(unresolved.threads[0]?.resolved).toBe(false);
+  });
+
+  test("failed outcomes leave the mirror unchanged", () => {
+    const remote = remoteState({
+      pullRequest: pr({ headSha: "h" }),
+      threads: [thread({ id: "t1", state: "synced", remoteThreadId: "PRT" })],
+    });
+    const out = applyStepResultsToRemote(remote, [
       commitResult({ ok: false, error: { message: "non-fast-forward" } }),
       {
-        step: { kind: "post-issue-comment", comment: comment() },
-        outcome: { ok: true, mapping: { cid: "c1", remoteId: 1 } },
+        step: { kind: "post-review-batch", commitId: "h", comments: [comment()] },
+        outcome: { ok: false, error: { message: "422" } },
+      },
+      {
+        step: { kind: "resolve-review-thread", threadId: "t1", remoteThreadId: "PRT" },
+        outcome: { ok: false, error: { message: "500" } },
       },
     ]);
     expect(out).toBe(remote);
-  });
-
-  test("no PullRequest in RemoteState is a no-op", () => {
-    const remote = remoteState();
-    const out = applyCommitResultsToRemote(remote, [commitResult({ ok: true, newHeadSha: "h2" })]);
-    expect(out.pullRequest).toBeNull();
   });
 });
 
