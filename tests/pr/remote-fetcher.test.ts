@@ -284,6 +284,126 @@ describe("remote-fetcher — fetchThreads", () => {
       { id: "foreign-thread-PRT_B", state: "synced", remoteThreadId: "PRT_B", resolved: false },
     ]);
   });
+
+  test("threads past the first reviewThreads page keep their resolved state (issue #178)", async () => {
+    const { fetch } = makeFetch(async (req) => {
+      const vars = (JSON.parse(req.body ?? "{}") as { variables: Record<string, unknown> })
+        .variables;
+      if (vars.cursor === null || vars.cursor === undefined) {
+        return jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: "PRT_page1",
+                      isResolved: false,
+                      comments: {
+                        nodes: [{ databaseId: 1, body: "a" }],
+                        pageInfo: { hasNextPage: false, endCursor: null },
+                      },
+                    },
+                  ],
+                  pageInfo: { hasNextPage: true, endCursor: "CUR1" },
+                },
+              },
+            },
+          },
+        });
+      }
+      return jsonResponse({
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                nodes: [
+                  {
+                    id: "PRT_page2",
+                    isResolved: true,
+                    comments: {
+                      nodes: [{ databaseId: 2, body: "b" }],
+                      pageInfo: { hasNextPage: false, endCursor: null },
+                    },
+                  },
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        },
+      });
+    });
+    const out = await fetchThreads({ token: "t", fetch }, PR);
+    expect(out).toEqual([
+      {
+        id: "foreign-thread-PRT_page1",
+        state: "synced",
+        remoteThreadId: "PRT_page1",
+        resolved: false,
+      },
+      {
+        id: "foreign-thread-PRT_page2",
+        state: "synced",
+        remoteThreadId: "PRT_page2",
+        resolved: true,
+      },
+    ]);
+  });
+
+  test("a Bark thread whose metadata comment is on a later comments page is not misclassified as foreign (issue #178)", async () => {
+    const barkBody = embedMetadata("x", {
+      cid: "c-deep",
+      threadId: "local-thread-deep",
+      path: "f.md",
+      anchor: {
+        sha: "h",
+        range: { sl: 1, sc: 1, el: 1, ec: 2 },
+        quote: "x",
+      },
+    });
+    const { fetch } = makeFetch(async (req) => {
+      const vars = (JSON.parse(req.body ?? "{}") as { variables: Record<string, unknown> })
+        .variables;
+      if (vars.threadId === undefined) {
+        return jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: "PRT_deep",
+                      isResolved: false,
+                      comments: {
+                        nodes: [{ databaseId: 1, body: "foreign reply" }],
+                        pageInfo: { hasNextPage: true, endCursor: "CC1" },
+                      },
+                    },
+                  ],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        });
+      }
+      return jsonResponse({
+        data: {
+          node: {
+            comments: {
+              nodes: [{ databaseId: 2, body: barkBody }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      });
+    });
+    const out = await fetchThreads({ token: "t", fetch }, PR);
+    expect(out).toEqual([
+      { id: "local-thread-deep", state: "synced", remoteThreadId: "PRT_deep", resolved: false },
+    ]);
+  });
 });
 
 describe("remote-fetcher — fetchFileContent URL encoding", () => {

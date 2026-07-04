@@ -8,6 +8,7 @@
 
 import { type GitHubClient, ghGraphQL, GitHubApiError, ghRequest } from "./github-api";
 import { embedMetadata, extractMetadata } from "./metadata";
+import { listReviewThreads } from "./review-threads";
 import type {
   CommitStep,
   PostIssueCommentStep,
@@ -256,61 +257,21 @@ function commitMessage(step: CommitStep): string {
 
 // ---- Identity matching -------------------------------------------------
 
-const LIST_THREADS_QUERY = `
-  query ListReviewThreads($owner: String!, $repo: String!, $number: Int!) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $number) {
-        reviewThreads(first: 100) {
-          nodes {
-            id
-            isResolved
-            comments(first: 100) {
-              nodes {
-                databaseId
-                body
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-`;
-
-type ListThreadsResponse = {
-  repository: {
-    pullRequest: {
-      reviewThreads: {
-        nodes: Array<{
-          id: string;
-          isResolved: boolean;
-          comments: {
-            nodes: Array<{ databaseId: number; body: string }>;
-          };
-        }>;
-      };
-    };
-  };
-};
-
-/** After a review post, fetch the PR's review threads via GraphQL and
- *  build cid → (remoteId, remoteThreadId) mappings for the freshly-posted
- *  comments by extracting hidden metadata from each comment body. */
+/** After a review post, fetch the PR's review threads via GraphQL (all
+ *  pages — see lib/pr/review-threads) and build cid → (remoteId,
+ *  remoteThreadId) mappings for the freshly-posted comments by extracting
+ *  hidden metadata from each comment body. */
 async function findCommentMappings(
   client: GitHubClient,
   prRef: PrRef,
   cids: string[],
 ): Promise<CommentRemoteMapping[]> {
   if (cids.length === 0) return [];
-  const data = await ghGraphQL<ListThreadsResponse>(client, LIST_THREADS_QUERY, {
-    owner: prRef.owner,
-    repo: prRef.repo,
-    number: prRef.number,
-  });
+  const threads = await listReviewThreads(client, prRef);
   const want = new Set(cids);
   const out: CommentRemoteMapping[] = [];
-  for (const thread of data.repository.pullRequest.reviewThreads.nodes) {
-    for (const c of thread.comments.nodes) {
+  for (const thread of threads) {
+    for (const c of thread.comments) {
       const { meta } = extractMetadata(c.body);
       if (meta && want.has(meta.cid)) {
         out.push({
