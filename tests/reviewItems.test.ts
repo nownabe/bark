@@ -14,6 +14,7 @@ import {
   groupPendingByFile,
   buildPendingSuggestions,
   buildSuggestionMarks,
+  canReplyToThread,
   deriveRole,
   filterReviewEntries,
   revealSubmittedFacets,
@@ -250,6 +251,66 @@ describe("buildSuggestionMarks", () => {
       displayPositionFor: dpFromAnchor(comments),
     });
     expect(marks).toHaveLength(1);
+  });
+});
+
+describe("canReplyToThread", () => {
+  test("true for a Bark-authored thread (root carries metadata to anchor the reply)", () => {
+    const threads = buildThreads([comment({ id: 1, meta: meta(5) })], [], "a.md");
+    expect(canReplyToThread(threads[0]!)).toBe(true);
+  });
+
+  test("true for a draft-only thread (root draft anchors the reply)", () => {
+    const threads = buildThreads([], [draft({ cid: "d1" })], "a.md");
+    expect(canReplyToThread(threads[0]!)).toBe(true);
+  });
+
+  test("true for a foreign review thread with a line (anchors to GitHub's native line)", () => {
+    const foreign = comment({
+      id: 9,
+      meta: null,
+      threadKey: "foreign-thread-PRT_a",
+      path: "a.md",
+      line: 3,
+    });
+    const threads = buildThreads([foreign], [], "a.md");
+    expect(canReplyToThread(threads[0]!)).toBe(true);
+  });
+
+  test("false for a foreign review thread without a line (nothing to anchor to)", () => {
+    const foreign = comment({ id: 9, meta: null, threadKey: "k", path: "a.md" });
+    const threads = buildThreads([foreign], [], "a.md");
+    expect(canReplyToThread(threads[0]!)).toBe(false);
+  });
+
+  test("false for a foreign issue thread (GitHub issue comments are flat; issue #183)", () => {
+    const foreign = comment({ id: 9, source: "issue", meta: null, threadKey: "k" });
+    const threads = buildThreads([foreign], [], "a.md");
+    expect(canReplyToThread(threads[0]!)).toBe(false);
+  });
+});
+
+describe("buildThreads — foreign grouping by threadKey", () => {
+  test("foreign comments sharing a threadKey group into one thread", () => {
+    const root = comment({ id: 10, meta: null, threadKey: "foreign-thread-PRT_a", line: 3 });
+    const reply = comment({ id: 11, meta: null, threadKey: "foreign-thread-PRT_a", line: 3 });
+    const threads = buildThreads([root, reply], [], "a.md");
+    expect(threads).toHaveLength(1);
+    expect(threads[0]!.id).toBe("foreign-thread-PRT_a");
+    expect(threads[0]!.messages).toHaveLength(2);
+  });
+
+  test("a reply draft keyed to the foreign thread id nests under it (issue #183)", () => {
+    const root = comment({ id: 10, meta: null, threadKey: "foreign-thread-PRT_a", line: 3 });
+    const reply = draft({ cid: "d1", thread: "foreign-thread-PRT_a" });
+    const threads = buildThreads([root], [reply], "a.md");
+    expect(threads).toHaveLength(1);
+    expect(threads[0]!.messages.map((m) => m.kind)).toEqual(["submitted", "pending"]);
+  });
+
+  test("a comment without meta or threadKey still falls back to a solo thread", () => {
+    const threads = buildThreads([comment({ id: 12, meta: null, line: 3 })], [], "a.md");
+    expect(threads[0]!.id).toBe("solo:review:12");
   });
 });
 

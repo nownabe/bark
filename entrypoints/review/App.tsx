@@ -45,6 +45,7 @@ import {
   buildReviewEntries,
   buildSuggestionMarks,
   buildThreads,
+  canReplyToThread,
   deriveRole,
   filterReviewEntries,
   revealSubmittedFacets,
@@ -104,7 +105,6 @@ import { useSelectedFileContent } from "./hooks/useSelectedFileContent";
 import { useUiPanels } from "./hooks/useUiPanels";
 import { useThreadActions } from "./hooks/useThreadActions";
 import { sampleDoc } from "./sample";
-import { threadKeysForThreadIds } from "./threadKeys";
 import {
   canAcceptSuggestion,
   DEV_ROLE_SWITCH,
@@ -318,23 +318,20 @@ export function App() {
     if (!repositoryAppState) return [];
     return commentViewsToExisting(repositoryAppState.commentViews.values());
   }, [repositoryAppState]);
-  // Resolved-thread mapping into the reviewItems thread-key space:
-  //   - Bark-authored: thread key = comment.id (cid), same as Repository
-  //     Thread.id.
-  //   - Foreign: reviewItems keys each foreign comment by `solo:${source}:
-  //     ${remoteId}` (legacy "one-comment-per-thread" shape), so the
-  //     same resolved Thread surfaces as one entry per foreign comment.
+  // The sidebar's thread keys equal the data layer's Thread ids: Bark
+  // comments group by their metadata threadId, foreign comments by their
+  // threadKey (both == Comment.threadId == Thread.id), so Repository
+  // Thread-id sets can be consumed directly — no key mapping needed.
   const resolvedThreadKeys = useMemo(() => {
     if (!prRepository || !repositoryAppState) return new Set<string>();
-    const resolvedIds = new Set(
+    return new Set(
       prRepository
         .getLocalState()
         .threads.filter((t) => t.resolved)
         .map((t) => t.id),
     );
-    return threadKeysForThreadIds(repositoryAppState.commentViews.values(), resolvedIds);
   }, [prRepository, repositoryAppState]);
-  // Thread keys that can actually be resolved/reopened: they have a
+  // Threads that can actually be resolved/reopened: they have a
   // GitHub-native review thread (a Repository Thread with a remoteThreadId,
   // resolvable via GraphQL). Out-of-diff Bark threads (issue comments) and
   // foreign issue comments never get one, and a freshly-created in-diff
@@ -342,13 +339,12 @@ export function App() {
   // silent no-op (issue #182), so gate the button on this set.
   const resolvableThreadKeys = useMemo(() => {
     if (!prRepository || !repositoryAppState) return new Set<string>();
-    const resolvableIds = new Set(
+    return new Set(
       prRepository
         .getLocalState()
         .threads.filter((t) => t.remoteThreadId !== undefined)
         .map((t) => t.id),
     );
-    return threadKeysForThreadIds(repositoryAppState.commentViews.values(), resolvableIds);
   }, [prRepository, repositoryAppState]);
 
   const lineStarts = useMemo(() => buildLineIndex(source), [source]);
@@ -832,15 +828,20 @@ export function App() {
 
   // Thread reply: inherit the thread's anchor (from its first submitted comment,
   // else its first pending draft) and add a draft with the same thread id.
+  // A foreign review root has no metadata; anchor to its GitHub-native
+  // path/line instead (empty quote — the reply's position comes from the
+  // thread root, not from re-anchoring) and key the draft by the thread's
+  // sidebar id, which equals the data layer's Thread id (issue #183).
   const addReply = async (thread: ReviewThread) => {
     if (!ref || !replyText.trim()) return;
-    const a = thread.rootComment?.meta
+    const root = thread.rootComment;
+    const a = root?.meta
       ? {
-          path: thread.rootComment.meta.path,
-          range: thread.rootComment.meta.range,
-          quote: thread.rootComment.meta.quote,
-          thread: thread.rootComment.meta.thread,
-          sha: thread.rootComment.meta.sha,
+          path: root.meta.path,
+          range: root.meta.range,
+          quote: root.meta.quote,
+          thread: root.meta.thread,
+          sha: root.meta.sha,
         }
       : thread.rootDraft
         ? {
@@ -850,7 +851,15 @@ export function App() {
             thread: thread.rootDraft.thread,
             sha: thread.rootDraft.sha,
           }
-        : null;
+        : root && root.source === "review" && root.path && root.line !== undefined
+          ? {
+              path: root.path,
+              range: { sl: root.line, sc: 1, el: root.line, ec: 1 },
+              quote: "",
+              thread: thread.id,
+              sha: headSha ?? "",
+            }
+          : null;
     if (!a) return;
     const ranges = parseRightRanges(files.find((f) => f.path === a.path)?.patch);
     const inDiff = isRangeInDiff(ranges, a.range.sl, a.range.el);
@@ -1336,7 +1345,11 @@ export function App() {
       setReviewFilter(new Set<ReviewFacet>(["pending", "submitted", "resolved"])); // make sure the emphasized thread is visible
     }
     setEmphasizedThreadId(hit.id);
-    if (replyTo !== hit.id) startReply(hit.id);
+    // Only open the composer when a reply can actually anchor there (#183).
+    const t = threads.find((x) => x.id === hit.id);
+    if (t && canReplyToThread(t)) {
+      if (replyTo !== hit.id) startReply(hit.id);
+    }
     alignItemToText(hit.id);
   };
 
@@ -1429,10 +1442,17 @@ export function App() {
 
   // Click a thread → highlight it in the body and open its reply box, so adding
   // a comment goes into the existing thread instead of starting a new one.
+  // Threads a reply can't anchor to (foreign issue comments, foreign review
+  // comments without a line) get no composer — it would silently discard the
+  // text (issue #183).
   const openThread = (t: ReviewThread) => {
     jumpToThread(t);
     setEmphasizedThreadId(t.id);
-    if (replyTo !== t.id) startReply(t.id);
+    if (canReplyToThread(t)) {
+      if (replyTo !== t.id) startReply(t.id);
+    } else {
+      cancelReply();
+    }
     alignItemToText(t.id);
   };
 

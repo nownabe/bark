@@ -159,6 +159,24 @@ export type PendingItem =
     }
   | { kind: "edit"; path: string };
 
+/**
+ * Whether a reply can be composed on this thread. A reply inherits the
+ * thread's anchor, which needs one of:
+ *  - a Bark-authored root (metadata carries path/range/quote),
+ *  - a pending root draft, or
+ *  - a foreign review root with a known line (GitHub-native path/line —
+ *    the reply anchors to that line and posts via the review-reply
+ *    endpoint).
+ * A foreign issue comment (no path/line, and GitHub issue comments are
+ * flat) can't take a reply; offering the composer there would silently
+ * discard the text (issue #183).
+ */
+export function canReplyToThread(t: ReviewThread): boolean {
+  if (t.rootComment?.meta || t.rootDraft) return true;
+  const root = t.rootComment;
+  return !!root && root.source === "review" && root.line !== undefined;
+}
+
 /** A thread's highlighted span in the body, used to map an editor click to a thread. */
 export interface ThreadRange {
   id: string;
@@ -281,7 +299,11 @@ export function buildThreads(
       if (!prev || c.id > prev.id) latestEvent.set(t, { id: c.id, event: c.meta.event });
       continue;
     }
-    group(c.meta?.thread || `solo:${c.source}:${c.id}`).submitted.push(c);
+    // Key by the Bark metadata threadId, else by the data layer's threadKey
+    // (== Thread entity id), so foreign comments group by their real GitHub
+    // thread — and a reply draft keyed to the same thread id nests with
+    // them. `solo:` is a last-resort fallback for comments with neither.
+    group(c.meta?.thread || c.threadKey || `solo:${c.source}:${c.id}`).submitted.push(c);
   }
   for (const d of drafts) group(d.thread).pending.push(d);
 

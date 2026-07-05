@@ -92,22 +92,25 @@ function fetchIssueCommentsRaw(client: GitHubClient, ref: PrRef): Promise<RawIss
 }
 
 /** Normalise raw review + issue comments to the unified `Comment` shape.
- *  `threadNodeIdByCommentId` maps a review comment's REST id to the GraphQL
- *  node id of the review thread it belongs to; it is what lets a foreign
- *  comment's `threadId` line up with the Thread entity `fetchThreads`
- *  synthesises (both keyed `foreign-thread-<nodeId>`), so foreign comments
- *  in one GitHub thread stay grouped (issue #181) and their resolved state
- *  is surfaced (issue #180). Pass an empty map when the thread data isn't
- *  available; foreign comments then fall back to a per-comment thread id. */
+ *  `threadLocalIdByCommentId` maps a review comment's REST id to the LOCAL
+ *  id of the review thread it belongs to — the same id `fetchThreads` gives
+ *  the Thread entity (a contained Bark comment's metadata threadId, else the
+ *  synthesised `foreign-thread-<nodeId>`). Foreign comments adopt it as
+ *  their `threadId`, so every review comment satisfies
+ *  `comment.threadId === Thread.id`: comments in one GitHub thread stay
+ *  grouped — including native replies to Bark threads — (issue #181) and
+ *  their resolved state is surfaced (issue #180). Pass an empty map when
+ *  the thread data isn't available; foreign comments then fall back to a
+ *  per-comment thread id. */
 export function normalizeComments(
   reviewRaw: RawReviewComment[],
   issueRaw: RawIssueComment[],
-  threadNodeIdByCommentId: ReadonlyMap<number, string> = new Map(),
+  threadLocalIdByCommentId: ReadonlyMap<number, string> = new Map(),
 ): Comment[] {
   const reviewById = new Map(reviewRaw.map((c) => [c.id, c]));
   const out: Comment[] = [];
   for (const rc of reviewRaw) {
-    const c = toCommentFromReview(rc, reviewById, threadNodeIdByCommentId);
+    const c = toCommentFromReview(rc, reviewById, threadLocalIdByCommentId);
     if (c) out.push(c);
   }
   for (const ic of issueRaw) {
@@ -134,7 +137,7 @@ export async function fetchComments(client: GitHubClient, ref: PrRef): Promise<C
 function toCommentFromReview(
   rc: RawReviewComment,
   byId: Map<number, RawReviewComment>,
-  threadNodeIdByCommentId: ReadonlyMap<number, string>,
+  threadLocalIdByCommentId: ReadonlyMap<number, string>,
 ): Comment | null {
   const { body, meta } = extractMetadata(rc.body);
   // A legacy v1 resolve marker is a hidden control comment, not a message —
@@ -170,15 +173,17 @@ function toCommentFromReview(
   // comment entirely (Bark currently does — it's scope is line-bound
   // comments only) or render it elsewhere.
   const headLine = rc.line ?? 0;
-  // Key the thread off the GraphQL review-thread node id (via the map) so
-  // it matches the Thread entity from fetchThreads. Fall back to the
-  // comment's own id only when the thread data is unavailable.
-  const threadNodeId = threadNodeIdByCommentId.get(rc.id);
+  // Adopt the thread's local id (via the map) so the comment matches the
+  // Thread entity from fetchThreads — for a mixed thread that's the Bark
+  // metadata threadId, for an all-foreign one the synthesised
+  // foreign-thread-<nodeId>. Fall back to the comment's own id only when
+  // the thread data is unavailable.
+  const threadLocalId = threadLocalIdByCommentId.get(rc.id);
   return {
     id: `foreign-review-${rc.id}`,
     state: "synced",
     remoteId: rc.id,
-    threadId: threadNodeId ? `foreign-thread-${threadNodeId}` : `foreign-thread-review-${rc.id}`,
+    threadId: threadLocalId ?? `foreign-thread-review-${rc.id}`,
     parentLocalId,
     body: rc.body,
     author,
@@ -257,13 +262,17 @@ function threadsFromRaw(raw: RawReviewThread[]): Thread[] {
   }));
 }
 
-/** Map each review comment's REST id to the GraphQL node id of the review
- *  thread it belongs to. Used to align foreign comments' `threadId` with
- *  the synthesised Thread entity (issues #180 / #181). */
+/** Map each review comment's REST id to the LOCAL id of the review thread
+ *  it belongs to — the same id `threadsFromRaw` gives the Thread entity.
+ *  Foreign comments adopt it as their `threadId` so a thread's comments and
+ *  its Thread entity always share one key, whether the thread is
+ *  all-foreign or mixed (a native reply inside a Bark thread inherits the
+ *  Bark threadId; issues #180 / #181 / #183). */
 function buildCommentThreadMap(raw: RawReviewThread[]): Map<number, string> {
   const map = new Map<number, string>();
   for (const t of raw) {
-    for (const c of t.comments) map.set(c.databaseId, t.id);
+    const localId = findThreadLocalId(t);
+    for (const c of t.comments) map.set(c.databaseId, localId);
   }
   return map;
 }

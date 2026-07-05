@@ -14,6 +14,10 @@ export interface ExistingComment {
   body: string;
   /** The restored anchor for tool-authored comments, null for foreign ones. */
   meta: CommentMetadata | null;
+  /** The data layer's Comment.threadId (== the Thread entity's id). Lets
+   *  foreign comments — which have no metadata — group by their real GitHub
+   *  thread in the sidebar instead of one thread per comment. */
+  threadKey?: string;
   /** For degraded mode: GitHub-native path/line (review comments only). */
   path?: string;
   line?: number;
