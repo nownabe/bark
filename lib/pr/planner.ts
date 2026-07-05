@@ -41,11 +41,21 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
         (ctx.isInDiff(op.comment) ? inDiff : outOfDiff).push(op.comment);
         break;
       case "create-reply":
-        replies.push({
-          kind: "post-reply",
-          comment: op.comment,
-          parent: op.parent,
-        });
+        // A reply to an in-diff review comment nests via the review-reply
+        // endpoint. GitHub issue comments are flat — there is no reply
+        // endpoint for them — so a reply to an out-of-diff (issue-comment)
+        // parent must be posted as another issue comment; Bark reconstructs
+        // the thread from the shared metadata threadId. Routing it to
+        // post-reply would 404 on the issue-comment id (issue #184).
+        if (ctx.isInDiff(op.parent)) {
+          replies.push({
+            kind: "post-reply",
+            comment: op.comment,
+            parent: op.parent,
+          });
+        } else {
+          outOfDiff.push(op.comment);
+        }
         break;
       case "update-thread-resolved":
         if (op.desiredResolved) {
