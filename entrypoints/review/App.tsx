@@ -1172,21 +1172,34 @@ export function App() {
       await prRepository.submitDrafts();
       const newHeadSha = prRepository.getRemoteState().pullRequest?.headSha ?? headSha;
 
+      // A failed Commit (e.g. the #187 conflict check, or a network error)
+      // parks its FileEdits as draft+lastError; step outcomes don't throw.
+      // Keep the author's editor edits and accepted-decision queue in that
+      // case — discarding them here would lose the work while GitHub has
+      // nothing committed. The parked FileEdits retry on the next submit.
+      const commitFailure = prRepository
+        .getLocalState()
+        .fileEdits.find((fe) => fe.lastError)?.lastError;
+
       // 5. Legacy state cleanup. Drafts auto-fall-out of the drafts useMemo
       //    once submitDrafts flips them past "draft"; only suggestionEdits +
       //    accepted-decision state still own their own storage.
-      await discardAllPersistedEdits();
-      if (acceptedResolvedRemoteIds.length > 0) {
-        await clearAcceptedDecisions(ref, acceptedResolvedRemoteIds);
-        setDismissed((prev) => {
-          const drop = new Set(acceptedResolvedRemoteIds.map((id) => String(id)));
-          const next: Record<string, SuggestionDecision> = {};
-          for (const [k, v] of Object.entries(prev)) {
-            if (v === "accepted" && drop.has(k)) continue;
-            next[k] = v;
-          }
-          return next;
-        });
+      if (commitFailure) {
+        setError(`Commit failed: ${commitFailure.message}. Your pending edits are kept.`);
+      } else {
+        await discardAllPersistedEdits();
+        if (acceptedResolvedRemoteIds.length > 0) {
+          await clearAcceptedDecisions(ref, acceptedResolvedRemoteIds);
+          setDismissed((prev) => {
+            const drop = new Set(acceptedResolvedRemoteIds.map((id) => String(id)));
+            const next: Record<string, SuggestionDecision> = {};
+            for (const [k, v] of Object.entries(prev)) {
+              if (v === "accepted" && drop.has(k)) continue;
+              next[k] = v;
+            }
+            return next;
+          });
+        }
       }
 
       // 6. New head SHA → reload the open file.
