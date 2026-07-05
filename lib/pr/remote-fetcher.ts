@@ -8,9 +8,10 @@
 // See docs/adr/0005-refresh-policy.md §2 for what a full refresh covers.
 
 import type { ChangedFile } from "./diff";
-import { type GitHubClient, ghGraphQL, ghPaginate, ghRequest } from "./github-api";
+import { type GitHubClient, ghPaginate, ghRequest } from "./github-api";
 import type { PrRef } from "./github-transport";
 import { extractMetadata } from "./metadata";
+import { listReviewThreads, type RawReviewThread } from "./review-threads";
 import type { Comment, FileContent, PullRequest, RemoteState, Thread, User } from "./types";
 
 // ---- PullRequest -------------------------------------------------------
@@ -198,68 +199,22 @@ function toCommentFromIssue(ic: RawIssueComment): Comment {
 
 // ---- Threads -----------------------------------------------------------
 
-const LIST_THREADS_QUERY = `
-  query ListReviewThreads($owner: String!, $repo: String!, $number: Int!) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $number) {
-        reviewThreads(first: 100) {
-          nodes {
-            id
-            isResolved
-            comments(first: 100) {
-              nodes {
-                databaseId
-                body
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-`;
-
-type ListThreadsResponse = {
-  repository: {
-    pullRequest: {
-      reviewThreads: {
-        nodes: Array<{
-          id: string;
-          isResolved: boolean;
-          comments: {
-            nodes: Array<{ databaseId: number; body: string }>;
-          };
-        }>;
-      };
-    };
-  };
-};
-
-/** Fetch review threads. For each GraphQL thread, find a constituent
- *  comment carrying hidden metadata and use its `threadId` as the local
- *  Thread.id; otherwise synthesise one keyed off `remoteThreadId`. */
+/** Fetch review threads (all pages — see lib/pr/review-threads). For each
+ *  GraphQL thread, find a constituent comment carrying hidden metadata and
+ *  use its `threadId` as the local Thread.id; otherwise synthesise one
+ *  keyed off `remoteThreadId`. */
 export async function fetchThreads(client: GitHubClient, ref: PrRef): Promise<Thread[]> {
-  const data = await ghGraphQL<ListThreadsResponse>(client, LIST_THREADS_QUERY, {
-    owner: ref.owner,
-    repo: ref.repo,
-    number: ref.number,
-  });
-  return data.repository.pullRequest.reviewThreads.nodes.map((t) => {
-    const localId = findThreadLocalId(t);
-    return {
-      id: localId,
-      state: "synced",
-      remoteThreadId: t.id,
-      resolved: t.isResolved,
-    };
-  });
+  const raw = await listReviewThreads(client, ref);
+  return raw.map((t) => ({
+    id: findThreadLocalId(t),
+    state: "synced",
+    remoteThreadId: t.id,
+    resolved: t.isResolved,
+  }));
 }
 
-function findThreadLocalId(thread: {
-  id: string;
-  comments: { nodes: Array<{ body: string }> };
-}): string {
-  for (const c of thread.comments.nodes) {
+function findThreadLocalId(thread: RawReviewThread): string {
+  for (const c of thread.comments) {
     const { meta } = extractMetadata(c.body);
     if (meta) return meta.threadId;
   }
