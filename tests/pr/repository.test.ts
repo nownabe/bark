@@ -389,6 +389,59 @@ describe("repository — setThreadResolved", () => {
     expect(r.getLocalState().threads[0]?.state).toBe("draft");
     expect(r.getLocalState().threads[0]?.resolved).toBe(true);
   });
+
+  test("setting resolved to the value remote already has completes instead of sticking in syncing (issue #188)", async () => {
+    // A stale click (or a refresh landing between render and click) can ask
+    // for the state the thread is already in remotely. The reconciler emits
+    // nothing for it, so without a no-op completion the thread would persist
+    // in "syncing" forever — merge protects syncing entities, so even a
+    // refresh can't release it.
+    const { transport, calls } = happyTransport();
+    const r = makeRepo(transport);
+    await r.setRemoteState({
+      ...r.getRemoteState(),
+      pullRequest: pr(),
+      threads: [thread({ id: "t1", state: "synced", remoteThreadId: "PRT", resolved: false })],
+    });
+
+    await r.setThreadResolved("t1", false); // remote is already false
+
+    expect(calls).toEqual([]); // nothing to push
+    expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: false });
+  });
+
+  test("a failed resolve can be retried (issue #188)", async () => {
+    let fail = true;
+    const { transport, calls } = happyTransport();
+    const flaky: Transport = {
+      ...transport,
+      async resolveReviewThread(step): Promise<ResolveOutcome> {
+        if (fail) {
+          calls.push("resolve-review-thread(fail)");
+          return { ok: false, error: { message: "boom" } };
+        }
+        return transport.resolveReviewThread(step);
+      },
+    };
+    const r = makeRepo(flaky);
+    await r.setRemoteState({
+      ...r.getRemoteState(),
+      pullRequest: pr(),
+      threads: [thread({ id: "t1", state: "synced", remoteThreadId: "PRT", resolved: false })],
+    });
+
+    await r.setThreadResolved("t1", true);
+    expect(r.getLocalState().threads[0]?.lastError?.message).toBe("boom");
+
+    // The retry click must dispatch again — a thread that exists on GitHub
+    // (remoteThreadId present) must not be stranded in a state that
+    // setThreadResolved silently ignores.
+    fail = false;
+    await r.setThreadResolved("t1", true);
+
+    expect(calls).toEqual(["resolve-review-thread(fail)", "resolve-review-thread"]);
+    expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: true });
+  });
 });
 
 describe("repository — setRemoteState (conflict policy)", () => {

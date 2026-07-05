@@ -4,6 +4,7 @@ import type { CommitOutcome } from "../../lib/pr/transport";
 import {
   applyStepResults,
   applyStepResultsToRemote,
+  completeNoopThreadSyncs,
   flipDraftsToSyncing,
   mergeRemoteIntoLocal,
   setThreadResolvedToSyncing,
@@ -127,10 +128,54 @@ describe("state-machine — setThreadResolvedToSyncing", () => {
     expect(out.threads[0]).toMatchObject({ state: "draft", resolved: true });
   });
 
+  test("a draft Thread WITH a remoteThreadId (failed sync) re-enters syncing (issue #188)", () => {
+    // applyThreadSyncFailure parks a failed resolve as draft+lastError; the
+    // retry click must transition it back to syncing or it never dispatches.
+    const t = thread({ state: "draft", remoteThreadId: "PRT", lastError: { message: "boom" } });
+    const out = setThreadResolvedToSyncing(localState({ threads: [t] }), "t1", true);
+    expect(out.threads[0]).toMatchObject({
+      state: "syncing",
+      resolved: true,
+      lastError: undefined,
+    });
+  });
+
   test("a non-matching id is a no-op", () => {
     const t = thread();
     const local = localState({ threads: [t] });
     expect(setThreadResolvedToSyncing(local, "other", true)).toEqual(local);
+  });
+});
+
+describe("state-machine — completeNoopThreadSyncs (issue #188)", () => {
+  test("a syncing Thread whose resolved matches remote flips back to synced", () => {
+    const t = thread({ state: "syncing", remoteThreadId: "PRT", resolved: false });
+    const remote = remoteState({
+      threads: [thread({ state: "synced", remoteThreadId: "PRT", resolved: false })],
+    });
+    const out = completeNoopThreadSyncs(localState({ threads: [t] }), remote);
+    expect(out.threads[0]).toMatchObject({ state: "synced", resolved: false });
+  });
+
+  test("a syncing Thread whose resolved differs from remote is left for the reconciler", () => {
+    const t = thread({ state: "syncing", remoteThreadId: "PRT", resolved: true });
+    const remote = remoteState({
+      threads: [thread({ state: "synced", remoteThreadId: "PRT", resolved: false })],
+    });
+    const local = localState({ threads: [t] });
+    expect(completeNoopThreadSyncs(local, remote)).toBe(local);
+  });
+
+  test("a syncing Thread without a remoteThreadId is left alone (may map in this submit)", () => {
+    const t = thread({ state: "syncing", resolved: false });
+    const local = localState({ threads: [t] });
+    expect(completeNoopThreadSyncs(local, remoteState())).toBe(local);
+  });
+
+  test("mirrors the reconciler: an absent remote thread counts as resolved=false", () => {
+    const t = thread({ state: "syncing", remoteThreadId: "PRT_gone", resolved: false });
+    const out = completeNoopThreadSyncs(localState({ threads: [t] }), remoteState());
+    expect(out.threads[0]?.state).toBe("synced");
   });
 });
 
