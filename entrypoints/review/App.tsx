@@ -9,7 +9,6 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
 } from "react";
 import type { ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
@@ -35,9 +34,9 @@ import { SourceEditor } from "./components/SourceEditor";
 import { InstallGate } from "./components/InstallGate";
 import { DebugFab } from "./components/DebugFab";
 import { RoleFab } from "./components/RoleFab";
-import { isSubmitChord } from "./keys";
 import { SubmitConfirmModal } from "./components/SubmitConfirmModal";
 import { DiscardAllConfirmModal } from "./components/DiscardAllConfirmModal";
+import { ThreadItem } from "./components/ThreadItem";
 import {
   buildAllPendingSuggestions,
   buildAuthorPendingItems,
@@ -62,13 +61,11 @@ import {
   applyAcceptedSuggestion,
   diffToSuggestions,
   extractSuggestionBlock,
-  stripSuggestionBlock,
   suggestionEditRanges,
 } from "../../lib/suggest";
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
 import type { ExistingComment } from "../../lib/comments";
 import {
-  avatarUrl,
   buildBlobPermalink,
   buildSuggestionBlock,
   findThreadNodeId,
@@ -112,7 +109,6 @@ import {
   DEV_ROLE_SWITCH,
   errMessage,
   installUrl,
-  STATUS_LABEL,
   type ViewMode,
 } from "./uiHelpers";
 
@@ -1463,199 +1459,47 @@ export function App() {
     );
   };
 
-  const renderSubmittedMessage = (
-    c: ExistingComment,
-    isRoot: boolean,
-    st: AnchorStatus | null,
-    actions?: ReactNode,
-  ) => (
-    <div key={`s-${c.source}-${c.id}`} className="comment">
-      <div className="comment__meta">
-        <img
-          className="comment__avatar"
-          src={avatarUrl(c.author, 40)}
-          alt=""
-          width={18}
-          height={18}
-          loading="lazy"
-        />
-        <span className="comment__author">{c.author}</span>
-        {isRoot && st && STATUS_LABEL[st] ? (
-          <span className={`badge badge--${st}`}>{STATUS_LABEL[st]}</span>
-        ) : null}
-        {isRoot && !c.meta ? (
-          <span className="badge badge--issue">{c.line ? `L${c.line}` : "no anchor"}</span>
-        ) : null}
-        {actions ? <span className="comment__meta-actions">{actions}</span> : null}
-      </div>
-      {c.meta?.kind === "suggestion" ? (
-        <>
-          {stripSuggestionBlock(c.body) ? (
-            <div className="comment__body">{stripSuggestionBlock(c.body)}</div>
-          ) : null}
-          <SuggestionDiff
-            before={c.meta.quote ?? ""}
-            after={extractSuggestionBlock(c.body) ?? ""}
-          />
-        </>
-      ) : (
-        <div className="comment__body">{c.body || "(no body)"}</div>
-      )}
-    </div>
-  );
-
-  const renderPendingMessage = (d: PendingDraft) => (
-    <div key={`p-${d.cid}`} className="comment comment--pending">
-      <div className="comment__meta">
-        <span className="comment__author">You</span>
-        <span className="badge badge--pending">pending</span>
-        <button
-          type="button"
-          className="btn-x"
-          aria-label="Delete pending item"
-          title="Delete"
-          onClick={(e) => {
-            e.stopPropagation();
-            removeDraft(d.cid);
-          }}
-        >
-          ✕
-        </button>
-      </div>
-      {d.kind === "suggestion" ? (
-        <SuggestionDiff before={d.quote} after={d.suggestion ?? ""} />
-      ) : (
-        <div className="comment__body">{d.body || "(no body)"}</div>
-      )}
-    </div>
-  );
-
   const renderThread = (t: ReviewThread) => {
     const root = t.rootComment;
-    const st = root ? statusFor(root) : null;
     const showAuthorActions = root?.meta?.kind === "suggestion" && role === "author";
     // Accept is gated on the reanchored position still matching the quoted
     // text — a shifted/outdated target would be corrupted by the apply
     // (issue #176).
-    const acceptable = showAuthorActions
-      ? canAcceptSuggestion(
-          root?.meta ? commentViewByCid.get(root.meta.cid)?.displayPosition : null,
-        )
-      : false;
+    const canAccept =
+      showAuthorActions && root?.meta
+        ? canAcceptSuggestion(commentViewByCid.get(root.meta.cid)?.displayPosition)
+        : false;
     // Resolvable when:
     //  - A: Bark-authored thread (root.meta present), not via accepted-suggestion
     //  - B: foreign in-diff review thread (root.meta null, source review). L3a's
     //    filter already kept only diff-inside foreign reviews; there's a
     //    GitHub-native reviewThread we can resolve via GraphQL.
-    // Reopen is offered only when resolution came from an event, not from
-    // accepting a suggestion (which resolves implicitly).
     const acceptedRoot = root?.meta?.kind === "suggestion" && dismissed[root.id] === "accepted";
     const isBarkAuthored = Boolean(root?.meta);
     const isForeignReviewRoot = !!root && !root.meta && root.source === "review";
     const canResolve = (isBarkAuthored || isForeignReviewRoot) && t.hasSubmitted && !acceptedRoot;
-    // Resolve/Reopen sits at the right end of the root comment's author row.
-    const resolveAction = canResolve ? (
-      <button
-        type="button"
-        className="thread__resolve"
-        disabled={resolvingId === t.id}
-        onClick={(e) => {
-          e.stopPropagation();
-          void setThreadResolved(t, !t.resolved);
-        }}
-      >
-        {resolvingId === t.id
-          ? t.resolved
-            ? "Reopening…"
-            : "Resolving…"
-          : t.resolved
-            ? "Reopen"
-            : "✓ Resolve"}
-      </button>
-    ) : null;
     return (
-      <div
+      <ThreadItem
         key={t.id}
-        data-thread-id={t.id}
-        className={`thread thread--clickable${t.resolved ? " thread--resolved" : ""}${
-          emphasizedThreadId === t.id ? " thread--emphasized" : ""
-        }`}
-        onClick={() => openThread(t)}
-      >
-        {t.quote ? <div className="thread__quote">{t.quote}</div> : null}
-        {t.messages.map((m) =>
-          m.kind === "submitted"
-            ? renderSubmittedMessage(
-                m.comment,
-                m.comment === root,
-                st,
-                m.comment === root ? resolveAction : undefined,
-              )
-            : renderPendingMessage(m.draft),
-        )}
-        {showAuthorActions && root ? (
-          <div className="comment__actions" onClick={(e) => e.stopPropagation()}>
-            {dismissed[root.id] ? (
-              <span className="notice--muted" style={{ fontSize: 11 }}>
-                {dismissed[root.id] === "accepted" ? "accepted — Submit to apply" : "rejected"}
-              </span>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="btn btn--primary btn--sm"
-                  disabled={!acceptable}
-                  title={
-                    acceptable
-                      ? undefined
-                      : "The document changed since this suggestion was written — its target text can't be safely replaced."
-                  }
-                  onClick={() => acceptSuggestion(root)}
-                >
-                  Accept
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  onClick={() => rejectSuggestion(root)}
-                >
-                  Reject
-                </button>
-              </>
-            )}
-          </div>
-        ) : null}
-        {replyTo === t.id ? (
-          <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
-            <textarea
-              className="field"
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              onKeyDown={(e) => {
-                if (isSubmitChord(e)) {
-                  e.preventDefault();
-                  addReply(t);
-                }
-              }}
-              rows={2}
-              placeholder="Reply"
-              autoFocus
-            />
-            <div className="composer__row">
-              <button
-                type="button"
-                className="btn btn--primary btn--sm"
-                onClick={() => addReply(t)}
-              >
-                Add
-              </button>
-              <button type="button" className="btn btn--sm" onClick={cancelReply}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
+        thread={t}
+        rootStatus={root ? statusFor(root) : null}
+        role={role}
+        canResolve={canResolve}
+        canAccept={canAccept}
+        decision={root ? dismissed[root.id] : undefined}
+        isResolving={resolvingId === t.id}
+        emphasized={emphasizedThreadId === t.id}
+        replyOpen={replyTo === t.id}
+        replyText={replyText}
+        onOpen={() => openThread(t)}
+        onToggleResolve={() => void setThreadResolved(t, !t.resolved)}
+        onAccept={() => root && void acceptSuggestion(root)}
+        onReject={() => root && void rejectSuggestion(root)}
+        onAddReply={() => addReply(t)}
+        onCancelReply={cancelReply}
+        onReplyTextChange={setReplyText}
+        onRemoveDraft={removeDraft}
+      />
     );
   };
 
