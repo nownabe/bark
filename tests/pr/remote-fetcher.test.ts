@@ -237,6 +237,44 @@ describe("remote-fetcher — fetchComments", () => {
     expect(out[0]?.id).toBe("foreign-issue-50");
     expect(out[0]?.path).toBe("");
   });
+
+  test("legacy v1 resolve-marker comments are dropped, not rendered (issue #186)", async () => {
+    const v1Marker = (event: "resolve" | "unresolve") =>
+      btoa(
+        JSON.stringify({
+          cid: `evt-${event}`,
+          thread: "t-1",
+          path: "x.md",
+          sha: "h",
+          quote: "q",
+          range: { sl: 1, sc: 1, el: 1, ec: 2 },
+          event,
+        }),
+      );
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.includes("/pulls/7/comments"))
+        return jsonResponse([
+          {
+            id: 300,
+            body: `Resolved via Bark.\n\n<!-- bark:v1 ${v1Marker("resolve")} -->`,
+            path: "x.md",
+            line: 1,
+            user: { login: "alice", avatar_url: "" },
+          },
+        ]);
+      if (req.url.includes("/issues/7/comments"))
+        return jsonResponse([
+          {
+            id: 301,
+            body: `Reopened via Bark.\n\n<!-- bark:v1 ${v1Marker("unresolve")} -->`,
+            user: { login: "alice", avatar_url: "" },
+          },
+        ]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchComments({ token: "t", fetch }, PR);
+    expect(out).toEqual([]);
+  });
 });
 
 describe("remote-fetcher — normalizeComments foreign threadId (issues #180 / #181)", () => {
