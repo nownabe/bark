@@ -104,6 +104,7 @@ import { useSelectedFileContent } from "./hooks/useSelectedFileContent";
 import { useUiPanels } from "./hooks/useUiPanels";
 import { useThreadActions } from "./hooks/useThreadActions";
 import { sampleDoc } from "./sample";
+import { threadKeysForThreadIds } from "./threadKeys";
 import {
   canAcceptSuggestion,
   DEV_ROLE_SWITCH,
@@ -324,27 +325,30 @@ export function App() {
   //     ${remoteId}` (legacy "one-comment-per-thread" shape), so the
   //     same resolved Thread surfaces as one entry per foreign comment.
   const resolvedThreadKeys = useMemo(() => {
-    const out = new Set<string>();
-    if (!prRepository || !repositoryAppState) return out;
+    if (!prRepository || !repositoryAppState) return new Set<string>();
     const resolvedIds = new Set(
       prRepository
         .getLocalState()
         .threads.filter((t) => t.resolved)
         .map((t) => t.id),
     );
-    if (resolvedIds.size === 0) return out;
-    for (const v of repositoryAppState.commentViews.values()) {
-      if (!resolvedIds.has(v.comment.threadId)) continue;
-      const cid = v.comment.id;
-      if (cid.startsWith("foreign-review-")) {
-        if (v.comment.remoteId !== undefined) out.add(`solo:review:${v.comment.remoteId}`);
-      } else if (cid.startsWith("foreign-issue-")) {
-        if (v.comment.remoteId !== undefined) out.add(`solo:issue:${v.comment.remoteId}`);
-      } else {
-        out.add(cid);
-      }
-    }
-    return out;
+    return threadKeysForThreadIds(repositoryAppState.commentViews.values(), resolvedIds);
+  }, [prRepository, repositoryAppState]);
+  // Thread keys that can actually be resolved/reopened: they have a
+  // GitHub-native review thread (a Repository Thread with a remoteThreadId,
+  // resolvable via GraphQL). Out-of-diff Bark threads (issue comments) and
+  // foreign issue comments never get one, and a freshly-created in-diff
+  // thread has none until the next refresh — offering Resolve there is a
+  // silent no-op (issue #182), so gate the button on this set.
+  const resolvableThreadKeys = useMemo(() => {
+    if (!prRepository || !repositoryAppState) return new Set<string>();
+    const resolvableIds = new Set(
+      prRepository
+        .getLocalState()
+        .threads.filter((t) => t.remoteThreadId !== undefined)
+        .map((t) => t.id),
+    );
+    return threadKeysForThreadIds(repositoryAppState.commentViews.values(), resolvableIds);
   }, [prRepository, repositoryAppState]);
 
   const lineStarts = useMemo(() => buildLineIndex(source), [source]);
@@ -1469,15 +1473,14 @@ export function App() {
       showAuthorActions && root?.meta
         ? canAcceptSuggestion(commentViewByCid.get(root.meta.cid)?.displayPosition)
         : false;
-    // Resolvable when:
-    //  - A: Bark-authored thread (root.meta present), not via accepted-suggestion
-    //  - B: foreign in-diff review thread (root.meta null, source review). L3a's
-    //    filter already kept only diff-inside foreign reviews; there's a
-    //    GitHub-native reviewThread we can resolve via GraphQL.
+    // Resolvable only when the thread has a GitHub-native review thread we
+    // can drive via GraphQL (resolvableThreadKeys). That covers Bark in-diff
+    // threads and foreign in-diff review threads, and excludes out-of-diff
+    // (issue-comment) threads where Resolve would be a silent no-op (#182).
+    // Reopen is withheld when resolution came from accepting a suggestion
+    // (which resolves implicitly), not from an explicit resolve.
     const acceptedRoot = root?.meta?.kind === "suggestion" && dismissed[root.id] === "accepted";
-    const isBarkAuthored = Boolean(root?.meta);
-    const isForeignReviewRoot = !!root && !root.meta && root.source === "review";
-    const canResolve = (isBarkAuthored || isForeignReviewRoot) && t.hasSubmitted && !acceptedRoot;
+    const canResolve = resolvableThreadKeys.has(t.id) && t.hasSubmitted && !acceptedRoot;
     return (
       <ThreadItem
         key={t.id}
