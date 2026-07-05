@@ -82,6 +82,8 @@ describe("useSelectedFileContent — happy path", () => {
     await waitFor(() => expect(result.current.baseSource).toBe("FETCHED"));
     // source picks up the persisted edit's source (so editing survives reload).
     expect(result.current.source).toBe("PERSISTED");
+    // ready flipped true once the fetched content was applied (issue #185).
+    expect(result.current.ready).toBe(true);
     expect(callbacks.onLoaded).toHaveBeenCalledWith({
       path: "f.md",
       text: "FETCHED",
@@ -112,6 +114,34 @@ describe("useSelectedFileContent — happy path", () => {
   });
 });
 
+describe("useSelectedFileContent — ready gating (issue #185)", () => {
+  test("editable (ready) when there is nothing to fetch", () => {
+    const { result } = renderHook(() =>
+      useSelectedFileContent(null, PR, "h", "f.md", "", makeDeps(), makeCallbacks()),
+    );
+    expect(result.current.ready).toBe(true);
+  });
+
+  test("stays not-ready while the fetch is in flight, then flips ready", async () => {
+    let resolveFetch: ((v: string) => void) | undefined;
+    const client = makeClient({
+      getFileContent: mock(
+        () =>
+          new Promise<string>((r) => {
+            resolveFetch = r;
+          }),
+      ),
+    });
+    const { result } = renderHook(() =>
+      useSelectedFileContent(client, PR, "h", "f.md", "", makeDeps(), makeCallbacks()),
+    );
+    // Content still loading → editor must be held read-only.
+    await waitFor(() => expect(result.current.ready).toBe(false));
+    resolveFetch?.("FRESH");
+    await waitFor(() => expect(result.current.ready).toBe(true));
+  });
+});
+
 describe("useSelectedFileContent — error path", () => {
   test("getFileContent throwing surfaces via onError and never calls onLoaded", async () => {
     const client = makeClient({
@@ -120,13 +150,18 @@ describe("useSelectedFileContent — error path", () => {
       }),
     });
     const callbacks = makeCallbacks();
-    renderHook(() => useSelectedFileContent(client, PR, "h", "f.md", "", makeDeps(), callbacks));
+    const { result } = renderHook(() =>
+      useSelectedFileContent(client, PR, "h", "f.md", "", makeDeps(), callbacks),
+    );
 
     await waitFor(() => expect(callbacks.onError).toHaveBeenCalled());
     const errCall = (callbacks.onError as unknown as { mock: { calls: unknown[][] } }).mock
       .calls[0];
     expect(errCall?.[0]).toBe("boom");
     expect(callbacks.onLoaded).not.toHaveBeenCalled();
+    // A failed load leaves the editor read-only (source still holds the
+    // previous file's text).
+    expect(result.current.ready).toBe(false);
   });
 });
 
