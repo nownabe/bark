@@ -41,6 +41,12 @@ export type SelectedFileContentCallbacks = {
 export type FileSource = {
   source: string;
   baseSource: string;
+  /** False while the selected file's content is being fetched. `source`
+   *  still holds the PREVIOUS file's text during that window, so callers
+   *  must treat the editor as read-only and ignore edits until it flips
+   *  true — otherwise a keystroke persists the old file's content under
+   *  the new path (issue #185). */
+  ready: boolean;
   setSource: Dispatch<SetStateAction<string>>;
   setBaseSource: Dispatch<SetStateAction<string>>;
 };
@@ -56,6 +62,9 @@ export function useSelectedFileContent(
 ): FileSource {
   const [source, setSource] = useState<string>(initialSource);
   const [baseSource, setBaseSource] = useState<string>(initialSource);
+  // Ready whenever there is nothing to fetch (sample/empty doc); flips
+  // false while a real file load is in flight (see FileSource.ready).
+  const [ready, setReady] = useState<boolean>(true);
 
   // Pin the latest callbacks via a ref so a new identity each render
   // doesn't re-fire the fetch effect.
@@ -65,7 +74,15 @@ export function useSelectedFileContent(
   listRef.current = deps.listSuggestionEdits;
 
   useEffect(() => {
-    if (!client || !ref || !headSha || !selectedPath) return;
+    if (!client || !ref || !headSha || !selectedPath) {
+      // Nothing to fetch (no PR loaded) — the sample/empty doc is editable.
+      setReady(true);
+      return;
+    }
+    // The selected file changed: `source` still holds the previous file's
+    // text until the fetch resolves, so mark not-ready to keep the editor
+    // read-only in that window (issue #185).
+    setReady(false);
     let cancelled = false;
     callbacksRef.current.onLoadingChange(true);
     (async () => {
@@ -77,6 +94,7 @@ export function useSelectedFileContent(
         setBaseSource(text);
         setSource(edit?.source ?? text);
         callbacksRef.current.onLoaded({ path: selectedPath, text, edit });
+        setReady(true);
       } catch (e) {
         if (!cancelled) callbacksRef.current.onError(errMessage(e));
       } finally {
@@ -92,5 +110,5 @@ export function useSelectedFileContent(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, ref?.owner, ref?.repo, ref?.number, headSha, selectedPath]);
 
-  return { source, baseSource, setSource, setBaseSource };
+  return { source, baseSource, ready, setSource, setBaseSource };
 }

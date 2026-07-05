@@ -216,7 +216,7 @@ export function App() {
       },
     },
   );
-  const { source, baseSource, setSource, setBaseSource } = fileSourceApi;
+  const { source, baseSource, ready: fileReady, setSource, setBaseSource } = fileSourceApi;
   const [reviewFilter, setReviewFilter] = useState<Set<ReviewFacet>>(
     () => new Set<ReviewFacet>(["pending", "submitted"]),
   );
@@ -413,8 +413,12 @@ export function App() {
     ];
     if (viewMode === "preview") ext.push(richMarkdown, richMarkdownTheme);
     if (role === "reviewer") ext.push(suggestDecorations, suggestTheme);
+    // While the selected file's content is loading, `source` still holds
+    // the previous file's text — keep the editor read-only so a keystroke
+    // can't persist that text under the new path (issue #185).
+    if (!fileReady) ext.push(EditorView.editable.of(false));
     return ext;
-  }, [viewMode, role]);
+  }, [viewMode, role, fileReady]);
 
   const curPath = selectedPath ?? "sample";
 
@@ -1223,6 +1227,11 @@ export function App() {
   // flushSuggestionEdits / persistSuggestionEdit now live in useSuggestionEdits.
 
   const onSourceChange = (v: string) => {
+    // Guard against edits fired before the selected file has loaded — at
+    // that point `source`/`baseSource` still belong to the previous file,
+    // so persisting under `curPath` would corrupt it (issue #185). The
+    // editor is also held read-only via cmExtensions; this is belt-and-braces.
+    if (!fileReady) return;
     setSource(v);
     persistSuggestionEdit(curPath, v, baseSource, suggestionComments);
   };
