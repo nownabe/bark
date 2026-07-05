@@ -62,6 +62,7 @@ import {
   applyAcceptedSuggestion,
   diffToSuggestions,
   extractSuggestionBlock,
+  rebaseLoadedEdit,
   suggestionEditRanges,
 } from "../../lib/suggest";
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
@@ -200,13 +201,22 @@ export function App() {
       onError: setError,
       onLoaded: ({ path, text, edit }) => {
         setSuggestionComments(edit?.comments ?? {});
-        // Normalise the persisted entry against the fresh base so legacy
-        // edits stored before `base` existed remain submittable.
-        if (edit && edit.source !== text) {
-          setSuggestionEdits((prev) => ({
-            ...prev,
-            [path]: { source: edit.source, base: text, comments: edit.comments ?? {} },
-          }));
+        if (!edit) return;
+        // Reconcile the persisted edit with the freshly-fetched base. If the
+        // file changed upstream, re-apply the author's edits onto the new
+        // base (3-way rebase) — the recovery path after a #187 commit
+        // conflict. A dirty merge keeps the edit anchored to its old base so
+        // the commit pipeline keeps refusing it instead of dropping hunks.
+        const result = rebaseLoadedEdit(edit, text, headSha ?? "");
+        setSuggestionEdits((prev) => ({ ...prev, [path]: result.edit }));
+        if (result.status === "rebased") {
+          setSource(result.edit.source);
+        } else if (result.status === "conflict") {
+          setError(
+            `${path} changed upstream and your edits could not be merged automatically. ` +
+              `Review your version in the editor, or use "Discard edits" and re-apply them ` +
+              `on the latest content.`,
+          );
         }
       },
       onCleanup: () => {
@@ -562,17 +572,24 @@ export function App() {
   useEffect(() => {
     if (!prRepository || !headSha || role !== "author") return;
     void (async () => {
-      const wanted = new Map<string, { path: string; source: string }>();
+      const wanted = new Map<string, { path: string; source: string; baseSha: string }>();
       for (const [path, edit] of Object.entries(suggestionEdits)) {
         if (edit.source === edit.base) continue;
-        wanted.set(`fileedit-${path}`, { path, source: edit.source });
+        // The edit's own baseSha (the head its base text was fetched at) is
+        // what the commit conflict check compares (issue #187); edits
+        // persisted before the field existed fall back to the current head.
+        wanted.set(`fileedit-${path}`, {
+          path,
+          source: edit.source,
+          baseSha: edit.baseSha ?? headSha,
+        });
       }
-      for (const [id, { path, source }] of wanted) {
+      for (const [id, { path, source, baseSha }] of wanted) {
         await prRepository.upsertFileEdit({
           id,
           state: "draft",
           path,
-          baseSha: headSha,
+          baseSha,
           editedSource: source,
         });
       }
@@ -980,7 +997,7 @@ export function App() {
       return;
     }
     setSource(newSource);
-    persistSuggestionEdit(curPath, newSource, baseSource, suggestionComments);
+    persistSuggestionEdit(curPath, newSource, baseSource, suggestionComments, headSha ?? undefined);
     await setDecision(c.id, "accepted");
   };
 
@@ -1135,17 +1152,21 @@ export function App() {
 
       // 2. Re-sync FileEdits authoritatively (the L6d-1 effect is best-
       //    effort; this is the source of truth for the impending commit).
-      const wantedFileEdits = new Map<string, { path: string; source: string }>();
+      const wantedFileEdits = new Map<string, { path: string; source: string; baseSha: string }>();
       for (const [path, edit] of Object.entries(suggestionEdits)) {
         if (edit.source === edit.base) continue;
-        wantedFileEdits.set(`fileedit-${path}`, { path, source: edit.source });
+        wantedFileEdits.set(`fileedit-${path}`, {
+          path,
+          source: edit.source,
+          baseSha: edit.baseSha ?? headSha,
+        });
       }
-      for (const [id, { path, source }] of wantedFileEdits) {
+      for (const [id, { path, source, baseSha }] of wantedFileEdits) {
         await prRepository.upsertFileEdit({
           id,
           state: "draft",
           path,
-          baseSha: headSha,
+          baseSha,
           editedSource: source,
         });
       }
@@ -1185,7 +1206,17 @@ export function App() {
       //    once submitDrafts flips them past "draft"; only suggestionEdits +
       //    accepted-decision state still own their own storage.
       if (commitFailure) {
-        setError(`Commit failed: ${commitFailure.message}. Your pending edits are kept.`);
+        setError(
+          `Commit failed: ${commitFailure.message} Your pending edits are kept — ` +
+            `review the reloaded file and submit again.`,
+        );
+        // Recovery: advance to the remote head so the open file reloads and
+        // the load-time rebase (rebaseLoadedEdit) merges the upstream
+        // changes into the author's edits; other conflicted files re-base
+        // when opened. Without this, App would keep fetching at the stale
+        // head and never see the upstream content.
+        const remoteHead = prRepository.getRemoteState().pullRequest?.headSha;
+        if (remoteHead && remoteHead !== headSha) setHeadSha(remoteHead);
       } else {
         await discardAllPersistedEdits();
         if (acceptedResolvedRemoteIds.length > 0) {
@@ -1255,7 +1286,9 @@ export function App() {
     // editor is also held read-only via cmExtensions; this is belt-and-braces.
     if (!fileReady) return;
     setSource(v);
-    persistSuggestionEdit(curPath, v, baseSource, suggestionComments);
+    // baseSource was fetched at the current headSha (the load effect keys on
+    // it), so stamping it as the edit's baseSha is faithful (issue #187).
+    persistSuggestionEdit(curPath, v, baseSource, suggestionComments, headSha ?? undefined);
   };
 
   const discardEdits = () => {
@@ -1302,7 +1335,7 @@ export function App() {
   const setSuggestionComment = (cid: string, value: string) => {
     const next = { ...suggestionComments, [cid]: value };
     setSuggestionComments(next);
-    persistSuggestionEdit(curPath, source, baseSource, next);
+    persistSuggestionEdit(curPath, source, baseSource, next, headSha ?? undefined);
   };
 
   // Side item click → scroll to the target in the body and highlight the selection.

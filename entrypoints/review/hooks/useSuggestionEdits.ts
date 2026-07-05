@@ -29,12 +29,14 @@ export type SuggestionEditsAPI = {
   setSuggestionEdits: Dispatch<SetStateAction<Record<string, SuggestionEdit>>>;
   setSuggestionComments: Dispatch<SetStateAction<Record<string, string>>>;
   /** Update the per-path edit (debounced storage write). Pass src === base
-   *  to clear that path. */
+   *  to clear that path. `baseSha` records the head `base` was fetched at
+   *  (see SuggestionEdit.baseSha). */
   persistSuggestionEdit: (
     path: string,
     src: string,
     base: string,
     comments: Record<string, string>,
+    baseSha?: string,
   ) => void;
   /** Flush any pending debounced writes immediately. Used before submit. */
   flushPendingWrites: () => Promise<void>;
@@ -98,9 +100,11 @@ export function useSuggestionEdits(
     src: string,
     base: string,
     comments: Record<string, string>,
+    baseSha?: string,
   ) => {
     if (!ref) return;
-    const edit: SuggestionEdit | null = src !== base ? { source: src, base, comments } : null;
+    const edit: SuggestionEdit | null =
+      src !== base ? { source: src, base, ...(baseSha ? { baseSha } : {}), comments } : null;
     // Keep the in-memory all-files map fresh immediately (storage write
     // is debounced below) so the submit count / modal reflect the
     // latest edit.
