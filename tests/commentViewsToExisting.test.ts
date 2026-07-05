@@ -78,6 +78,7 @@ describe("commentViewsToExisting — Bark-authored", () => {
         thread: "tid-uuid",
         kind: "comment",
       },
+      threadKey: "tid-uuid",
       path: "src/foo.md",
       line: 4,
     });
@@ -108,6 +109,7 @@ describe("commentViewsToExisting — foreign", () => {
       author: "carol",
       body: "Drive-by comment",
       meta: null,
+      threadKey: "foreign-thread-review-99",
       path: "doc.md",
       line: 7,
     });
@@ -149,6 +151,7 @@ describe("commentViewsToExisting — foreign", () => {
       author: "dan",
       body: "Top-level chatter",
       meta: null,
+      threadKey: "foreign-thread-issue-50",
     });
     expect("path" in (out ?? {})).toBe(false);
     expect("line" in (out ?? {})).toBe(false);

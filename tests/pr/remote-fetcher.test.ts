@@ -289,9 +289,10 @@ describe("remote-fetcher — normalizeComments foreign threadId (issues #180 / #
 
   test("foreign comments in the same GraphQL thread share one threadId (#181)", () => {
     // Two foreign comments that GitHub groups under one review thread node.
+    // The map (built from the thread data) carries the thread's LOCAL id.
     const map = new Map<number, string>([
-      [10, "PRT_shared"],
-      [11, "PRT_shared"],
+      [10, "foreign-thread-PRT_shared"],
+      [11, "foreign-thread-PRT_shared"],
     ]);
     const out = normalizeComments([foreignReview(10), foreignReview(11, 10)], [], map);
     expect(out[0]?.threadId).toBe("foreign-thread-PRT_shared");
@@ -301,10 +302,20 @@ describe("remote-fetcher — normalizeComments foreign threadId (issues #180 / #
   });
 
   test("foreign comment threadId matches the Thread entity fetchThreads builds (#180)", () => {
-    const map = new Map<number, string>([[42, "PRT_x"]]);
+    // fetchThreads names an all-foreign thread `foreign-thread-<nodeId>`;
+    // the map hands normalizeComments that exact id.
+    const map = new Map<number, string>([[42, "foreign-thread-PRT_x"]]);
     const [comment] = normalizeComments([foreignReview(42)], [], map);
-    // fetchThreads names an all-foreign thread `foreign-thread-<nodeId>`.
     expect(comment?.threadId).toBe("foreign-thread-PRT_x");
+  });
+
+  test("a native reply inside a Bark thread inherits the Bark threadId (#181 / #183)", () => {
+    // The GitHub thread contains a Bark root, so its local id is the Bark
+    // metadata threadId — the foreign reply must adopt it, or it detaches
+    // into its own synthetic thread.
+    const map = new Map<number, string>([[55, "local-t1"]]);
+    const [comment] = normalizeComments([foreignReview(55)], [], map);
+    expect(comment?.threadId).toBe("local-t1");
   });
 
   test("falls back to a per-comment threadId when thread data is unavailable", () => {
@@ -533,6 +544,85 @@ describe("remote-fetcher — fetchRemoteState", () => {
     expect(out.pullRequest?.headSha).toBe("h");
     expect(out.viewer?.login).toBe("alice");
     expect(out.fileContents).toEqual([]);
+  });
+
+  test("a native reply in a mixed thread adopts the Bark threadId end-to-end (#181 / #183)", async () => {
+    // GitHub thread: Bark root (metadata threadId "local-t1") + a foreign
+    // reply. The Thread entity takes the Bark id; the foreign reply's
+    // Comment.threadId must equal it, so the thread renders as one group.
+    const barkBody = embedMetadata("root", {
+      cid: "c-root",
+      threadId: "local-t1",
+      path: "f.md",
+      anchor: { sha: "h", range: { sl: 3, sc: 1, el: 3, ec: 5 }, quote: "sel" },
+    });
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7"))
+        return jsonResponse({
+          number: 7,
+          title: "T",
+          body: "B",
+          state: "open",
+          draft: false,
+          merged: false,
+          head: { sha: "h", ref: "topic" },
+          base: { ref: "main" },
+          user: { login: "alice", avatar_url: "" },
+        });
+      if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/comments"))
+        return jsonResponse([
+          {
+            id: 100,
+            body: barkBody,
+            path: "f.md",
+            line: 3,
+            user: { login: "alice", avatar_url: "" },
+          },
+          {
+            id: 101,
+            body: "native reply",
+            path: "f.md",
+            line: 3,
+            in_reply_to_id: 100,
+            user: { login: "carol", avatar_url: "" },
+          },
+        ]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: "PRT_mixed",
+                      isResolved: false,
+                      comments: {
+                        nodes: [
+                          { databaseId: 100, body: barkBody },
+                          { databaseId: 101, body: "native reply" },
+                        ],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        });
+      if (req.url.includes("/contents/"))
+        return jsonResponse({ content: btoa("x"), encoding: "base64" });
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchRemoteState({ token: "t", fetch }, PR);
+    const reply = out.comments.find((c) => c.remoteId === 101);
+    expect(reply?.threadId).toBe("local-t1");
+    expect(reply?.parentLocalId).toBe("c-root");
+    expect(out.threads).toEqual([
+      { id: "local-t1", state: "synced", remoteThreadId: "PRT_mixed", resolved: false },
+    ]);
   });
 
   test("fileContentTargets are fetched in parallel and added to RemoteState", async () => {

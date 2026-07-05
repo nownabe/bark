@@ -57,6 +57,7 @@ function toExistingComment(view: CommentView): ExistingComment | null {
     author: c.author.login,
     body: c.body,
     meta,
+    threadKey: c.threadId,
   };
   if (source === "review") {
     base.path = c.path;
