@@ -38,9 +38,12 @@ export function flipDraftsToSyncing(local: LocalState): LocalState {
   };
 }
 
-/** Set a Thread's `resolved` field. If the Thread is currently `synced`, also
- *  transition it to `syncing` so the change is pushed. For `draft` and
- *  `syncing` states, just update the field without changing state. */
+/** Set a Thread's `resolved` field. If the Thread is currently `synced` —
+ *  or `draft` with a remoteThreadId, i.e. it exists on GitHub but a prior
+ *  sync failed — also transition it to `syncing` so the change is pushed;
+ *  without the draft case a failed resolve could never be retried (issue
+ *  #188). A true draft (no remoteThreadId yet) just updates the field:
+ *  it syncs with the next submit. */
 export function setThreadResolvedToSyncing(
   local: LocalState,
   id: LocalId,
@@ -50,12 +53,33 @@ export function setThreadResolvedToSyncing(
     ...local,
     threads: local.threads.map((t) => {
       if (t.id !== id) return t;
-      if (t.state === "synced") {
+      if (t.state === "synced" || (t.state === "draft" && t.remoteThreadId !== undefined)) {
         return { ...t, state: "syncing", resolved, lastError: undefined };
       }
       return { ...t, resolved };
     }),
   };
+}
+
+/** Complete "nothing to push" thread syncs. A `syncing` Thread whose desired
+ *  `resolved` already matches the remote snapshot emits no reconcile
+ *  operation, and no step result will ever advance it — without this it
+ *  stays `syncing` forever (persisted, and protected from refresh by the
+ *  merge policy; issue #188). Flip it straight back to `synced`. Threads
+ *  without a remoteThreadId are left alone: they may still receive one from
+ *  a review-batch mapping in the same submit. */
+export function completeNoopThreadSyncs(local: LocalState, remote: RemoteState): LocalState {
+  let changed = false;
+  const threads = local.threads.map((t) => {
+    if (t.state !== "syncing" || t.remoteThreadId === undefined) return t;
+    const remoteThread = remote.threads.find((r) => r.remoteThreadId === t.remoteThreadId);
+    // Mirror the reconciler's comparison exactly (absent remote → false).
+    const remoteResolved = remoteThread?.resolved ?? false;
+    if (t.resolved !== remoteResolved) return t;
+    changed = true;
+    return { ...t, state: "synced" as const, lastError: undefined };
+  });
+  return changed ? { ...local, threads } : local;
 }
 
 /** Apply step results to LocalState, advancing entities per the state machine. */

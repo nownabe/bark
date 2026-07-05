@@ -15,6 +15,7 @@ import { reconcile } from "./reconciler";
 import {
   applyStepResults,
   applyStepResultsToRemote,
+  completeNoopThreadSyncs,
   flipDraftsToSyncing,
   mergeRemoteIntoLocal,
   setThreadResolvedToSyncing,
@@ -191,6 +192,15 @@ export class PullRequestRepository {
       // next cycle (and the next submit) must plan against it.
       const ctx = this.plannerContext();
       if (!ctx) return;
+      // A syncing Thread whose desired resolved already matches remote has
+      // nothing to push — the reconciler skips it, so complete it here or it
+      // would stay "syncing" forever (issue #188).
+      const completed = completeNoopThreadSyncs(this.localState, this.remoteState);
+      if (completed !== this.localState) {
+        this.localState = completed;
+        this.notify();
+        await this.persist();
+      }
       const ops = reconcile(this.localState, this.remoteState);
       if (ops.length === 0) break;
       const steps = planExecution(ops, ctx);
