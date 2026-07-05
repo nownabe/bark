@@ -10,9 +10,10 @@
 // says legacy *local* data isn't migrated — but comment metadata lives
 // on github.com, where it CAN'T be migrated, so the new fetcher has to
 // keep reading it. v1 → v2 mapping rewrites field names and reshapes
-// the anchor inline; `kind` is re-derived from the body downstream and
-// `event` (legacy resolve-event marker comments) is intentionally
-// dropped because v2 represents resolved state on Thread directly.
+// the anchor inline; `kind` is re-derived from the body downstream. v2
+// represents resolved state on the Thread entity, so `event` is not part
+// of v2 — but v1 `event` is kept as `legacyResolveEvent` so the fetcher
+// can recognise and drop legacy resolve-marker comments (issue #186).
 
 import type { Anchor } from "./types";
 
@@ -27,6 +28,13 @@ export type WireMetadata = {
    *  round-trip their path even though GitHub does not store it natively. */
   path: string;
   anchor: Anchor;
+  /** Read-only, v1 only. Legacy Bark resolved a thread by posting a hidden
+   *  marker comment ("Resolved via Bark." / "Reopened via Bark.") carrying
+   *  `event` in its v1 fence. v2 represents resolved state on the Thread
+   *  entity and never writes this. When set, the comment is a resolution
+   *  marker, not a real message — the fetcher drops it so it doesn't render
+   *  as a thread reply (issue #186). */
+  legacyResolveEvent?: "resolve" | "unresolve";
 };
 
 /** Append the metadata fence to a comment body. */
@@ -101,8 +109,10 @@ function parseV1(decoded: string): WireMetadata | null {
     typeof r.ec !== "number"
   )
     return null;
-  // Drop `kind` (re-derived from body downstream) and `event` (legacy
-  // resolution markers — v2 carries resolved state on Thread).
+  // Drop `kind` (re-derived from body downstream). Keep `event` as
+  // `legacyResolveEvent` so the fetcher can recognise and drop legacy
+  // resolution-marker comments (v2 carries resolved state on Thread).
+  const legacyResolveEvent = m.event === "resolve" || m.event === "unresolve" ? m.event : undefined;
   return {
     cid: m.cid,
     threadId: m.thread,
@@ -112,6 +122,7 @@ function parseV1(decoded: string): WireMetadata | null {
       range: { sl: r.sl, sc: r.sc, el: r.el, ec: r.ec },
       quote: m.quote,
     },
+    ...(legacyResolveEvent ? { legacyResolveEvent } : {}),
   };
 }
 

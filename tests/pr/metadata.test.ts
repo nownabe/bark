@@ -82,6 +82,35 @@ describe("metadata — extraction edge cases", () => {
     expect(out.body).toBe("body");
   });
 
+  test("a v1 resolve marker keeps its event as legacyResolveEvent (issue #186)", () => {
+    const v1 = {
+      cid: "e-1",
+      thread: "t-1",
+      path: "x.md",
+      sha: "h",
+      quote: "q",
+      range: { sl: 1, sc: 1, el: 1, ec: 2 },
+      event: "resolve",
+    };
+    const encoded = btoa(JSON.stringify(v1));
+    const out = extractMetadata(`Resolved via Bark.\n\n<!-- bark:v1 ${encoded} -->`);
+    expect(out.meta?.legacyResolveEvent).toBe("resolve");
+  });
+
+  test("a v1 fence without event has no legacyResolveEvent", () => {
+    const v1 = {
+      cid: "c-1",
+      thread: "t-1",
+      path: "x.md",
+      sha: "h",
+      quote: "q",
+      range: { sl: 1, sc: 1, el: 1, ec: 2 },
+    };
+    const encoded = btoa(JSON.stringify(v1));
+    const out = extractMetadata(`body\n\n<!-- bark:v1 ${encoded} -->`);
+    expect(out.meta?.legacyResolveEvent).toBeUndefined();
+  });
+
   test("the legacy 'docreview:v1' marker alias is also accepted", () => {
     const v1 = {
       cid: "c-2",

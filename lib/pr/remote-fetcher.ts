@@ -107,10 +107,12 @@ export function normalizeComments(
   const reviewById = new Map(reviewRaw.map((c) => [c.id, c]));
   const out: Comment[] = [];
   for (const rc of reviewRaw) {
-    out.push(toCommentFromReview(rc, reviewById, threadNodeIdByCommentId));
+    const c = toCommentFromReview(rc, reviewById, threadNodeIdByCommentId);
+    if (c) out.push(c);
   }
   for (const ic of issueRaw) {
-    out.push(toCommentFromIssue(ic));
+    const c = toCommentFromIssue(ic);
+    if (c) out.push(c);
   }
   return out;
 }
@@ -133,8 +135,11 @@ function toCommentFromReview(
   rc: RawReviewComment,
   byId: Map<number, RawReviewComment>,
   threadNodeIdByCommentId: ReadonlyMap<number, string>,
-): Comment {
+): Comment | null {
   const { body, meta } = extractMetadata(rc.body);
+  // A legacy v1 resolve marker is a hidden control comment, not a message —
+  // drop it so it doesn't render as a thread reply (issue #186).
+  if (meta?.legacyResolveEvent) return null;
   const author = { login: rc.user.login, avatarUrl: rc.user.avatar_url };
   // Reply chains: GitHub gives `in_reply_to_id` (REST id of parent). We
   // resolve to the parent's local id by looking up its metadata's cid.
@@ -199,8 +204,11 @@ function localIdForReview(parent: RawReviewComment | null, parentRemoteId: numbe
   return `foreign-review-${parentRemoteId}`;
 }
 
-function toCommentFromIssue(ic: RawIssueComment): Comment {
+function toCommentFromIssue(ic: RawIssueComment): Comment | null {
   const { body, meta } = extractMetadata(ic.body);
+  // Legacy out-of-diff resolves posted the marker as an issue comment; drop
+  // it the same way (issue #186).
+  if (meta?.legacyResolveEvent) return null;
   const author = { login: ic.user.login, avatarUrl: ic.user.avatar_url };
   if (meta) {
     return {
