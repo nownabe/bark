@@ -8,6 +8,7 @@ import {
   fetchRemoteState,
   fetchThreads,
   fetchViewer,
+  normalizeComments,
 } from "../../lib/pr/remote-fetcher";
 
 const PR: PrRef = { owner: "o", repo: "r", number: 7 };
@@ -235,6 +236,42 @@ describe("remote-fetcher — fetchComments", () => {
     const out = await fetchComments({ token: "t", fetch }, PR);
     expect(out[0]?.id).toBe("foreign-issue-50");
     expect(out[0]?.path).toBe("");
+  });
+});
+
+describe("remote-fetcher — normalizeComments foreign threadId (issues #180 / #181)", () => {
+  const foreignReview = (id: number, inReplyTo?: number) => ({
+    id,
+    body: `foreign ${id}`,
+    path: "f.md",
+    line: 3 as number | null,
+    ...(inReplyTo !== undefined ? { in_reply_to_id: inReplyTo } : {}),
+    user: { login: "carol", avatar_url: "" },
+  });
+
+  test("foreign comments in the same GraphQL thread share one threadId (#181)", () => {
+    // Two foreign comments that GitHub groups under one review thread node.
+    const map = new Map<number, string>([
+      [10, "PRT_shared"],
+      [11, "PRT_shared"],
+    ]);
+    const out = normalizeComments([foreignReview(10), foreignReview(11, 10)], [], map);
+    expect(out[0]?.threadId).toBe("foreign-thread-PRT_shared");
+    expect(out[1]?.threadId).toBe("foreign-thread-PRT_shared");
+    // Both group under one thread instead of splitting into per-comment threads.
+    expect(new Set(out.map((c) => c.threadId)).size).toBe(1);
+  });
+
+  test("foreign comment threadId matches the Thread entity fetchThreads builds (#180)", () => {
+    const map = new Map<number, string>([[42, "PRT_x"]]);
+    const [comment] = normalizeComments([foreignReview(42)], [], map);
+    // fetchThreads names an all-foreign thread `foreign-thread-<nodeId>`.
+    expect(comment?.threadId).toBe("foreign-thread-PRT_x");
+  });
+
+  test("falls back to a per-comment threadId when thread data is unavailable", () => {
+    const [comment] = normalizeComments([foreignReview(7)], [], new Map());
+    expect(comment?.threadId).toBe("foreign-thread-review-7");
   });
 });
 

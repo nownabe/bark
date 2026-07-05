@@ -77,26 +77,37 @@ type RawIssueComment = {
   user: RawUser;
 };
 
-/** Fetch the PR's review comments + issue comments and normalise both to
- *  the unified `Comment` shape. Bark-authored comments roundtrip their
- *  cid / threadId / anchor via hidden metadata; foreign comments get a
- *  synthetic id and an empty anchor so they appear in the sidebar but
- *  do not pin to a line. */
-export async function fetchComments(client: GitHubClient, ref: PrRef): Promise<Comment[]> {
-  const [reviewRaw, issueRaw] = await Promise.all([
-    ghPaginate<RawReviewComment>(
-      client,
-      `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments?per_page=100`,
-    ),
-    ghPaginate<RawIssueComment>(
-      client,
-      `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments?per_page=100`,
-    ),
-  ]);
+function fetchReviewCommentsRaw(client: GitHubClient, ref: PrRef): Promise<RawReviewComment[]> {
+  return ghPaginate<RawReviewComment>(
+    client,
+    `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments?per_page=100`,
+  );
+}
+
+function fetchIssueCommentsRaw(client: GitHubClient, ref: PrRef): Promise<RawIssueComment[]> {
+  return ghPaginate<RawIssueComment>(
+    client,
+    `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments?per_page=100`,
+  );
+}
+
+/** Normalise raw review + issue comments to the unified `Comment` shape.
+ *  `threadNodeIdByCommentId` maps a review comment's REST id to the GraphQL
+ *  node id of the review thread it belongs to; it is what lets a foreign
+ *  comment's `threadId` line up with the Thread entity `fetchThreads`
+ *  synthesises (both keyed `foreign-thread-<nodeId>`), so foreign comments
+ *  in one GitHub thread stay grouped (issue #181) and their resolved state
+ *  is surfaced (issue #180). Pass an empty map when the thread data isn't
+ *  available; foreign comments then fall back to a per-comment thread id. */
+export function normalizeComments(
+  reviewRaw: RawReviewComment[],
+  issueRaw: RawIssueComment[],
+  threadNodeIdByCommentId: ReadonlyMap<number, string> = new Map(),
+): Comment[] {
   const reviewById = new Map(reviewRaw.map((c) => [c.id, c]));
   const out: Comment[] = [];
   for (const rc of reviewRaw) {
-    out.push(toCommentFromReview(rc, reviewById));
+    out.push(toCommentFromReview(rc, reviewById, threadNodeIdByCommentId));
   }
   for (const ic of issueRaw) {
     out.push(toCommentFromIssue(ic));
@@ -104,7 +115,25 @@ export async function fetchComments(client: GitHubClient, ref: PrRef): Promise<C
   return out;
 }
 
-function toCommentFromReview(rc: RawReviewComment, byId: Map<number, RawReviewComment>): Comment {
+/** Fetch the PR's review + issue comments and normalise both to the
+ *  unified `Comment` shape. Bark-authored comments roundtrip their cid /
+ *  threadId / anchor via hidden metadata; foreign comments get a synthetic
+ *  id and an empty anchor so they appear in the sidebar but do not pin to a
+ *  line. Called standalone (no thread data), so foreign comments fall back
+ *  to a per-comment threadId; `fetchRemoteState` supplies the thread map. */
+export async function fetchComments(client: GitHubClient, ref: PrRef): Promise<Comment[]> {
+  const [reviewRaw, issueRaw] = await Promise.all([
+    fetchReviewCommentsRaw(client, ref),
+    fetchIssueCommentsRaw(client, ref),
+  ]);
+  return normalizeComments(reviewRaw, issueRaw);
+}
+
+function toCommentFromReview(
+  rc: RawReviewComment,
+  byId: Map<number, RawReviewComment>,
+  threadNodeIdByCommentId: ReadonlyMap<number, string>,
+): Comment {
   const { body, meta } = extractMetadata(rc.body);
   const author = { login: rc.user.login, avatarUrl: rc.user.avatar_url };
   // Reply chains: GitHub gives `in_reply_to_id` (REST id of parent). We
@@ -136,11 +165,15 @@ function toCommentFromReview(rc: RawReviewComment, byId: Map<number, RawReviewCo
   // comment entirely (Bark currently does — it's scope is line-bound
   // comments only) or render it elsewhere.
   const headLine = rc.line ?? 0;
+  // Key the thread off the GraphQL review-thread node id (via the map) so
+  // it matches the Thread entity from fetchThreads. Fall back to the
+  // comment's own id only when the thread data is unavailable.
+  const threadNodeId = threadNodeIdByCommentId.get(rc.id);
   return {
     id: `foreign-review-${rc.id}`,
     state: "synced",
     remoteId: rc.id,
-    threadId: `foreign-thread-review-${rc.id}`,
+    threadId: threadNodeId ? `foreign-thread-${threadNodeId}` : `foreign-thread-review-${rc.id}`,
     parentLocalId,
     body: rc.body,
     author,
@@ -204,13 +237,27 @@ function toCommentFromIssue(ic: RawIssueComment): Comment {
  *  use its `threadId` as the local Thread.id; otherwise synthesise one
  *  keyed off `remoteThreadId`. */
 export async function fetchThreads(client: GitHubClient, ref: PrRef): Promise<Thread[]> {
-  const raw = await listReviewThreads(client, ref);
+  return threadsFromRaw(await listReviewThreads(client, ref));
+}
+
+function threadsFromRaw(raw: RawReviewThread[]): Thread[] {
   return raw.map((t) => ({
     id: findThreadLocalId(t),
     state: "synced",
     remoteThreadId: t.id,
     resolved: t.isResolved,
   }));
+}
+
+/** Map each review comment's REST id to the GraphQL node id of the review
+ *  thread it belongs to. Used to align foreign comments' `threadId` with
+ *  the synthesised Thread entity (issues #180 / #181). */
+function buildCommentThreadMap(raw: RawReviewThread[]): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const t of raw) {
+    for (const c of t.comments) map.set(c.databaseId, t.id);
+  }
+  return map;
 }
 
 function findThreadLocalId(thread: RawReviewThread): string {
@@ -304,12 +351,19 @@ export async function fetchRemoteState(
   ref: PrRef,
   opts: FetchRemoteStateOptions = {},
 ): Promise<RemoteState> {
-  const [pullRequest, viewer, comments, threads] = await Promise.all([
+  // Fetch every raw source in parallel, then normalise. The review-thread
+  // data is needed both to build Thread entities and to key foreign
+  // comments' threadId off their GraphQL thread node id, so comment
+  // normalisation waits on the raw fetch (not on a second round trip).
+  const [pullRequest, viewer, reviewRaw, issueRaw, rawThreads] = await Promise.all([
     fetchPullRequest(client, ref),
     fetchViewer(client),
-    fetchComments(client, ref),
-    fetchThreads(client, ref),
+    fetchReviewCommentsRaw(client, ref),
+    fetchIssueCommentsRaw(client, ref),
+    listReviewThreads(client, ref),
   ]);
+  const comments = normalizeComments(reviewRaw, issueRaw, buildCommentThreadMap(rawThreads));
+  const threads = threadsFromRaw(rawThreads);
 
   // Union of:
   //   - every fetched comment's anchor (foreign comments with anchor.sha
