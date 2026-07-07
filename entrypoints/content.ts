@@ -1,13 +1,18 @@
 // Content script — injects the "Open in Bark" entry point on PR pages.
+// Runs on all github.com pages so Turbo navigation onto a PR still injects.
 // Design Doc §6 (Content Script). It only injects the button; the review
 // experience (rendering, anchoring) lives in the SPA page.
 export default defineContentScript({
-  matches: ["https://github.com/*/pull/*"],
+  // Match every github.com page, not just /pull/: GitHub navigates via Turbo
+  // (same-document pushState), so a /pull/-only match never injects when the
+  // user reaches a PR from the pulls list or repo home (#189). syncEntryButton
+  // keeps the injection itself PR-page-only.
+  matches: ["https://github.com/*"],
   main() {
-    injectEntryButton();
-    // GitHub navigates via Turbo (SPA-like); re-inject after client-side nav.
+    syncEntryButton();
+    // Re-sync after each Turbo client-side navigation.
     // TODO(next slice): use a more robust nav observer / MutationObserver.
-    document.addEventListener("turbo:load", injectEntryButton);
+    document.addEventListener("turbo:load", syncEntryButton);
   },
 });
 
@@ -17,10 +22,16 @@ function parsePr(): { owner: string; repo: string; pr: string } | null {
   return { owner: m[1], repo: m[2], pr: m[3] };
 }
 
-function injectEntryButton() {
+function syncEntryButton() {
   const ref = parsePr();
-  if (!ref) return;
-  if (document.getElementById("bark-entry")) return;
+  const existing = document.getElementById("bark-entry");
+  if (!ref) {
+    // Turbo usually swaps <body> (dropping the button), but remove explicitly
+    // so a nav that keeps the body can't leave the button on a non-PR page.
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
 
   // The icon IS the button: a round, transparent floating action button that
   // shows the Bark mascot. The label lives in the tooltip/aria-label so the
