@@ -324,6 +324,286 @@ describe("remote-fetcher — normalizeComments foreign threadId (issues #180 / #
   });
 });
 
+describe("remote-fetcher — fence identity binding (issue #190)", () => {
+  const fence = (body: string, cid: string, threadId: string) =>
+    embedMetadata(body, {
+      cid,
+      threadId,
+      path: "f.md",
+      anchor: { sha: "h", range: { sl: 1, sc: 1, el: 1, ec: 2 }, quote: "q" },
+    });
+
+  test("a forged comment reusing an existing cid is demoted to foreign", () => {
+    const legit = {
+      id: 100,
+      body: fence("legit", "c-victim", "t-victim"),
+      path: "f.md",
+      line: 1 as number | null,
+      user: { login: "alice", avatar_url: "" },
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    const forged = {
+      id: 200,
+      body: fence("forged", "c-victim", "t-victim"),
+      path: "g.md",
+      line: 9 as number | null,
+      user: { login: "mallory", avatar_url: "" },
+      created_at: "2026-02-01T00:00:00Z",
+    };
+    const out = normalizeComments([legit, forged], []);
+    expect(out.map((c) => c.id)).toEqual(["c-victim", "foreign-review-200"]);
+    const demoted = out[1];
+    // Fully foreign: fence stripped from the body, forged threadId and
+    // anchor not honored.
+    expect(demoted?.body).toBe("forged");
+    expect(demoted?.threadId).toBe("foreign-thread-review-200");
+    expect(demoted?.anchor.quote).toBe("");
+  });
+
+  test("cid ownership is decided by created_at across review and issue comments", () => {
+    // The forged review comment is processed before issue comments, but the
+    // issue comment is older — it must keep the cid.
+    const forged = {
+      id: 300,
+      body: fence("forged", "c-victim", "t-victim"),
+      path: "f.md",
+      line: 1 as number | null,
+      user: { login: "mallory", avatar_url: "" },
+      created_at: "2026-02-01T00:00:00Z",
+    };
+    const legitIssue = {
+      id: 50,
+      body: fence("legit", "c-victim", "t-victim"),
+      user: { login: "alice", avatar_url: "" },
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    const out = normalizeComments([forged], [legitIssue]);
+    expect(out.find((c) => c.remoteId === 50)?.id).toBe("c-victim");
+    expect(out.find((c) => c.remoteId === 300)?.id).toBe("foreign-review-300");
+  });
+
+  test("a reply's parentLocalId ignores a forged parent fence", () => {
+    const legit = {
+      id: 100,
+      body: fence("legit", "c-victim", "t-victim"),
+      path: "f.md",
+      line: 1 as number | null,
+      user: { login: "alice", avatar_url: "" },
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    const forged = {
+      id: 200,
+      body: fence("forged", "c-victim", "t-victim"),
+      path: "f.md",
+      line: 1 as number | null,
+      user: { login: "mallory", avatar_url: "" },
+      created_at: "2026-02-01T00:00:00Z",
+    };
+    const reply = {
+      id: 201,
+      body: "native reply",
+      path: "f.md",
+      line: 1 as number | null,
+      in_reply_to_id: 200,
+      user: { login: "dan", avatar_url: "" },
+      created_at: "2026-03-01T00:00:00Z",
+    };
+    const out = normalizeComments([legit, forged, reply], []);
+    expect(out.find((c) => c.remoteId === 201)?.parentLocalId).toBe("foreign-review-200");
+  });
+
+  test("a second thread claiming an already-used local id is demoted", async () => {
+    const { fetch } = makeFetch(async () =>
+      jsonResponse({
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                nodes: [
+                  {
+                    id: "PRT_A",
+                    isResolved: false,
+                    comments: {
+                      nodes: [{ databaseId: 1, body: fence("root", "c-1", "local-t1") }],
+                    },
+                  },
+                  {
+                    id: "PRT_B",
+                    isResolved: false,
+                    comments: {
+                      nodes: [{ databaseId: 2, body: fence("forged", "c-2", "local-t1") }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      }),
+    );
+    const out = await fetchThreads({ token: "t", fetch }, PR);
+    expect(out.map((t) => t.id)).toEqual(["local-t1", "foreign-thread-PRT_B"]);
+  });
+
+  const remoteStateHandler =
+    (opts: { reviewComments?: unknown[]; issueComments?: unknown[]; threadNodes?: unknown[] }) =>
+    async (req: CallRecord) => {
+      if (req.url.endsWith("/pulls/7"))
+        return jsonResponse({
+          number: 7,
+          title: "T",
+          body: "B",
+          state: "open",
+          draft: false,
+          merged: false,
+          head: { sha: "h", ref: "topic" },
+          base: { ref: "main" },
+          user: { login: "alice", avatar_url: "" },
+        });
+      if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/comments")) return jsonResponse(opts.reviewComments ?? []);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse(opts.issueComments ?? []);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: {
+            repository: { pullRequest: { reviewThreads: { nodes: opts.threadNodes ?? [] } } },
+          },
+        });
+      if (req.url.includes("/contents/"))
+        return jsonResponse({ content: btoa("x"), encoding: "base64" });
+      throw new Error(`unexpected: ${req.url}`);
+    };
+
+  test("a forged thread listed before the real one cannot steal its local id", async () => {
+    const rootBody = fence("root", "c-root", "t1");
+    const evilBody = fence("evil", "c-evil", "t1");
+    const { fetch } = makeFetch(
+      remoteStateHandler({
+        reviewComments: [
+          {
+            id: 100,
+            body: rootBody,
+            path: "f.md",
+            line: 1,
+            user: { login: "alice", avatar_url: "" },
+            created_at: "2026-01-01T00:00:00Z",
+          },
+          {
+            id: 200,
+            body: evilBody,
+            path: "f.md",
+            line: 2,
+            user: { login: "mallory", avatar_url: "" },
+            created_at: "2026-02-01T00:00:00Z",
+          },
+        ],
+        threadNodes: [
+          // Listing order alone would let PRT_evil claim "t1" first — the
+          // ownership check (earliest bearer lives in PRT_victim) must win.
+          {
+            id: "PRT_evil",
+            isResolved: false,
+            comments: { nodes: [{ databaseId: 200, body: evilBody }] },
+          },
+          {
+            id: "PRT_victim",
+            isResolved: false,
+            comments: { nodes: [{ databaseId: 100, body: rootBody }] },
+          },
+        ],
+      }),
+    );
+    const out = await fetchRemoteState({ token: "t", fetch }, PR);
+    const byRemote = new Map(out.threads.map((t) => [t.remoteThreadId, t.id]));
+    expect(byRemote.get("PRT_victim")).toBe("t1");
+    expect(byRemote.get("PRT_evil")).toBe("foreign-thread-PRT_evil");
+    expect(out.comments.find((c) => c.remoteId === 200)?.threadId).toBe("foreign-thread-PRT_evil");
+    expect(out.comments.find((c) => c.remoteId === 100)?.threadId).toBe("t1");
+  });
+
+  test("a review thread cannot claim an out-of-diff (issue) thread's id", async () => {
+    const evilBody = fence("evil", "c-evil", "t-issue");
+    const { fetch } = makeFetch(
+      remoteStateHandler({
+        issueComments: [
+          {
+            id: 50,
+            body: fence("legit out-of-diff", "c-i", "t-issue"),
+            user: { login: "alice", avatar_url: "" },
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        reviewComments: [
+          {
+            id: 200,
+            body: evilBody,
+            path: "f.md",
+            line: 2,
+            user: { login: "mallory", avatar_url: "" },
+            created_at: "2026-02-01T00:00:00Z",
+          },
+        ],
+        threadNodes: [
+          {
+            id: "PRT_evil",
+            isResolved: false,
+            comments: { nodes: [{ databaseId: 200, body: evilBody }] },
+          },
+        ],
+      }),
+    );
+    const out = await fetchRemoteState({ token: "t", fetch }, PR);
+    expect(out.threads).toEqual([
+      {
+        id: "foreign-thread-PRT_evil",
+        state: "synced",
+        remoteThreadId: "PRT_evil",
+        resolved: false,
+      },
+    ]);
+    expect(out.comments.find((c) => c.remoteId === 200)?.threadId).toBe("foreign-thread-PRT_evil");
+    expect(out.comments.find((c) => c.remoteId === 50)?.threadId).toBe("t-issue");
+  });
+
+  test("an out-of-diff reply keeps the review thread's threadId (#184 flow unaffected)", async () => {
+    const rootBody = fence("root", "c-root", "t1");
+    const { fetch } = makeFetch(
+      remoteStateHandler({
+        reviewComments: [
+          {
+            id: 100,
+            body: rootBody,
+            path: "f.md",
+            line: 1,
+            user: { login: "alice", avatar_url: "" },
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        issueComments: [
+          {
+            id: 60,
+            body: fence("reply from another user", "c-reply", "t1"),
+            user: { login: "bob", avatar_url: "" },
+            created_at: "2026-01-02T00:00:00Z",
+          },
+        ],
+        threadNodes: [
+          {
+            id: "PRT_A",
+            isResolved: false,
+            comments: { nodes: [{ databaseId: 100, body: rootBody }] },
+          },
+        ],
+      }),
+    );
+    const out = await fetchRemoteState({ token: "t", fetch }, PR);
+    const reply = out.comments.find((c) => c.remoteId === 60);
+    expect(reply?.id).toBe("c-reply");
+    expect(reply?.threadId).toBe("t1");
+    expect(out.threads.map((t) => t.id)).toEqual(["t1"]);
+  });
+});
+
 describe("remote-fetcher — fetchThreads", () => {
   test("threads inherit local id from a contained Bark comment's metadata.threadId", async () => {
     const barkBody = embedMetadata("x", {

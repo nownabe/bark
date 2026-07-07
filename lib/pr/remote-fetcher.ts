@@ -69,13 +69,77 @@ type RawReviewComment = {
   start_line?: number | null;
   in_reply_to_id?: number;
   user: RawUser;
+  created_at?: string;
 };
 
 type RawIssueComment = {
   id: number;
   body: string;
   user: RawUser;
+  created_at?: string;
 };
+
+// ---- Fence identity binding (issue #190) --------------------------------
+//
+// The metadata fence is plaintext-base64 inside a publicly readable comment
+// body, so any PR commenter can copy another comment's cid / threadId into
+// their own fence. Identity is therefore bound to the earliest bearer: for
+// each cid and threadId, the first comment (by created_at, across review AND
+// issue comments) that carried it is its owner. A later comment bearing an
+// owned cid is demoted to foreign, and a review thread's local id is honored
+// only when the owning comment sits inside that very thread — so a forged
+// fence can neither displace the real comment nor pull other comments into
+// the forger's thread. (A forged fence merely *joining* an existing
+// out-of-diff thread is indistinguishable from the legitimate issue-comment
+// reply flow of #184 and stays allowed; GitHub shows the real author.)
+
+type FenceOwners = {
+  cid: Map<string, string>;
+  threadId: Map<string, string>;
+};
+
+const reviewOwnerKey = (restId: number) => `review-${restId}`;
+const issueOwnerKey = (restId: number) => `issue-${restId}`;
+
+function buildFenceOwners(reviewRaw: RawReviewComment[], issueRaw: RawIssueComment[]): FenceOwners {
+  const cidBest = new Map<string, OwnerCandidate>();
+  const threadBest = new Map<string, OwnerCandidate>();
+  let index = 0;
+  const consider = (key: string, body: string, createdAt: string | undefined) => {
+    const i = index++;
+    const { meta } = extractMetadata(body);
+    if (!meta) return;
+    const candidate: OwnerCandidate = { key, createdAt, index: i };
+    claimIfEarlier(cidBest, meta.cid, candidate);
+    claimIfEarlier(threadBest, meta.threadId, candidate);
+  };
+  for (const c of reviewRaw) consider(reviewOwnerKey(c.id), c.body, c.created_at);
+  for (const c of issueRaw) consider(issueOwnerKey(c.id), c.body, c.created_at);
+  return { cid: ownerKeys(cidBest), threadId: ownerKeys(threadBest) };
+}
+
+type OwnerCandidate = { key: string; createdAt?: string; index: number };
+
+function claimIfEarlier(best: Map<string, OwnerCandidate>, id: string, c: OwnerCandidate): void {
+  const prev = best.get(id);
+  if (!prev || isEarlier(c, prev)) best.set(id, c);
+}
+
+/** ISO-8601 created_at compares lexicographically. GitHub always sends it;
+ *  an absent one sorts last so an undated fence never displaces a dated
+ *  bearer. Ties fall back to fetch order (review pages before issue pages). */
+function isEarlier(a: OwnerCandidate, b: OwnerCandidate): boolean {
+  if (a.createdAt !== b.createdAt) {
+    if (a.createdAt === undefined) return false;
+    if (b.createdAt === undefined) return true;
+    return a.createdAt < b.createdAt;
+  }
+  return a.index < b.index;
+}
+
+function ownerKeys(best: Map<string, OwnerCandidate>): Map<string, string> {
+  return new Map(Array.from(best, ([id, c]) => [id, c.key]));
+}
 
 function fetchReviewCommentsRaw(client: GitHubClient, ref: PrRef): Promise<RawReviewComment[]> {
   return ghPaginate<RawReviewComment>(
@@ -108,13 +172,14 @@ export function normalizeComments(
   threadLocalIdByCommentId: ReadonlyMap<number, string> = new Map(),
 ): Comment[] {
   const reviewById = new Map(reviewRaw.map((c) => [c.id, c]));
+  const owners = buildFenceOwners(reviewRaw, issueRaw);
   const out: Comment[] = [];
   for (const rc of reviewRaw) {
-    const c = toCommentFromReview(rc, reviewById, threadLocalIdByCommentId);
+    const c = toCommentFromReview(rc, reviewById, threadLocalIdByCommentId, owners);
     if (c) out.push(c);
   }
   for (const ic of issueRaw) {
-    const c = toCommentFromIssue(ic);
+    const c = toCommentFromIssue(ic, owners);
     if (c) out.push(c);
   }
   return out;
@@ -138,6 +203,7 @@ function toCommentFromReview(
   rc: RawReviewComment,
   byId: Map<number, RawReviewComment>,
   threadLocalIdByCommentId: ReadonlyMap<number, string>,
+  owners: FenceOwners,
 ): Comment | null {
   const { body, meta } = extractMetadata(rc.body);
   // A legacy v1 resolve marker is a hidden control comment, not a message —
@@ -148,14 +214,17 @@ function toCommentFromReview(
   // resolve to the parent's local id by looking up its metadata's cid.
   const parentLocalId =
     rc.in_reply_to_id !== undefined
-      ? localIdForReview(byId.get(rc.in_reply_to_id) ?? null, rc.in_reply_to_id)
+      ? localIdForReview(byId.get(rc.in_reply_to_id) ?? null, rc.in_reply_to_id, owners)
       : undefined;
-  if (meta) {
+  if (meta && owners.cid.get(meta.cid) === reviewOwnerKey(rc.id)) {
     return {
       id: meta.cid,
       state: "synced",
       remoteId: rc.id,
-      threadId: meta.threadId,
+      // Prefer GitHub's own thread grouping over the fence value so a
+      // forged threadId cannot re-home the comment (issue #190); the two
+      // agree for every legitimately posted comment.
+      threadId: threadLocalIdByCommentId.get(rc.id) ?? meta.threadId,
       parentLocalId,
       body,
       author,
@@ -163,7 +232,8 @@ function toCommentFromReview(
       anchor: meta.anchor,
     };
   }
-  // Foreign review comment — preserve as much position info as we can,
+  // Foreign review comment (or a fence whose cid an earlier comment owns —
+  // a forged copy, issue #190) — preserve as much position info as we can,
   // but leave quote empty so re-anchoring reports `outdated`. When the
   // GitHub `line` field is null (the comment's original line no longer
   // exists in the head — i.e. it's outdated / diff-outside), encode
@@ -185,7 +255,9 @@ function toCommentFromReview(
     remoteId: rc.id,
     threadId: threadLocalId ?? `foreign-thread-review-${rc.id}`,
     parentLocalId,
-    body: rc.body,
+    // `body` (not rc.body): identical for true foreign comments, and strips
+    // the forged fence from a demoted one.
+    body,
     author,
     path: rc.path,
     anchor: {
@@ -201,25 +273,32 @@ function toCommentFromReview(
   };
 }
 
-function localIdForReview(parent: RawReviewComment | null, parentRemoteId: number): string {
+function localIdForReview(
+  parent: RawReviewComment | null,
+  parentRemoteId: number,
+  owners: FenceOwners,
+): string {
   if (parent) {
     const { meta } = extractMetadata(parent.body);
-    if (meta) return meta.cid;
+    if (meta && owners.cid.get(meta.cid) === reviewOwnerKey(parent.id)) return meta.cid;
   }
   return `foreign-review-${parentRemoteId}`;
 }
 
-function toCommentFromIssue(ic: RawIssueComment): Comment | null {
+function toCommentFromIssue(ic: RawIssueComment, owners: FenceOwners): Comment | null {
   const { body, meta } = extractMetadata(ic.body);
   // Legacy out-of-diff resolves posted the marker as an issue comment; drop
   // it the same way (issue #186).
   if (meta?.legacyResolveEvent) return null;
   const author = { login: ic.user.login, avatarUrl: ic.user.avatar_url };
-  if (meta) {
+  if (meta && owners.cid.get(meta.cid) === issueOwnerKey(ic.id)) {
     return {
       id: meta.cid,
       state: "synced",
       remoteId: ic.id,
+      // meta.threadId is kept as-is: issue comments have no GitHub thread
+      // structure to validate against, and sharing another thread's id is
+      // exactly how legitimate out-of-diff replies work (issue #184).
       threadId: meta.threadId,
       body,
       author,
@@ -232,7 +311,7 @@ function toCommentFromIssue(ic: RawIssueComment): Comment | null {
     state: "synced",
     remoteId: ic.id,
     threadId: `foreign-thread-issue-${ic.id}`,
-    body: ic.body,
+    body,
     author,
     path: "",
     anchor: {
@@ -253,13 +332,30 @@ export async function fetchThreads(client: GitHubClient, ref: PrRef): Promise<Th
   return threadsFromRaw(await listReviewThreads(client, ref));
 }
 
-function threadsFromRaw(raw: RawReviewThread[]): Thread[] {
+function threadsFromRaw(raw: RawReviewThread[], owners?: FenceOwners): Thread[] {
+  const localIds = threadLocalIds(raw, owners);
   return raw.map((t) => ({
-    id: findThreadLocalId(t),
+    id: localIds.get(t.id) ?? `foreign-thread-${t.id}`,
     state: "synced",
     remoteThreadId: t.id,
     resolved: t.isResolved,
   }));
+}
+
+/** Local id per thread node id, deduplicated: the first thread claiming a
+ *  local id keeps it; a later claimant (a forged fence duplicating another
+ *  thread's id, issue #190) falls back to its synthesised foreign id so two
+ *  Thread entities never collide. */
+function threadLocalIds(raw: RawReviewThread[], owners?: FenceOwners): Map<string, string> {
+  const used = new Set<string>();
+  const out = new Map<string, string>();
+  for (const t of raw) {
+    let id = findThreadLocalId(t, owners);
+    if (used.has(id)) id = `foreign-thread-${t.id}`;
+    used.add(id);
+    out.set(t.id, id);
+  }
+  return out;
 }
 
 /** Map each review comment's REST id to the LOCAL id of the review thread
@@ -268,19 +364,29 @@ function threadsFromRaw(raw: RawReviewThread[]): Thread[] {
  *  its Thread entity always share one key, whether the thread is
  *  all-foreign or mixed (a native reply inside a Bark thread inherits the
  *  Bark threadId; issues #180 / #181 / #183). */
-function buildCommentThreadMap(raw: RawReviewThread[]): Map<number, string> {
+function buildCommentThreadMap(raw: RawReviewThread[], owners?: FenceOwners): Map<number, string> {
+  const localIds = threadLocalIds(raw, owners);
   const map = new Map<number, string>();
   for (const t of raw) {
-    const localId = findThreadLocalId(t);
+    const localId = localIds.get(t.id);
+    if (localId === undefined) continue;
     for (const c of t.comments) map.set(c.databaseId, localId);
   }
   return map;
 }
 
-function findThreadLocalId(thread: RawReviewThread): string {
+/** With `owners` (the fetchRemoteState path), a fence names its thread only
+ *  when the naming comment is the earliest bearer of that threadId — a
+ *  forged fence cannot name someone else's thread, including an out-of-diff
+ *  (issue-comment) thread's id (issue #190). Without owners (standalone
+ *  fetchThreads, no REST comment data) the fence is trusted as before and
+ *  only the `threadLocalIds` dedup applies. */
+function findThreadLocalId(thread: RawReviewThread, owners?: FenceOwners): string {
   for (const c of thread.comments) {
     const { meta } = extractMetadata(c.body);
-    if (meta) return meta.threadId;
+    if (!meta) continue;
+    if (owners && owners.threadId.get(meta.threadId) !== reviewOwnerKey(c.databaseId)) continue;
+    return meta.threadId;
   }
   return `foreign-thread-${thread.id}`;
 }
@@ -379,8 +485,13 @@ export async function fetchRemoteState(
     fetchIssueCommentsRaw(client, ref),
     listReviewThreads(client, ref),
   ]);
-  const comments = normalizeComments(reviewRaw, issueRaw, buildCommentThreadMap(rawThreads));
-  const threads = threadsFromRaw(rawThreads);
+  const owners = buildFenceOwners(reviewRaw, issueRaw);
+  const comments = normalizeComments(
+    reviewRaw,
+    issueRaw,
+    buildCommentThreadMap(rawThreads, owners),
+  );
+  const threads = threadsFromRaw(rawThreads, owners);
 
   // Union of:
   //   - every fetched comment's anchor (foreign comments with anchor.sha
