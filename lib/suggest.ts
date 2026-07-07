@@ -3,6 +3,7 @@
 //  - diffToSuggestions: split into hunks via line-level LCS and convert to GitHub suggestions (line replacement)
 import { diff_match_patch } from "diff-match-patch";
 import { lineColToOffset } from "./anchor";
+import type { SuggestionEdit } from "./drafts";
 import type { CommentMetadata } from "./metadata";
 import { buildLineMap } from "./pr/linemap";
 import type { DisplayPosition } from "./pr/reanchor";
@@ -83,6 +84,53 @@ export function charDiffs(base: string, edited: string): Array<[number, string]>
   const diffs = dmp.diff_main(base, edited);
   dmp.diff_cleanupSemantic(diffs);
   return diffs as Array<[number, string]>;
+}
+
+/** Re-apply the author's edits (the base → edited delta) onto a new base —
+ *  a 3-way rebase via diff-match-patch. `clean` is true when every patch
+ *  hunk applied; a false result means the merged text is missing at least
+ *  one of the author's hunks and must not silently replace their edit. */
+export function rebaseEdit(
+  base: string,
+  edited: string,
+  newBase: string,
+): { source: string; clean: boolean } {
+  const dmp = new diff_match_patch();
+  const patches = dmp.patch_make(base, edited);
+  const [source, results] = dmp.patch_apply(patches, newBase);
+  return { source, clean: results.every(Boolean) };
+}
+
+export type LoadedEditRebase =
+  | { status: "unchanged"; edit: SuggestionEdit }
+  | { status: "rebased"; edit: SuggestionEdit }
+  | { status: "conflict"; edit: SuggestionEdit };
+
+/** Reconcile a persisted per-file edit with the freshly-fetched file content.
+ *
+ *  - The base is unchanged → keep the edit, just (re)stamp `baseSha`.
+ *  - The file changed upstream and the author's edits re-apply cleanly →
+ *    "rebased": the edit is rebuilt on the new base, preserving both the
+ *    author's changes and the upstream ones (the recovery path for a #187
+ *    commit conflict).
+ *  - They don't re-apply cleanly → "conflict": the edit is returned
+ *    UNCHANGED (still anchored to its old base/baseSha, so the commit
+ *    pipeline keeps refusing it rather than silently dropping hunks); the
+ *    caller surfaces guidance to discard & re-apply manually. */
+export function rebaseLoadedEdit(
+  edit: SuggestionEdit,
+  freshText: string,
+  headSha: string,
+): LoadedEditRebase {
+  if (edit.base === freshText) {
+    return { status: "unchanged", edit: { ...edit, baseSha: headSha } };
+  }
+  const { source, clean } = rebaseEdit(edit.base, edit.source, freshText);
+  if (!clean) return { status: "conflict", edit };
+  return {
+    status: "rebased",
+    edit: { source, base: freshText, baseSha: headSha, comments: edit.comments },
+  };
 }
 
 export interface SuggestionHunk {

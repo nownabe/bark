@@ -201,6 +201,27 @@ async function commit(
   step: CommitStep,
 ): Promise<CommitOutcome> {
   try {
+    // A FileEdit records the head it was edited against (fe.baseSha). When
+    // the PR head has advanced since (step.baseSha), committing the full
+    // editedSource would silently revert any interim changes to that file
+    // (issue #187). Allow the commit only when the file itself is unchanged
+    // between the two shas (same blob); otherwise fail with a conflict the
+    // UI can surface. Files whose baseSha matches the head need no check.
+    for (const fe of step.fileEdits) {
+      if (!fe.baseSha || fe.baseSha === step.baseSha) continue;
+      const [before, after] = await Promise.all([
+        fetchBlobSha(client, prRef, fe.path, fe.baseSha),
+        fetchBlobSha(client, prRef, fe.path, step.baseSha),
+      ]);
+      if (before === null || after === null || before !== after) {
+        return {
+          ok: false,
+          error: {
+            message: `Conflict: ${fe.path} changed on the PR branch after your edit. Refresh the PR and re-apply your changes.`,
+          },
+        };
+      }
+    }
     const blobs = await Promise.all(
       step.fileEdits.map(async (fe) => {
         const result = await ghRequest<{ sha: string }>(
@@ -253,6 +274,28 @@ async function commit(
 function commitMessage(step: CommitStep): string {
   const paths = step.fileEdits.map((f) => f.path).join(", ");
   return `Apply edits to ${paths}`;
+}
+
+/** The blob sha of `path` at `ref`, or null when unreadable (deleted /
+ *  moved) — the caller treats null as a conflict. Blob shas are
+ *  content-addressed, so equality means the file is byte-identical. */
+async function fetchBlobSha(
+  client: GitHubClient,
+  prRef: PrRef,
+  path: string,
+  ref: string,
+): Promise<string | null> {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  try {
+    const res = await ghRequest<{ sha: string }>(
+      client,
+      "GET",
+      `/repos/${prRef.owner}/${prRef.repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
+    );
+    return res.sha;
+  } catch {
+    return null;
+  }
 }
 
 // ---- Identity matching -------------------------------------------------

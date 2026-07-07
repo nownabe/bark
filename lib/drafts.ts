@@ -41,6 +41,11 @@ export interface SuggestionEdit {
   /** The unedited base text the edit is diffed against, so the live suggestion
    * hunks can be recomputed for any file — not only the one open in the editor. */
   base: string;
+  /** The head sha `base` was fetched at. Lets the commit pipeline verify the
+   * file didn't change upstream since the edit (issue #187); absent on edits
+   * persisted before this field existed (treated as "made at the current
+   * head", the pre-#187 behaviour). */
+  baseSha?: string;
   comments: Record<string, string>;
 }
 

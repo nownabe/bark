@@ -4,6 +4,8 @@ import {
   charDiffs,
   diffToSuggestions,
   extractSuggestionBlock,
+  rebaseEdit,
+  rebaseLoadedEdit,
   stripSuggestionBlock,
   suggestionEditRanges,
 } from "../lib/suggest";
@@ -167,6 +169,63 @@ describe("charDiffs", () => {
       .join("");
     expect(edited).toBe("hello brave world");
     expect(diffs.some(([op]) => op === 1)).toBe(true);
+  });
+});
+
+describe("rebaseEdit / rebaseLoadedEdit (issue #187 recovery)", () => {
+  test("re-applies the author's edit cleanly onto a new base with unrelated upstream changes", () => {
+    const base = "alpha\nbravo\ncharlie\ndelta\n";
+    const edited = "alpha\nBRAVO!\ncharlie\ndelta\n"; // author edits line 2
+    const newBase = "alpha\nbravo\ncharlie\nDELTA (upstream)\n"; // upstream edits line 4
+    const out = rebaseEdit(base, edited, newBase);
+    expect(out.clean).toBe(true);
+    expect(out.source).toBe("alpha\nBRAVO!\ncharlie\nDELTA (upstream)\n");
+  });
+
+  test("reports clean: false when upstream rewrote the same region", () => {
+    const base = "one two three";
+    const edited = "one TWO three"; // author edits the middle word
+    const newBase = "completely different text"; // upstream rewrote everything
+    const out = rebaseEdit(base, edited, newBase);
+    expect(out.clean).toBe(false);
+  });
+
+  test("rebaseLoadedEdit stamps baseSha and keeps the edit when the base is unchanged", () => {
+    const edit = { source: "edited", base: "base", comments: {} };
+    const out = rebaseLoadedEdit(edit, "base", "h1");
+    expect(out.status).toBe("unchanged");
+    expect(out.edit).toEqual({ source: "edited", base: "base", baseSha: "h1", comments: {} });
+  });
+
+  test("rebaseLoadedEdit rebuilds a clean merge on the new base", () => {
+    const edit = {
+      source: "alpha\nBRAVO!\ncharlie\ndelta\n",
+      base: "alpha\nbravo\ncharlie\ndelta\n",
+      baseSha: "h0",
+      comments: { c: "note" },
+    };
+    const out = rebaseLoadedEdit(edit, "alpha\nbravo\ncharlie\nDELTA (upstream)\n", "h1");
+    expect(out.status).toBe("rebased");
+    expect(out.edit).toEqual({
+      source: "alpha\nBRAVO!\ncharlie\nDELTA (upstream)\n",
+      base: "alpha\nbravo\ncharlie\nDELTA (upstream)\n",
+      baseSha: "h1",
+      comments: { c: "note" },
+    });
+  });
+
+  test("rebaseLoadedEdit returns the edit UNCHANGED on a dirty merge (old base/baseSha kept)", () => {
+    const edit = {
+      source: "one TWO three",
+      base: "one two three",
+      baseSha: "h0",
+      comments: {},
+    };
+    const out = rebaseLoadedEdit(edit, "completely different text", "h1");
+    expect(out.status).toBe("conflict");
+    // Anchored to the old base so the commit pipeline keeps refusing it
+    // instead of silently dropping the author's hunks.
+    expect(out.edit).toEqual(edit);
   });
 });
 

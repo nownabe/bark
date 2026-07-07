@@ -228,7 +228,74 @@ describe("github-transport — commit", () => {
       ],
     });
     expect(outcome).toEqual({ ok: true, newHeadSha: "commit-sha" });
-    // Exactly: blob, tree, commit, updateRef.
+    // Exactly: blob, tree, commit, updateRef — no conflict-check GETs when
+    // every FileEdit's baseSha matches the commit base.
     expect(calls.map((c) => c.method)).toEqual(["POST", "POST", "POST", "PATCH"]);
+  });
+
+  test("a stale FileEdit whose file changed since its baseSha fails as a conflict (issue #187)", () => {
+    const { fetch, calls } = makeFetch(async (req) => {
+      // The file's blob differs between the edit's base and the current head.
+      if (req.url.includes("/contents/a.md?ref=h0")) return jsonResponse({ sha: "blob-old" });
+      if (req.url.includes("/contents/a.md?ref=h1")) return jsonResponse({ sha: "blob-new" });
+      throw new Error(`unexpected call: ${req.url}`);
+    });
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    return transport
+      .commit({
+        kind: "commit",
+        baseSha: "h1", // head advanced past the edit's base
+        headRef: "topic",
+        fileEdits: [
+          { id: "f1", state: "syncing", path: "a.md", baseSha: "h0", editedSource: "edited" },
+        ],
+      })
+      .then((outcome) => {
+        expect(outcome.ok).toBe(false);
+        if (!outcome.ok) expect(outcome.error.message).toContain("Conflict: a.md changed");
+        // Nothing was committed: only the two contents GETs ran.
+        expect(calls.map((c) => c.method)).toEqual(["GET", "GET"]);
+      });
+  });
+
+  test("a stale baseSha with an UNCHANGED file commits normally", async () => {
+    const { fetch, calls } = makeFetch(async (req) => {
+      if (req.url.includes("/contents/a.md")) return jsonResponse({ sha: "blob-same" });
+      if (req.url.endsWith("/git/blobs")) return jsonResponse({ sha: "blob-sha" });
+      if (req.url.endsWith("/git/trees")) return jsonResponse({ sha: "tree-sha" });
+      if (req.url.endsWith("/git/commits")) return jsonResponse({ sha: "commit-sha" });
+      if (req.url.includes("/git/refs/heads/")) return jsonResponse({});
+      throw new Error(`unexpected call: ${req.url}`);
+    });
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const outcome = await transport.commit({
+      kind: "commit",
+      baseSha: "h1",
+      headRef: "topic",
+      fileEdits: [
+        { id: "f1", state: "syncing", path: "a.md", baseSha: "h0", editedSource: "edited" },
+      ],
+    });
+    expect(outcome).toEqual({ ok: true, newHeadSha: "commit-sha" });
+    expect(calls.map((c) => c.method)).toEqual(["GET", "GET", "POST", "POST", "POST", "PATCH"]);
+  });
+
+  test("a file deleted at the head also fails as a conflict", async () => {
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.includes("/contents/a.md?ref=h0")) return jsonResponse({ sha: "blob-old" });
+      if (req.url.includes("/contents/a.md?ref=h1"))
+        return jsonResponse({ message: "Not Found" }, 404);
+      throw new Error(`unexpected call: ${req.url}`);
+    });
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const outcome = await transport.commit({
+      kind: "commit",
+      baseSha: "h1",
+      headRef: "topic",
+      fileEdits: [
+        { id: "f1", state: "syncing", path: "a.md", baseSha: "h0", editedSource: "edited" },
+      ],
+    });
+    expect(outcome.ok).toBe(false);
   });
 });
