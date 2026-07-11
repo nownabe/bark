@@ -30,6 +30,19 @@ function lineClassFor(name: string): string | null {
   return null;
 }
 
+// PR Markdown is untrusted; without this allowlist a `javascript:`/`data:`
+// destination would land verbatim in an anchor href (#86). Relative URLs are
+// also rejected — they would resolve against the extension page, not GitHub.
+const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+
+function safeHref(raw: string): string | null {
+  try {
+    return SAFE_LINK_PROTOCOLS.has(new URL(raw).protocol) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 class LinkWidget extends WidgetType {
   constructor(
     readonly text: string,
@@ -44,7 +57,9 @@ class LinkWidget extends WidgetType {
     const a = document.createElement("a");
     a.className = "dr-link";
     a.textContent = this.text;
-    a.href = this.href;
+    const href = safeHref(this.href);
+    if (href === null) return a; // inert text for disallowed/invalid URLs
+    a.href = href;
     a.rel = "noopener noreferrer";
     a.target = "_blank";
     // A reviewer clicking the link should follow it (open in a new tab), so let

@@ -63,3 +63,40 @@ describe("preview mode: Markdown links render as clickable anchors", () => {
     view.destroy();
   });
 });
+
+describe("preview mode: unsafe URL schemes are not emitted as hrefs (#86)", () => {
+  // PR Markdown is untrusted; only http/https/mailto may become a real link.
+  // Everything else renders as inert text (an anchor without href).
+  const inert = (url: string) => {
+    // "See " keeps the default cursor (offset 0) outside the link so the
+    // widget renders instead of the editable source.
+    const view = render(`See [click](${url})`);
+    const a = view.dom.querySelector("a.dr-link");
+    expect(a).not.toBeNull();
+    expect(a!.hasAttribute("href")).toBe(false);
+    view.destroy();
+  };
+
+  test("javascript: links render without href", () => {
+    inert("javascript:alert(1)");
+  });
+
+  test("scheme matching is case-insensitive", () => {
+    inert("JaVaScRiPt:alert(1)");
+  });
+
+  test("data: links render without href", () => {
+    inert("data:text/html,<script>alert(1)</script>");
+  });
+
+  test("relative links render without href (would resolve to the extension page)", () => {
+    inert("./other.md");
+  });
+
+  test("mailto: links keep their href", () => {
+    const view = render("See [mail](mailto:a@example.com)");
+    const a = view.dom.querySelector("a.dr-link");
+    expect(a!.getAttribute("href")).toBe("mailto:a@example.com");
+    view.destroy();
+  });
+});
