@@ -7,10 +7,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 // The content script relies on WXT auto-import globals; provide them so the
 // entrypoint module can be imported and driven directly in tests.
 (globalThis as Record<string, unknown>).defineContentScript = (definition: unknown) => definition;
+const sentMessages: unknown[] = [];
 (globalThis as Record<string, unknown>).browser = {
   runtime: {
     getURL: (path: string) => `chrome-extension://bark${path}`,
-    sendMessage: async () => undefined,
+    sendMessage: async (message: unknown) => {
+      sentMessages.push(message);
+    },
   },
 };
 
@@ -30,6 +33,7 @@ function turboNavigateTo(url: string) {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+  sentMessages.length = 0;
 });
 
 afterEach(() => {
@@ -62,6 +66,18 @@ describe("entry button injection", () => {
 
     turboNavigateTo("https://github.com/owner/repo/pull/42");
     expect(document.getElementById("bark-entry")).not.toBeNull();
+  });
+
+  test("clicking after Turbo navigation to another PR sends the current PR ref (#87)", () => {
+    setUrl("https://github.com/owner/repo/pull/42");
+    contentScript.main();
+
+    turboNavigateTo("https://github.com/owner/repo/pull/43");
+    document.getElementById("bark-entry")?.click();
+
+    expect(sentMessages).toEqual([
+      { type: "bark/open", ref: { owner: "owner", repo: "repo", pr: "43" } },
+    ]);
   });
 
   test("removes the button when Turbo navigation leaves the PR page", () => {

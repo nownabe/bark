@@ -78,10 +78,14 @@ function syncEntryButton() {
   });
 
   btn.addEventListener("click", () => {
+    // Re-parse at click time: Turbo can navigate to a different PR while the
+    // button survives, so a ref captured at injection time can go stale (#87).
+    const current = parsePr();
+    if (!current) return;
     // Ask the background worker to open the page via chrome.tabs.create;
     // window.open(chrome-extension://...) from a content script is blocked
     // with ERR_BLOCKED_BY_CLIENT.
-    void browser.runtime.sendMessage({ type: "bark/open", ref });
+    void browser.runtime.sendMessage({ type: "bark/open", ref: current });
   });
 
   document.body.appendChild(btn);
