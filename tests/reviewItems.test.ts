@@ -22,6 +22,7 @@ import {
   summarizePending,
   threadRangeAt,
   sortPos,
+  comparePos,
   composerInsertIndex,
   type AcceptedSuggestionInfo,
   type PendingSuggestion,
@@ -644,9 +645,31 @@ describe("buildPendingSuggestions", () => {
 
 describe("sortPos", () => {
   test("line dominates, column breaks ties", () => {
-    expect(sortPos(2, 1)).toBeGreaterThan(sortPos(1, 9999));
-    expect(sortPos(5, 3)).toBeGreaterThan(sortPos(5, 1));
-    expect(sortPos(5, 1)).toBe(500001);
+    expect(comparePos(sortPos(2, 1), sortPos(1, 9999))).toBeGreaterThan(0);
+    expect(comparePos(sortPos(5, 3), sortPos(5, 1))).toBeGreaterThan(0);
+    expect(comparePos(sortPos(5, 1), sortPos(5, 1))).toBe(0);
+  });
+});
+
+describe("sortPos — column overflow (#196)", () => {
+  test("a huge column on an earlier line still sorts before the next line", () => {
+    // With the old packed int (line * 100000 + col), col >= 100000 leaked into
+    // the next line's range, so an item past column 100000 on line 1 sorted
+    // after items on line 2. Line must dominate no matter how large the column.
+    expect(comparePos(sortPos(1, 250000), sortPos(2, 1))).toBeLessThan(0);
+  });
+
+  test("columns beyond 100000 keep their relative order within a line", () => {
+    expect(comparePos(sortPos(1, 100001), sortPos(1, 100000))).toBeGreaterThan(0);
+    expect(comparePos(sortPos(1, 250000), sortPos(1, 999999))).toBeLessThan(0);
+  });
+
+  test("composerInsertIndex treats a huge-column line-1 entry as before line 2", () => {
+    const list = [{ sortPos: sortPos(1, 300000) }, { sortPos: sortPos(2, 1) }];
+    // A selection between them (line 1 col 999999) must splice after the
+    // huge-column line-1 entry and before line 2 — index 1. The old packed int
+    // put sortPos(1, 300000) numerically past sortPos(2, 1), inverting this.
+    expect(composerInsertIndex(list, sortPos(1, 999999))).toBe(1);
   });
 });
 
