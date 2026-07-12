@@ -383,7 +383,12 @@ export function filterReviewEntries(
     if (e.kind === "liveSuggestion") return facets.has("pending");
     const t = e.thread;
     if (facets.has("resolved") && t.resolved) return true;
-    if (facets.has("pending") && t.hasPending && !t.resolved) return true;
+    // A pending draft is always in the submit scope (buildPendingItems has no
+    // resolved check), so surface it under "pending" even on a resolved thread —
+    // otherwise the draft vanishes from the sidebar yet Submit still posts it
+    // (Pending (0) vs Submit (1), issue #193). Submitted content on a resolved
+    // thread still hides under the resolved facet.
+    if (facets.has("pending") && t.hasPending) return true;
     if (facets.has("submitted") && t.hasSubmitted && !t.resolved) return true;
     return false;
   });
