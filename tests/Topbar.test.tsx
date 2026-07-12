@@ -51,6 +51,7 @@ const samplePull = (overrides: Partial<PullInfo> = {}): PullInfo => ({
   body: "",
   headSha: "abcdef0123456",
   headRef: "feature",
+  baseRef: "main",
   state: "open",
   draft: false,
   merged: false,

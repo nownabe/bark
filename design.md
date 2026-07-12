@@ -140,6 +140,17 @@ heavy drop shadows.
   errors are never surfaced silently. Severity uses the semantic palette
   (`--red*` for errors, `--amber*` for warnings); auto-dismiss after a few
   seconds with a close affordance.
+- **Redline overlay** (`.redline*`, R10): the Topbar "Redline" toggle chip
+  (`.redline-toggle`) reads like a `.seg` chip and turns **accent** (blue =
+  interactive) when active, carrying the baseline's short SHA in
+  `--font-mono` / `tabular-nums`; it dims when disabled (no baseline). The
+  baseline selector reuses the `.popover` pattern (`.popover--redline`,
+  `.redline-option`). Over the document, the char-level baseline→head diff uses
+  its **own** classes so it never collides with suggest mode: insertions
+  (`.dr-redline-ins`) echo suggest mode's green tint + underline ("new"),
+  deletions (`.dr-redline-del`) strike through in `--red`. Same green/red split
+  as suggest mode, kept on separate classes because the two overlays are
+  mutually exclusive (redline is read-only preview; suggest is the edit diff).
 - **Floating controls** (`.debug-fab` bottom-left, `.role-fab` bottom-right):
   pill/circle, translucent, lift on hover. Dev-only controls (e.g. the
   role switch behind `BARK_DEV_ROLE_SWITCH`) live here, out of the main chrome.

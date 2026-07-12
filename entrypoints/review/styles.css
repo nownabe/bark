@@ -230,6 +230,131 @@ select:focus-visible {
   color: #fff;
 }
 
+/* ---- redline overlay controls (R10) ---- */
+.redline {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* The Redline toggle chip: reads like a .seg chip, turns accent (blue =
+   interactive) when active, carries the baseline short SHA in mono/tabular. */
+.redline-toggle {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.redline-toggle:not(:disabled):hover {
+  color: var(--fg);
+}
+.redline-toggle[aria-pressed="true"] {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  border-color: transparent;
+}
+.redline-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.redline-toggle__sha {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  opacity: 0.85;
+}
+.redline-selector-btn {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.redline-selector-btn:hover {
+  color: var(--fg);
+  border-color: var(--muted);
+}
+.redline-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.redline-jump__count {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 14px;
+  text-align: center;
+}
+/* Baseline selector popover — anchored under the redline controls. */
+.popover--redline {
+  right: auto;
+  width: 240px;
+}
+.redline-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.redline-option {
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.redline-option:not(:disabled):hover {
+  background: var(--bg-subtle);
+}
+.redline-option[aria-pressed="true"] {
+  background: var(--accent-tint);
+  border-color: transparent;
+  color: var(--accent-strong);
+}
+.redline-option:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.redline-option__detail {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .btn {
   font: inherit;
   font-size: 12px;

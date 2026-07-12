@@ -52,6 +52,8 @@ export interface ChangedFile {
 export interface PullInfo {
   headSha: string;
   headRef: string;
+  /** The PR's base branch name (e.g. "main") — a redline baseline option (R10). */
+  baseRef: string;
   title: string;
   /** PR description (Markdown); empty string when none. */
   body: string;

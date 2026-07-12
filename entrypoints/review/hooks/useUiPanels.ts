@@ -33,6 +33,12 @@ export type UiPanels = {
   helpBtnRef: RefObject<HTMLButtonElement>;
   helpRef: RefObject<HTMLDivElement>;
 
+  showRedlineSelector: boolean;
+  toggleRedlineSelector: () => void;
+  closeRedlineSelector: () => void;
+  redlineSelectorBtnRef: RefObject<HTMLButtonElement>;
+  redlineSelectorRef: RefObject<HTMLDivElement>;
+
   showDebug: boolean;
   toggleDebug: () => void;
   closeDebug: () => void;
@@ -43,6 +49,7 @@ export function useUiPanels(): UiPanels {
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [showPrInfo, setShowPrInfo] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showRedlineSelector, setShowRedlineSelector] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
 
   // popover refs (used by both render and the outside-click effects).
@@ -50,6 +57,8 @@ export function useUiPanels(): UiPanels {
   const prInfoRef = useRef<HTMLDivElement>(null);
   const helpBtnRef = useRef<HTMLButtonElement>(null);
   const helpRef = useRef<HTMLDivElement>(null);
+  const redlineSelectorBtnRef = useRef<HTMLButtonElement>(null);
+  const redlineSelectorRef = useRef<HTMLDivElement>(null);
 
   // PR info: outside-click closes (treat the toggle button itself as inside).
   useEffect(() => {
@@ -75,6 +84,19 @@ export function useUiPanels(): UiPanels {
     return () => document.removeEventListener("mousedown", onDown);
   }, [showHelp]);
 
+  // Redline baseline selector: same outside-click pattern.
+  useEffect(() => {
+    if (!showRedlineSelector) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (redlineSelectorRef.current?.contains(t) || redlineSelectorBtnRef.current?.contains(t))
+        return;
+      setShowRedlineSelector(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [showRedlineSelector]);
+
   return {
     showSubmitConfirm,
     setShowSubmitConfirm,
@@ -90,6 +112,11 @@ export function useUiPanels(): UiPanels {
     closeHelp: () => setShowHelp(false),
     helpBtnRef,
     helpRef,
+    showRedlineSelector,
+    toggleRedlineSelector: () => setShowRedlineSelector((v) => !v),
+    closeRedlineSelector: () => setShowRedlineSelector(false),
+    redlineSelectorBtnRef,
+    redlineSelectorRef,
     showDebug,
     toggleDebug: () => setShowDebug((v) => !v),
     closeDebug: () => setShowDebug(false),

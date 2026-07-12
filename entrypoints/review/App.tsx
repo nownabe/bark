@@ -24,11 +24,13 @@ import {
 import { commentHighlightField, commentHighlightTheme, setCommentHighlights } from "./highlight";
 import { richMarkdown, richMarkdownTheme } from "./richMarkdown";
 import { baseTextField, setBaseText, suggestDecorations, suggestTheme } from "./suggestMode";
+import { redlineBaseField, redlineDecorations, redlineTheme, setRedlineBase } from "./redlineMode";
 import { setSuggestionMarks, suggestionMarksField, suggestionViewTheme } from "./suggestionView";
 import { SelectionBubble } from "./components/SelectionBubble";
 import { LoginGate } from "./components/LoginGate";
 import { SuggestionDiff } from "./components/SuggestionDiff";
 import { Topbar } from "./components/Topbar";
+import { RedlineControls, type RedlineBaselineSource } from "./components/RedlineControls";
 import { ReviewSidebar } from "./components/ReviewSidebar";
 import { SourceEditor } from "./components/SourceEditor";
 import { InstallGate } from "./components/InstallGate";
@@ -104,10 +106,13 @@ import { productionSuggestionEditsDeps } from "./hooks/useSuggestionEdits.deps";
 import { useDismissedSuggestions } from "./hooks/useDismissedSuggestions";
 import { productionDismissedDeps } from "./hooks/useDismissedSuggestions.deps";
 import { useSelectedFileContent } from "./hooks/useSelectedFileContent";
+import { useBaselineContent } from "./hooks/useBaselineContent";
 import { useUiPanels } from "./hooks/useUiPanels";
 import { useThreadActions } from "./hooks/useThreadActions";
 import { useVisibilityRefresh } from "./hooks/useVisibilityRefresh";
 import { SnackbarProvider, useSnackbar } from "./components/Snackbar";
+import { consumeAndAdvanceBaseline } from "../../lib/lastSeen";
+import { computeRedline, type RedlineSegment } from "../../lib/redline";
 import { sampleDoc } from "./sample";
 import {
   canAcceptSuggestion,
@@ -248,6 +253,7 @@ function AppBody() {
       pullRequest && {
         headSha: pullRequest.headSha,
         headRef: pullRequest.headRef,
+        baseRef: pullRequest.baseRef,
         title: pullRequest.title,
         body: pullRequest.body,
         author: pullRequest.author.login,
@@ -263,12 +269,22 @@ function AppBody() {
   // subscription re-derives (no manual setHeadSha anywhere).
   const headSha = pullRequest?.headSha ?? null;
   const headRef = pullRequest?.headRef ?? null;
+  // The PR's base branch — a redline baseline option (R10).
+  const baseRef = pullRequest?.baseRef ?? null;
   const viewerLogin = repositoryAppState?.viewer?.login ?? null;
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   const [role, setRole] = useState<Role>("reviewer");
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
+  // R10 redline overlay (§7.10). The default baseline is the head SHA the viewer
+  // last saw this PR at (consumed once on bootstrap, below); the PR base branch
+  // is the alternative. Both are ephemeral UI state (ADR 0002 §4): the toggle
+  // resets to its default each open and is not persisted.
+  const [sessionBaselineSha, setSessionBaselineSha] = useState<string | null>(null);
+  const [redlineBaselineSource, setRedlineBaselineSource] =
+    useState<RedlineBaselineSource>("lastVisit");
+  const [redlineEnabled, setRedlineEnabled] = useState(false);
   // The open composer's anchor — set only when the selection bubble is clicked.
   const [anchor, setAnchor] = useState<SourceAnchor | null>(null);
   // The pending text selection (drives the bubble button, not the composer) and
@@ -359,12 +375,22 @@ function AppBody() {
     closeHelp,
     helpBtnRef,
     helpRef,
+    showRedlineSelector,
+    toggleRedlineSelector,
+    closeRedlineSelector,
+    redlineSelectorBtnRef,
+    redlineSelectorRef,
     showDebug,
     toggleDebug,
     closeDebug,
   } = uiPanels;
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const sidebarRef = useRef<HTMLElement>(null);
+  // Guards the once-per-open consume-and-advance of the last-seen SHA: the PR
+  // key we've already captured a baseline for. headSha can advance later (an
+  // author commit), but the redline baseline must stay the head we FIRST opened
+  // at, so we key on the PR, not on headSha.
+  const baselineCapturedFor = useRef<string | null>(null);
   // The pending-suggestion ids seen on the previous render, so a newly created
   // suggestion can be scrolled into view in the review list (see effect below).
   const seenSuggestionCids = useRef<Set<string>>(new Set());
@@ -486,6 +512,57 @@ function AppBody() {
       role === "reviewer" && source !== baseSource ? diffToSuggestions(baseSource, source) : [],
     [role, source, baseSource],
   );
+  // ---- R10 redline overlay -------------------------------------------------
+  // Consume the viewer's last-seen SHA once per PR open: the returned prior SHA
+  // is the session's default baseline, and the stored value advances to the
+  // current head. Runs after headSha lands; guarded so a later head advance
+  // (author commit) doesn't re-capture a newer baseline.
+  useEffect(() => {
+    if (!ref || !headSha) return;
+    const key = `${ref.owner}/${ref.repo}#${ref.number}`;
+    if (baselineCapturedFor.current === key) return;
+    baselineCapturedFor.current = key;
+    void consumeAndAdvanceBaseline(ref, headSha).then((prior) => {
+      // A stored SHA equal to head means "same head as last visit" → no redline;
+      // consumeAndAdvanceBaseline returns headSha in that case, which we map to
+      // "no baseline" (nothing changed to show).
+      setSessionBaselineSha(prior && prior !== headSha ? prior : null);
+    });
+  }, [ref?.owner, ref?.repo, ref?.number, headSha]);
+
+  // The active baseline commit for the redline: the viewer's last-seen head, or
+  // the PR base branch. PR-base uses the ref name (accepts drift — plan §0).
+  const redlineBaselineSha =
+    redlineBaselineSource === "prBase" ? (baseRef ?? null) : sessionBaselineSha;
+  // Fetch the selected file's content at that baseline (404-tolerant → null).
+  const baselineContent = useBaselineContent(client, ref, redlineBaselineSha, selectedPath);
+  // Redline is only meaningful in Preview with no local edits (the buffer must
+  // equal head, or the diff would compare against the viewer's own edits).
+  const hasLocalEdits = source !== baseSource;
+  const redlineActive =
+    redlineEnabled && viewMode === "preview" && !hasLocalEdits && baselineContent !== null;
+  // The baseline text handed to CodeMirror: empty string when redline is off, so
+  // the decoration extension renders nothing (its own base===head/empty gate).
+  const redlineBaseText = redlineActive ? (baselineContent ?? "") : "";
+  // Change segments over the current file — drives the count + jump navigation.
+  const redlineSegments = useMemo(
+    () => (redlineActive && baselineContent ? computeRedline(baselineContent, source) : []),
+    [redlineActive, baselineContent, source],
+  );
+  // Default the toggle ON the first time a baseline becomes available for this
+  // PR, and OFF again when none exists. Not persisted; resets each open because
+  // sessionBaselineSha resets (the guard ref) each open.
+  const redlineDefaultedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const key = ref ? `${ref.owner}/${ref.repo}#${ref.number}` : null;
+    if (sessionBaselineSha && key && redlineDefaultedFor.current !== key) {
+      redlineDefaultedFor.current = key;
+      setRedlineEnabled(true);
+    } else if (!sessionBaselineSha && baseRef == null) {
+      setRedlineEnabled(false);
+    }
+  }, [sessionBaselineSha, baseRef, ref?.owner, ref?.repo, ref?.number]);
+
   const cmExtensions = useMemo(() => {
     const ext = [
       markdown({ extensions: [GFM], codeLanguages: languages }),
@@ -495,15 +572,21 @@ function AppBody() {
       suggestionMarksField,
       suggestionViewTheme,
       baseTextField,
+      redlineBaseField,
     ];
     if (viewMode === "preview") ext.push(richMarkdown, richMarkdownTheme);
     if (role === "reviewer") ext.push(suggestDecorations, suggestTheme);
+    // Redline overlay: preview-only and only while the buffer equals head (no
+    // local edits). suggestDecorations render only when the buffer diverges from
+    // base, so the two overlays are mutually exclusive at render time even when
+    // both extensions are installed; redlineActive already encodes !hasLocalEdits.
+    if (redlineActive) ext.push(redlineDecorations, redlineTheme);
     // While the selected file's content is loading, `source` still holds
     // the previous file's text — keep the editor read-only so a keystroke
     // can't persist that text under the new path (issue #185).
     if (!fileReady) ext.push(EditorView.editable.of(false));
     return ext;
-  }, [viewMode, role, fileReady]);
+  }, [viewMode, role, fileReady, redlineActive]);
 
   const curPath = selectedPath ?? "sample";
 
@@ -697,6 +780,12 @@ function AppBody() {
   useEffect(() => {
     cmRef.current?.view?.dispatch({ effects: setBaseText.of(baseSource) });
   }, [baseSource]);
+
+  // Push the redline baseline into CM (R10). Empty string when redline is off,
+  // so the decoration extension (present only while active) renders nothing.
+  useEffect(() => {
+    cmRef.current?.view?.dispatch({ effects: setRedlineBase.of(redlineBaseText) });
+  }, [redlineBaseText]);
 
   // Highlight comment/draft anchors over the CM body (R6); pending uses a distinct color.
   // Always clip ranges to the current CM document length (out-of-range ranges crash on map).
@@ -1331,6 +1420,12 @@ function AppBody() {
     setRefreshPr(null);
     resetSuggestionEdits();
     resetDismissed();
+    // Reset the redline session so re-login rebuilds the baseline afresh.
+    setSessionBaselineSha(null);
+    setRedlineEnabled(false);
+    setRedlineBaselineSource("lastVisit");
+    baselineCapturedFor.current = null;
+    redlineDefaultedFor.current = null;
     setSelectedPath(null);
     setSource(ref ? "" : sampleDoc);
     setBaseSource(ref ? "" : sampleDoc);
@@ -1410,6 +1505,30 @@ function AppBody() {
     view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
     suppressNextAnchor.current = false; // update listener already ran synchronously
     view.focus();
+  };
+
+  // Redline jump-to-change: step the caret to the next/previous change segment
+  // (offsets are already in head/CM-doc coords). An `ins` selects its span; a
+  // `del` is zero-width, so it places a caret at the deletion point. Wraps
+  // around at the ends.
+  const jumpToRedline = (dir: 1 | -1) => {
+    const view = cmRef.current?.view;
+    if (!view || redlineSegments.length === 0) return;
+    const startOf = (s: RedlineSegment) => (s.op === "ins" ? s.from : s.at);
+    const ordered = [...redlineSegments].sort((a, b) => startOf(a) - startOf(b));
+    const cursor = view.state.selection.main.head;
+    const seg =
+      dir === 1
+        ? (ordered.find((s) => startOf(s) > cursor) ?? ordered[0])
+        : ([...ordered].reverse().find((s) => startOf(s) < cursor) ?? ordered[ordered.length - 1]);
+    if (seg.op === "ins") {
+      jumpToOffsets(seg.from, seg.to);
+    } else {
+      suppressNextAnchor.current = true;
+      view.dispatch({ selection: { anchor: seg.at }, scrollIntoView: true });
+      suppressNextAnchor.current = false;
+      view.focus();
+    }
   };
 
   const jumpToDraft = (d: PendingDraft) => {
@@ -1666,6 +1785,29 @@ function AppBody() {
         prInfoRef={prInfoRef}
         helpBtnRef={helpBtnRef}
         helpRef={helpRef}
+        redline={
+          ref ? (
+            <RedlineControls
+              enabled={redlineEnabled}
+              baselineSha={redlineBaselineSha}
+              baselineSource={redlineBaselineSource}
+              prBaseRef={baseRef}
+              lastVisitSha={sessionBaselineSha}
+              changeCount={redlineSegments.length}
+              showSelector={showRedlineSelector}
+              selectorBtnRef={redlineSelectorBtnRef}
+              selectorRef={redlineSelectorRef}
+              onToggle={() => setRedlineEnabled((v) => !v)}
+              onChangeBaselineSource={(s) => {
+                setRedlineBaselineSource(s);
+                closeRedlineSelector();
+              }}
+              onToggleSelector={toggleRedlineSelector}
+              onJumpPrev={() => jumpToRedline(-1)}
+              onJumpNext={() => jumpToRedline(1)}
+            />
+          ) : null
+        }
         onSelectPath={(path) => {
           setSelectedPath(path);
           setAnchor(null);

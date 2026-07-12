@@ -6,7 +6,7 @@
 // parent too, because they participate in outside-click logic that
 // spans more than just this component.
 
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import {
   avatarUrl,
   type ChangedFile,
@@ -38,6 +38,9 @@ export type TopbarProps = {
   prInfoRef: RefObject<HTMLDivElement>;
   helpBtnRef: RefObject<HTMLButtonElement>;
   helpRef: RefObject<HTMLDivElement>;
+  /** Redline overlay controls (R10), rendered next to the view-mode switch.
+   *  Passed as a slot so Topbar stays presentation-only. */
+  redline?: ReactNode;
   onSelectPath: (path: string) => void;
   onChangeViewMode: (mode: ViewMode) => void;
   onAskSubmit: () => void;
@@ -68,6 +71,7 @@ export function Topbar({
   prInfoRef,
   helpBtnRef,
   helpRef,
+  redline,
   onSelectPath,
   onChangeViewMode,
   onAskSubmit,
@@ -151,6 +155,7 @@ export function Topbar({
               Raw
             </button>
           </div>
+          {redline}
           <button
             type="button"
             className="btn btn--icon"
