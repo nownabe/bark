@@ -173,13 +173,58 @@ export class GitHubApiError extends Error {
   }
 }
 
+// ---- GET hardening (issue #9) ------------------------------------------
+//
+// A module-level ETag cache lets conditional GETs replay a cached body on a
+// 304 (which does NOT count against the REST rate limit), and idempotent
+// GETs retry transient failures (network rejection / 5xx) with a small
+// bounded backoff. Mutations (post/patch/put) are never cached or retried —
+// a repeated commit/comment would duplicate side effects.
+
+/** url -> { etag, raw Response text }. GET-only; a 304 replays the text for
+ *  free. Module-level, no persistence (page / service-worker lifetime). */
+const etagCache = new Map<string, { etag: string; text: string }>();
+
+/** Test seam: drop cached ETags so cases don't leak into one another. */
+export function clearGitHubEtagCache(): void {
+  etagCache.clear();
+}
+
+const RETRY_BACKOFF_MS = [300, 900];
+
+/** True for transient failures worth retrying an idempotent read: a network
+ *  rejection (no status) or a 5xx GitHubApiError. */
+function isTransientGetError(err: unknown): boolean {
+  if (err instanceof GitHubApiError) return err.status >= 500 && err.status < 600;
+  return true;
+}
+
+/** A 200 Response whose body is the given cached text — replayed on a 304
+ *  so callers can `.json()` / `.text()` it exactly as a live response. */
+function cachedResponse(text: string): Response {
+  return new Response(text, { status: 200 });
+}
+
+/** Cache the response body under its ETag and hand the caller a Response it
+ *  can still read (the original body was consumed to capture the text). */
+async function cacheAndClone(url: string, etag: string, res: Response): Promise<Response> {
+  const text = await res.text();
+  etagCache.set(url, { etag, text });
+  return new Response(text, { status: res.status });
+}
+
 /**
  * REST client that calls api.github.com directly (runs in the browser / CORS-friendly, §4).
  * The bearer token comes from the GitHub App device flow (§7.6 / D10); this client
  * is auth-method agnostic and just sends whatever token it is given.
  */
 export class GitHubClient {
-  constructor(private readonly token: string) {}
+  /** @param delay injectable backoff sleeper (tests pass a no-op). */
+  constructor(
+    private readonly token: string,
+    private readonly delay: (ms: number) => Promise<void> = (ms) =>
+      new Promise((r) => setTimeout(r, ms)),
+  ) {}
 
   private headers(extra?: Record<string, string>): Record<string, string> {
     return {
@@ -201,10 +246,39 @@ export class GitHubClient {
     return new GitHubApiError(res.status, `GitHub API ${res.status} for ${where}`);
   }
 
-  private async request(path: string, accept = "application/vnd.github+json"): Promise<Response> {
-    const res = await fetch(`${API_BASE}${path}`, { headers: this.headers({ Accept: accept }) });
-    if (!res.ok) throw this.errorFor(res, path);
-    return res;
+  /** Run an idempotent GET op, retrying transient failures with a small
+   *  bounded exponential backoff; non-transient errors surface at once. */
+  private async withRetry<T>(op: () => Promise<T>): Promise<T> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
+      try {
+        return await op();
+      } catch (err) {
+        lastErr = err;
+        if (attempt === RETRY_BACKOFF_MS.length || !isTransientGetError(err)) throw err;
+        await this.delay(RETRY_BACKOFF_MS[attempt]);
+      }
+    }
+    throw lastErr;
+  }
+
+  /** Conditional GET: sends If-None-Match from the ETag cache and, on a 304,
+   *  synthesises a Response from the cached body (no rate-limit cost). The
+   *  returned Response is read by callers via `.json()` / `.text()`. Wrapped
+   *  in `withRetry` because a GET is idempotent. */
+  private request(path: string, accept = "application/vnd.github+json"): Promise<Response> {
+    const url = `${API_BASE}${path}`;
+    return this.withRetry(async () => {
+      const cached = etagCache.get(url);
+      const headers = this.headers({ Accept: accept });
+      if (cached) headers["If-None-Match"] = cached.etag;
+      const res = await fetch(url, { headers });
+      if (res.status === 304 && cached) return cachedResponse(cached.text);
+      if (!res.ok) throw this.errorFor(res, path);
+      const etag = res.headers.get("ETag");
+      if (etag) return cacheAndClone(url, etag, res);
+      return res;
+    });
   }
 
   /** Follow the Link header's rel="next" to fetch and concatenate all pages (pagination, §10). */
@@ -212,10 +286,26 @@ export class GitHubClient {
     let url: string | null = `${API_BASE}${path}`;
     const all: T[] = [];
     while (url) {
-      const res: Response = await fetch(url, { headers: this.headers() });
-      if (!res.ok) throw this.errorFor(res, url);
-      all.push(...((await res.json()) as T[]));
-      url = parseNextLink(res.headers.get("Link"));
+      const pageUrl: string = url;
+      const { items, next } = await this.withRetry(async () => {
+        const cached = etagCache.get(pageUrl);
+        const headers = this.headers();
+        if (cached) headers["If-None-Match"] = cached.etag;
+        const res: Response = await fetch(pageUrl, { headers });
+        if (res.status === 304 && cached) {
+          return {
+            items: JSON.parse(cached.text) as T[],
+            next: parseNextLink(res.headers.get("Link")),
+          };
+        }
+        if (!res.ok) throw this.errorFor(res, pageUrl);
+        const text = await res.text();
+        const etag = res.headers.get("ETag");
+        if (etag) etagCache.set(pageUrl, { etag, text });
+        return { items: JSON.parse(text) as T[], next: parseNextLink(res.headers.get("Link")) };
+      });
+      all.push(...items);
+      url = next;
     }
     return all;
   }

@@ -1,5 +1,18 @@
-import { describe, expect, test } from "bun:test";
-import { ghGraphQL, ghPaginate, GitHubApiError, ghRequest } from "../../lib/pr/github-api";
+import { beforeEach, describe, expect, test } from "bun:test";
+import {
+  clearEtagCache,
+  ghGraphQL,
+  ghPaginate,
+  GitHubApiError,
+  ghRequest,
+} from "../../lib/pr/github-api";
+
+// Backoff sleeper stubbed to a no-op so retry tests don't wait on real timers.
+const noDelay = () => Promise.resolve();
+
+beforeEach(() => {
+  clearEtagCache();
+});
 
 type CallRecord = {
   url: string;
@@ -134,5 +147,164 @@ describe("github-api — ghPaginate", () => {
     ]);
     const out = await ghPaginate<{ id: number }>({ token: "t", fetch }, "/x");
     expect(out).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
+  });
+});
+
+// ---- ETag conditional requests (issue #9a) -----------------------------
+
+/** A 304 Not Modified response — no JSON body is read on this path. */
+function notModified(headers: Record<string, string> = {}) {
+  return {
+    ok: false,
+    status: 304,
+    headers: new Headers(headers),
+    json: async () => {
+      throw new Error("304 has no body");
+    },
+    text: async () => "",
+  } as unknown as Response;
+}
+
+describe("github-api — ETag caching", () => {
+  test("caches on 200 with ETag, then sends If-None-Match and replays body on 304", async () => {
+    const { fetch, calls } = makeFetch([
+      jsonResponse({ v: 1 }, 200, { ETag: 'W/"abc"' }),
+      notModified(),
+    ]);
+    const client = { token: "t", fetch };
+    const first = await ghRequest<{ v: number }>(client, "GET", "/repos/x/y/pulls/1");
+    expect(first).toEqual({ v: 1 });
+    // First call must NOT carry a conditional header (nothing cached yet).
+    expect(calls[0]?.headers["If-None-Match"]).toBeUndefined();
+
+    const second = await ghRequest<{ v: number }>(client, "GET", "/repos/x/y/pulls/1");
+    // 304 -> the cached body is returned without re-parsing JSON.
+    expect(second).toEqual({ v: 1 });
+    expect(calls[1]?.headers["If-None-Match"]).toBe('W/"abc"');
+  });
+
+  test("a fresh 200 (ETag miss) updates the cache with the new body/etag", async () => {
+    const { fetch, calls } = makeFetch([
+      jsonResponse({ v: 1 }, 200, { ETag: '"one"' }),
+      jsonResponse({ v: 2 }, 200, { ETag: '"two"' }),
+      notModified(),
+    ]);
+    const client = { token: "t", fetch };
+    await ghRequest(client, "GET", "/e");
+    const second = await ghRequest<{ v: number }>(client, "GET", "/e");
+    expect(second).toEqual({ v: 2 }); // server returned a new body, not 304
+    expect(calls[1]?.headers["If-None-Match"]).toBe('"one"');
+
+    const third = await ghRequest<{ v: number }>(client, "GET", "/e");
+    expect(third).toEqual({ v: 2 }); // 304 replays the *updated* cache
+    expect(calls[2]?.headers["If-None-Match"]).toBe('"two"');
+  });
+
+  test("does not cache or send conditional headers for non-GET requests", async () => {
+    const { fetch, calls } = makeFetch([
+      jsonResponse({ id: 1 }, 201, { ETag: '"x"' }),
+      jsonResponse({ id: 2 }, 201, { ETag: '"y"' }),
+    ]);
+    const client = { token: "t", fetch };
+    await ghRequest(client, "POST", "/p", { a: 1 });
+    await ghRequest(client, "POST", "/p", { a: 1 });
+    expect(calls[1]?.headers["If-None-Match"]).toBeUndefined();
+  });
+
+  test("ghPaginate replays a page body on 304", async () => {
+    const { fetch, calls } = makeFetch([
+      jsonResponse([{ id: 1 }], 200, { ETag: '"p1"' }),
+      notModified(),
+    ]);
+    const client = { token: "t", fetch };
+    const first = await ghPaginate<{ id: number }>(client, "/x");
+    expect(first).toEqual([{ id: 1 }]);
+    const second = await ghPaginate<{ id: number }>(client, "/x");
+    expect(second).toEqual([{ id: 1 }]);
+    expect(calls[1]?.headers["If-None-Match"]).toBe('"p1"');
+  });
+});
+
+// ---- Retry with backoff (issue #9b) ------------------------------------
+
+function fiveHundred() {
+  return {
+    ok: false,
+    status: 503,
+    headers: new Headers(),
+    text: async () => "unavailable",
+  } as unknown as Response;
+}
+
+describe("github-api — retry with backoff", () => {
+  test("retries a 5xx GET and succeeds", async () => {
+    const { fetch, calls } = makeFetch([fiveHundred(), jsonResponse({ ok: true })]);
+    const out = await ghRequest<{ ok: boolean }>(
+      { token: "t", fetch, delay: noDelay },
+      "GET",
+      "/x",
+    );
+    expect(out).toEqual({ ok: true });
+    expect(calls.length).toBe(2);
+  });
+
+  test("retries a network error (fetch rejection) on GET and succeeds", async () => {
+    let i = 0;
+    const flakyFetch = (async () => {
+      i++;
+      if (i === 1) throw new TypeError("network down");
+      return jsonResponse({ ok: true });
+    }) as unknown as typeof fetch;
+    const out = await ghRequest<{ ok: boolean }>(
+      { token: "t", fetch: flakyFetch, delay: noDelay },
+      "GET",
+      "/x",
+    );
+    expect(out).toEqual({ ok: true });
+    expect(i).toBe(2);
+  });
+
+  test("does NOT retry a mutation (POST) on 5xx", async () => {
+    const { fetch, calls } = makeFetch([fiveHundred(), jsonResponse({ ok: true })]);
+    let caught: unknown;
+    try {
+      await ghRequest({ token: "t", fetch, delay: noDelay }, "POST", "/p", { a: 1 });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(GitHubApiError);
+    expect((caught as GitHubApiError).status).toBe(503);
+    expect(calls.length).toBe(1); // ran exactly once
+  });
+
+  test("surfaces the error after retries are exhausted", async () => {
+    const { fetch, calls } = makeFetch([fiveHundred(), fiveHundred(), fiveHundred()]);
+    let caught: unknown;
+    try {
+      await ghRequest({ token: "t", fetch, delay: noDelay }, "GET", "/x");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(GitHubApiError);
+    expect((caught as GitHubApiError).status).toBe(503);
+    expect(calls.length).toBe(3); // initial + 2 retries
+  });
+
+  test("does NOT retry a non-transient 4xx GET", async () => {
+    const notFound = {
+      ok: false,
+      status: 404,
+      headers: new Headers(),
+      text: async () => "nope",
+    } as unknown as Response;
+    const { fetch, calls } = makeFetch([notFound, jsonResponse({ ok: true })]);
+    let caught: unknown;
+    try {
+      await ghRequest({ token: "t", fetch, delay: noDelay }, "GET", "/x");
+    } catch (e) {
+      caught = e;
+    }
+    expect((caught as GitHubApiError).status).toBe(404);
+    expect(calls.length).toBe(1);
   });
 });
