@@ -356,3 +356,39 @@ describe("appstate — deriveAppState: changedMarkdownFiles", () => {
     expect(out.changedMarkdownFiles).toEqual([]);
   });
 });
+
+describe("appstate — deriveAppState: timeline", () => {
+  test("empty when there are no commits or reviews", () => {
+    const out = deriveAppState(localState(), remoteState({ pullRequest: pr() }));
+    expect(out.timeline).toEqual({ rounds: [], entries: [] });
+  });
+
+  test("derives rounds from RemoteState commits + reviews", () => {
+    const out = deriveAppState(
+      localState(),
+      remoteState({
+        pullRequest: pr(),
+        commits: [
+          {
+            sha: "c1",
+            message: "m",
+            author: { login: "alice" },
+            committedAt: "2026-07-01T00:00:00Z",
+            parents: [],
+          },
+        ],
+        reviews: [
+          {
+            id: 1,
+            author: { login: "bob" },
+            state: "CHANGES_REQUESTED",
+            submittedAt: "2026-07-01T10:00:00Z",
+            commitId: "c1",
+          },
+        ],
+      }),
+    );
+    expect(out.timeline.rounds).toHaveLength(1);
+    expect(out.timeline.rounds[0]).toMatchObject({ baseSha: "c1", orphaned: false });
+  });
+});

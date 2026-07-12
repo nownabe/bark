@@ -6,6 +6,7 @@
 import { extractSuggestionBlock } from "../suggest";
 import { buildIsInDiff } from "./diff";
 import { type DisplayPosition, reanchor } from "./reanchor";
+import { deriveRounds, type Timeline } from "./rounds";
 import type {
   ChangedFile,
   Comment,
@@ -43,6 +44,10 @@ export type AppState = {
    *  in-diff ranges. Empty until the remote snapshot carries the
    *  changed-file listing. */
   changedMarkdownFiles: ChangedFile[];
+
+  /** Review↔fix round history derived from RemoteState commits + reviews.
+   *  Empty when neither is present. Consumed by the History UI (PR-6). */
+  timeline: Timeline;
 };
 
 export type CommentView = {
@@ -86,6 +91,7 @@ export function deriveAppState(local: LocalState, remote: RemoteState): AppState
     threadGroups,
     currentFiles,
     changedMarkdownFiles: buildChangedMarkdownFiles(remote.changedFiles),
+    timeline: deriveRounds(remote.commits, remote.reviews),
   };
 }
 
