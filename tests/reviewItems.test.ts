@@ -665,6 +665,19 @@ describe("buildAuthorPendingItems", () => {
     expect(edit.map((i) => (i.kind === "edit" ? i.path : ""))).toEqual(["docs/a.md"]);
   });
 
+  // Issue #194: an edit that only adds/removes the file's final newline is not
+  // a submittable change (diffToSuggestions yields no hunks), so it must not
+  // surface as an 'edit' item — otherwise the author sees a phantom pending
+  // change with no way to submit or discard it.
+  test("regression: a trailing-newline-only edit is not a pending 'edit' item", () => {
+    const edits: Record<string, SuggestionEdit> = {
+      "docs/a.md": { source: "line one\nline two\n", base: "line one\nline two", comments: {} },
+      "docs/b.md": { source: "line one\nline two", base: "line one\nline two\n", comments: {} },
+    };
+    const items = buildAuthorPendingItems([], edits, []);
+    expect(items.filter((i) => i.kind === "edit")).toHaveLength(0);
+  });
+
   test("emits one 'acceptedSuggestion' item per accepted comment", () => {
     const items = buildAuthorPendingItems([], {}, accepted);
     const acc = items.filter((i) => i.kind === "acceptedSuggestion");

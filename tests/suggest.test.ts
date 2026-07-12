@@ -4,6 +4,7 @@ import {
   charDiffs,
   diffToSuggestions,
   extractSuggestionBlock,
+  isMeaningfulEdit,
   rebaseEdit,
   rebaseLoadedEdit,
   stripSuggestionBlock,
@@ -498,5 +499,44 @@ describe("applyAcceptedSuggestion", () => {
       });
       expect(out).toBe("top\nn1\nn2\nn3\nX\nY\nbottom\n");
     });
+  });
+});
+
+// Issue #194: adding or removing only the file's final newline used to count as
+// a pending edit (persisted, decorated as tracked changes) that could never be
+// submitted or discarded — diffToSuggestions returns zero hunks for it, so no
+// review-list item exists and Submit early-returns. isMeaningfulEdit is the
+// single dirty-check both the persistence gate and the load path share, so a
+// trailing-newline-only difference no longer registers as a pending change.
+describe("isMeaningfulEdit (issue #194)", () => {
+  test("identical text is not a pending edit", () => {
+    expect(isMeaningfulEdit("a\nb\n", "a\nb\n")).toBe(false);
+  });
+
+  test("adding only the final newline is not a pending edit", () => {
+    expect(isMeaningfulEdit("a\nb", "a\nb\n")).toBe(false);
+  });
+
+  test("removing only the final newline is not a pending edit", () => {
+    expect(isMeaningfulEdit("a\nb\n", "a\nb")).toBe(false);
+  });
+
+  test("a real content change is a pending edit", () => {
+    expect(isMeaningfulEdit("a\nb\n", "a\nB\n")).toBe(true);
+  });
+
+  test("a real change plus a newline toggle is still a pending edit", () => {
+    expect(isMeaningfulEdit("a\nb\n", "a\nB")).toBe(true);
+  });
+
+  test("adding a whole blank line (not just the final newline) is a pending edit", () => {
+    expect(isMeaningfulEdit("a\nb\n", "a\nb\n\n")).toBe(true);
+  });
+
+  test("agrees with diffToSuggestions: newline-only edits produce no hunks", () => {
+    // The bug's core invariant: whenever there are no hunks to submit, the edit
+    // must not register as pending. A newline-only edit has zero hunks.
+    expect(diffToSuggestions("a\nb", "a\nb\n")).toEqual([]);
+    expect(isMeaningfulEdit("a\nb", "a\nb\n")).toBe(false);
   });
 });

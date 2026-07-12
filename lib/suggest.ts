@@ -78,6 +78,23 @@ export function stripSuggestionBlock(body: string): string {
   return body.replace(/(`{3,})suggestion\n?[\s\S]*?\n?\1(?!`)/g, "").trim();
 }
 
+/**
+ * Whether `source` differs from `base` in a way that produces a real,
+ * submittable change — the single dirty-check the persistence gate and the
+ * per-file edit load path share.
+ *
+ * A difference that is ONLY the file's trailing newline (added or removed)
+ * yields zero `diffToSuggestions` hunks, so it can never be submitted or shown
+ * with a Discard button. Treating it as a pending edit stranded the reviewer in
+ * an unsubmittable tracked-changes state (issue #194); we normalize that single
+ * trailing "\n" away so it no longer registers as a change.
+ */
+export function isMeaningfulEdit(base: string, source: string): boolean {
+  if (source === base) return false;
+  const strip = (s: string) => (s.endsWith("\n") ? s.slice(0, -1) : s);
+  return strip(source) !== strip(base);
+}
+
 /** Char-level diff [op(-1 del / 0 eq / 1 ins), text]. For inline tracked-changes decoration. */
 export function charDiffs(base: string, edited: string): Array<[number, string]> {
   const dmp = new diff_match_patch();

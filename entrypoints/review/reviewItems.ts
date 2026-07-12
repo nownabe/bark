@@ -15,7 +15,12 @@ import type { ExistingComment } from "../../lib/comments";
 import type { PendingDraft, SuggestionEdit } from "../../lib/drafts";
 import type { AnchorRange, CommentMetadata } from "../../lib/metadata";
 import type { DisplayPosition } from "../../lib/pr/reanchor";
-import { diffToSuggestions, extractSuggestionBlock, type SuggestionHunk } from "../../lib/suggest";
+import {
+  diffToSuggestions,
+  extractSuggestionBlock,
+  isMeaningfulEdit,
+  type SuggestionHunk,
+} from "../../lib/suggest";
 
 /** The viewer's capability in the review UI. */
 export type Role = "author" | "reviewer";
@@ -433,7 +438,7 @@ export function buildAuthorPendingItems(
       return (
         typeof e?.base === "string" &&
         typeof e?.source === "string" &&
-        e.source !== e.base &&
+        isMeaningfulEdit(e.base, e.source) &&
         !acceptedPaths.has(path)
       );
     })
