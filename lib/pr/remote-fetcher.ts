@@ -533,5 +533,7 @@ export async function fetchRemoteState(
     threads,
     fileEdits: [],
     fileContents,
+    commits: [],
+    reviews: [],
   };
 }

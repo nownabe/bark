@@ -529,4 +529,30 @@ describe("state-machine — mergeRemoteIntoLocal", () => {
     const local = localState({ fileEdits: [f] });
     expect(mergeRemoteIntoLocal(local, remoteState()).fileEdits).toEqual([f]);
   });
+
+  test("commits and reviews stay RemoteState-only (never merged into local)", () => {
+    // Like fileContents/fileEdits, commits/reviews live only on RemoteState.
+    // The merge must leave LocalState's (empty) commits/reviews untouched —
+    // a remote snapshot carrying them does not leak them into LocalState.
+    const remoteCommit = {
+      sha: "abc",
+      message: "m",
+      author,
+      committedAt: "2026-07-01T00:00:00Z",
+      parents: [],
+    };
+    const remoteReview = {
+      id: 1,
+      author,
+      state: "APPROVED" as const,
+      submittedAt: "2026-07-01T01:00:00Z",
+      commitId: "abc",
+    };
+    const out = mergeRemoteIntoLocal(
+      localState(),
+      remoteState({ commits: [remoteCommit], reviews: [remoteReview] }),
+    );
+    expect(out.commits).toEqual([]);
+    expect(out.reviews).toEqual([]);
+  });
 });

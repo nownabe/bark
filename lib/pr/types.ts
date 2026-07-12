@@ -110,6 +110,27 @@ export type ChangedFile = {
   patch?: string;
 };
 
+/** A commit on the PR branch. Fetched read-only; RemoteState-only.
+ *  `committedAt` (commit.committer.date) drives round ordering. */
+export type PrCommit = {
+  sha: string;
+  message: string;
+  author: User;
+  committedAt: string;
+  parents: string[];
+};
+
+/** A submitted (or pending) review on the PR. Fetched read-only;
+ *  RemoteState-only. `submittedAt` is null for PENDING reviews, which are
+ *  excluded from round derivation. */
+export type PrReview = {
+  id: number;
+  author: User;
+  state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
+  submittedAt: string | null;
+  commitId: string;
+};
+
 /** Shape shared by `LocalState` and `RemoteState`. Both sides carry the same
  *  fields so the Reconciler can diff them field-by-field; individual fields are
  *  conventionally populated on one side or the other (see ADR 0002). */
@@ -118,6 +139,10 @@ export type PRState = {
   threads: Thread[];
   fileEdits: FileEdit[];
   fileContents: FileContent[];
+  /** PR branch commits. RemoteState-only; always [] in LocalState. */
+  commits: PrCommit[];
+  /** Submitted/pending reviews. RemoteState-only; always [] in LocalState. */
+  reviews: PrReview[];
   pullRequest: PullRequest | null;
   viewer: User | null;
 };
@@ -144,6 +169,8 @@ export function emptyState(): PRState {
     threads: [],
     fileEdits: [],
     fileContents: [],
+    commits: [],
+    reviews: [],
     pullRequest: null,
     viewer: null,
   };
