@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { reanchor } from "../../lib/pr/reanchor";
+import { reanchor, regionSurvives } from "../../lib/pr/reanchor";
 import type { Anchor } from "../../lib/pr/types";
 
 function anchor(overrides: Partial<Anchor> = {}): Anchor {
@@ -198,5 +198,58 @@ describe("reanchor", () => {
       oldSrc,
     );
     expect(result).toEqual({ status: "outdated" });
+  });
+});
+
+describe("regionSurvives", () => {
+  test("unchanged content + identical quote survives at the mapped range", () => {
+    const src = "line1\nhello\nline3";
+    const match = regionSurvives(
+      anchor({ range: { sl: 2, sc: 1, el: 2, ec: 6 }, quote: "hello" }),
+      src,
+      src,
+    );
+    expect(match).toEqual({ survives: true, range: { sl: 2, sc: 1, el: 2, ec: 6 } });
+  });
+
+  test("a line inserted above shifts the region but it still survives", () => {
+    const oldSrc = "hello\nworld";
+    const newSrc = "inserted\nhello\nworld";
+    const match = regionSurvives(
+      anchor({ range: { sl: 1, sc: 1, el: 1, ec: 6 }, quote: "hello" }),
+      oldSrc,
+      newSrc,
+    );
+    expect(match).toEqual({ survives: true, range: { sl: 2, sc: 1, el: 2, ec: 6 } });
+  });
+
+  test("the quoted text edited in place does not survive, but endpoints still map", () => {
+    // The whole line stays mappable via its neighbours, but its text changed.
+    const oldSrc = "top\nhello\nbottom";
+    const newSrc = "top\nHELLO\nbottom";
+    const match = regionSurvives(
+      anchor({ range: { sl: 2, sc: 1, el: 2, ec: 6 }, quote: "hello" }),
+      oldSrc,
+      newSrc,
+    );
+    expect(match.survives).toBe(false);
+    // endpoints could not map to an unchanged line → range null (region gone)
+    expect(match.range).toBeNull();
+  });
+
+  test("the anchored line deleted → does not survive, range null", () => {
+    const oldSrc = "keep\nhello\nkeep2";
+    const newSrc = "keep\nkeep2";
+    const match = regionSurvives(
+      anchor({ range: { sl: 2, sc: 1, el: 2, ec: 6 }, quote: "hello" }),
+      oldSrc,
+      newSrc,
+    );
+    expect(match).toEqual({ survives: false, range: null });
+  });
+
+  test("an empty quote never survives", () => {
+    const match = regionSurvives(anchor({ quote: "" }), "hello", "hello");
+    expect(match).toEqual({ survives: false, range: null });
   });
 });

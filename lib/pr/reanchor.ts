@@ -20,6 +20,62 @@ export type DisplayPosition =
   | { status: "shifted"; range: Range }
   | { status: "outdated" };
 
+/** Outcome of mapping an anchor's region from `oldSource` to `newSource`:
+ *   - `{ survives: true, range }`  — both endpoints map AND the quoted text is
+ *     byte-identical, so the commented region is intact (just possibly moved).
+ *   - `{ survives: false, range }` — endpoints map but the quote changed: the
+ *     region's text was edited in place.
+ *   - `{ survives: false, range: null }` — an endpoint no longer maps: the
+ *     region was deleted / no longer exists.
+ *  Callers requiring `oldSource` handle the "unavailable source" case
+ *  themselves (there is nothing to map against). */
+export type RegionMatch =
+  | { survives: true; range: Range }
+  | { survives: false; range: Range | null };
+
+/** Does the anchored region still exist unchanged when `oldSource` becomes
+ *  `newSource`? Shared by `reanchor` (mapped/shifted/outdated classification)
+ *  and the R9 comment-status walk ("addressed" = first commit where the
+ *  region stops surviving). Pure LCS line-map + quote check (ADR 0004 §3);
+ *  no fuzzy fallback. An empty `anchor.quote` never survives. */
+export function regionSurvives(anchor: Anchor, oldSource: string, newSource: string): RegionMatch {
+  if (anchor.quote === "") {
+    // Defensive: an anchor must carry quote at creation.
+    return { survives: false, range: null };
+  }
+  const lineMap = buildLineMap(oldSource, newSource);
+  const newSl = lineMap.get(anchor.range.sl);
+  const newEl = lineMap.get(anchor.range.el);
+  if (newSl === undefined || newEl === undefined) {
+    return { survives: false, range: null };
+  }
+
+  const newRange: Range = {
+    sl: newSl,
+    sc: anchor.range.sc,
+    el: newEl,
+    ec: anchor.range.ec,
+  };
+
+  if (extractTextAtRange(newSource, newRange) === anchor.quote) {
+    return { survives: true, range: newRange };
+  }
+  // Suggestion anchors are stored line-based (sc=1, ec=1) with quote = the
+  // full lines sl..el. The char-based extraction above can never reproduce
+  // such a quote (it collapses to zero width on a single line and drops the
+  // end line on multi-line ranges), which left the quote check inert for
+  // suggestions and misclassified byte-identical targets as "shifted"
+  // (issue #176). Compare against the whole-line extraction too.
+  if (
+    newRange.sc === 1 &&
+    newRange.ec === 1 &&
+    extractLinesAtRange(newSource, newRange) === anchor.quote
+  ) {
+    return { survives: true, range: newRange };
+  }
+  return { survives: false, range: newRange };
+}
+
 export function reanchor(
   anchor: Anchor,
   currentSource: string,
@@ -32,42 +88,14 @@ export function reanchor(
   if (oldSource === null) {
     return { status: "outdated" };
   }
-  if (anchor.quote === "") {
-    // Defensive: an anchor must carry quote at creation. Empty quote → outdated.
+
+  const match = regionSurvives(anchor, oldSource, currentSource);
+  if (match.range === null) {
     return { status: "outdated" };
   }
-
-  const lineMap = buildLineMap(oldSource, currentSource);
-  const newSl = lineMap.get(anchor.range.sl);
-  const newEl = lineMap.get(anchor.range.el);
-  if (newSl === undefined || newEl === undefined) {
-    return { status: "outdated" };
-  }
-
-  const newRange: Range = {
-    sl: newSl,
-    sc: anchor.range.sc,
-    el: newEl,
-    ec: anchor.range.ec,
-  };
-
-  if (extractTextAtRange(currentSource, newRange) === anchor.quote) {
-    return { status: "mapped", range: newRange };
-  }
-  // Suggestion anchors are stored line-based (sc=1, ec=1) with quote = the
-  // full lines sl..el. The char-based extraction above can never reproduce
-  // such a quote (it collapses to zero width on a single line and drops the
-  // end line on multi-line ranges), which left the quote check inert for
-  // suggestions and misclassified byte-identical targets as "shifted"
-  // (issue #176). Compare against the whole-line extraction too.
-  if (
-    newRange.sc === 1 &&
-    newRange.ec === 1 &&
-    extractLinesAtRange(currentSource, newRange) === anchor.quote
-  ) {
-    return { status: "mapped", range: newRange };
-  }
-  return { status: "shifted", range: newRange };
+  return match.survives
+    ? { status: "mapped", range: match.range }
+    : { status: "shifted", range: match.range };
 }
 
 function extractLinesAtRange(source: string, range: Range): string {
