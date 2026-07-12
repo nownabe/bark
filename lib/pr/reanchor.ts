@@ -37,13 +37,21 @@ export type RegionMatch =
  *  `newSource`? Shared by `reanchor` (mapped/shifted/outdated classification)
  *  and the R9 comment-status walk ("addressed" = first commit where the
  *  region stops surviving). Pure LCS line-map + quote check (ADR 0004 §3);
- *  no fuzzy fallback. An empty `anchor.quote` never survives. */
-export function regionSurvives(anchor: Anchor, oldSource: string, newSource: string): RegionMatch {
+ *  no fuzzy fallback. An empty `anchor.quote` never survives.
+ *
+ *  `lineMap` may be supplied by callers that check many anchors against the
+ *  same `(oldSource, newSource)` pair (the comment-status walk memoizes it by
+ *  `(oldSha, newSha, path)`), avoiding a redundant O(n·m) LCS per anchor. */
+export function regionSurvives(
+  anchor: Anchor,
+  oldSource: string,
+  newSource: string,
+  lineMap: Map<number, number> = buildLineMap(oldSource, newSource),
+): RegionMatch {
   if (anchor.quote === "") {
     // Defensive: an anchor must carry quote at creation.
     return { survives: false, range: null };
   }
-  const lineMap = buildLineMap(oldSource, newSource);
   const newSl = lineMap.get(anchor.range.sl);
   const newEl = lineMap.get(anchor.range.el);
   if (newSl === undefined || newEl === undefined) {

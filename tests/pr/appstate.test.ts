@@ -392,3 +392,46 @@ describe("appstate — deriveAppState: timeline", () => {
     expect(out.timeline.rounds[0]).toMatchObject({ baseSha: "c1", orphaned: false });
   });
 });
+
+describe("appstate — deriveAppState: commentStatuses", () => {
+  test("resolved thread surfaces a resolved status", () => {
+    const c = comment({ id: "c1", threadId: "t1" });
+    const out = deriveAppState(
+      localState({ comments: [c], threads: [thread({ id: "t1", resolved: true })] }),
+      remoteState({ pullRequest: pr() }),
+    );
+    expect(out.commentStatuses.get("c1")).toEqual({ status: "resolved" });
+  });
+
+  test("addressed reuses the comment's displayPosition and finds the fixing commit", () => {
+    // Anchor at sha0 line 2 ("hello"). sha1 edits it away (addresses it), head
+    // (sha2) restores it — so at HEAD the region maps (not outdated), yet the
+    // walk still reports it was addressed by sha1. This isolates addressed from
+    // the outdated precedence: displayPosition is reused, not recomputed.
+    const c = comment({
+      id: "c1",
+      threadId: "t1",
+      path: "f.md",
+      anchor: { sha: "sha0", range: { sl: 2, sc: 1, el: 2, ec: 6 }, quote: "hello" },
+    });
+    const withHello = "top\nhello\nbottom";
+    const edited = "top\nCHANGED\nbottom";
+    const out = deriveAppState(
+      localState({ comments: [c], threads: [thread({ id: "t1" })] }),
+      remoteState({
+        pullRequest: pr({ headSha: "sha2" }),
+        commits: [
+          { sha: "sha0", message: "m", author, committedAt: "2026-07-01T00:00:00Z", parents: [] },
+          { sha: "sha1", message: "m", author, committedAt: "2026-07-01T01:00:00Z", parents: [] },
+          { sha: "sha2", message: "m", author, committedAt: "2026-07-01T02:00:00Z", parents: [] },
+        ],
+        fileContents: [
+          fileContent("sha0", "f.md", withHello),
+          fileContent("sha1", "f.md", edited),
+          fileContent("sha2", "f.md", withHello),
+        ],
+      }),
+    );
+    expect(out.commentStatuses.get("c1")).toEqual({ status: "addressed", addressedBySha: "sha1" });
+  });
+});

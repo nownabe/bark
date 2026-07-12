@@ -4,6 +4,7 @@
 // See docs/adr/0002-data-model.md §4.
 
 import { extractSuggestionBlock } from "../suggest";
+import { type CommentRoundStatus, deriveCommentStatuses } from "./commentStatus";
 import { buildIsInDiff } from "./diff";
 import { type DisplayPosition, reanchor } from "./reanchor";
 import { deriveRounds, type Timeline } from "./rounds";
@@ -48,6 +49,11 @@ export type AppState = {
   /** Review↔fix round history derived from RemoteState commits + reviews.
    *  Empty when neither is present. Consumed by the History UI (PR-6). */
   timeline: Timeline;
+
+  /** Per-Comment round status (resolved/outdated/addressed/open), keyed by
+   *  Comment.id. Reuses each comment's already-computed displayPosition — the
+   *  re-anchor walk is not repeated. Consumed by the History UI (PR-6). */
+  commentStatuses: Map<LocalId, CommentRoundStatus>;
 };
 
 export type CommentView = {
@@ -83,6 +89,14 @@ export function deriveAppState(local: LocalState, remote: RemoteState): AppState
   const threadGroups = buildThreadGroups(local.threads, commentViews);
   const currentFiles = buildCurrentFiles(remote.fileContents, headSha);
 
+  const resolvedByThreadId = new Map(threadGroups.map((g) => [g.thread.id, g.thread.resolved]));
+  const commentStatuses = deriveCommentStatuses(local.comments, {
+    resolvedByThreadId: (id) => resolvedByThreadId.get(id) ?? false,
+    displayPositionOf: (id) => commentViews.get(id)?.displayPosition,
+    commits: remote.commits,
+    fileSourceAt: (sha, path) => fileContents.get(fileKey(sha, path)),
+  });
+
   return {
     role: computeRole(remote.viewer, remote.pullRequest),
     pullRequest: remote.pullRequest,
@@ -92,6 +106,7 @@ export function deriveAppState(local: LocalState, remote: RemoteState): AppState
     currentFiles,
     changedMarkdownFiles: buildChangedMarkdownFiles(remote.changedFiles),
     timeline: deriveRounds(remote.commits, remote.reviews),
+    commentStatuses,
   };
 }
 

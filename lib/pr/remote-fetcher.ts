@@ -524,6 +524,28 @@ export async function fetchReviews(client: GitHubClient, ref: PrRef): Promise<Pr
   return raw.map(normalizeReview);
 }
 
+/** Add (commitSha, path) file-content targets for the R9 "addressed" walk:
+ *  for each comment with a real anchor, every commit committed strictly after
+ *  the anchor commit, on that comment's path only. A comment whose anchor sha
+ *  is not among the fetched commits contributes nothing (no baseline to order
+ *  against). */
+function addAddressedTargets(
+  targetSet: Map<string, { sha: string; path: string }>,
+  comments: Comment[],
+  commits: PrCommit[],
+): void {
+  const committedAtBySha = new Map(commits.map((c) => [c.sha, c.committedAt]));
+  for (const c of comments) {
+    if (!c.anchor.sha || !c.path) continue;
+    const anchorAt = committedAtBySha.get(c.anchor.sha);
+    if (anchorAt === undefined) continue;
+    for (const commit of commits) {
+      if (commit.committedAt <= anchorAt) continue;
+      targetSet.set(`${commit.sha}\0${c.path}`, { sha: commit.sha, path: c.path });
+    }
+  }
+}
+
 // ---- Orchestrator ------------------------------------------------------
 
 export type FetchRemoteStateOptions = {
@@ -592,6 +614,14 @@ export async function fetchRemoteState(
       targetSet.set(`${t.sha}\0${t.path}`, t);
     }
   }
+  // R9 "addressed" detection: for each commented path, also fetch its source
+  // at every commit pushed after the comment's anchor commit, so the status
+  // walk (lib/pr/commentStatus) can line-map the anchor region forward. Bounded
+  // to commented paths only. 404s stay non-fatal (Promise.allSettled below).
+  // simplify: fetches (commits-after-anchor × commented-paths) file contents —
+  // O(commits × paths) requests. Upgrade: use per-commit changed-file lists to
+  // fetch only the commits that actually touched each path.
+  addAddressedTargets(targetSet, comments, commits);
   const targets = Array.from(targetSet.values());
 
   // A 404 on one file (the sha + path no longer exists at GitHub) is
