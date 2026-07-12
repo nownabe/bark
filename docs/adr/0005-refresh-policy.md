@@ -31,6 +31,7 @@ A full refresh refetches:
 
 - `PullRequest` — may reveal a new `headSha`.
 - `Comment` and `Thread` — for the PR.
+- `PrCommit` and `PrReview` — the PR's commits and reviews, from which R9 derives the review↔fix round timeline.
 - `FileContent` at `(newHeadSha, currentPath)` if `headSha` advanced.
 - `FileContent` at any newly-referenced `(anchor.sha, path)` introduced by newly-fetched Comments.
 

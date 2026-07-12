@@ -3,9 +3,11 @@ import type { PrRef } from "../../lib/pr/github-transport";
 import { embedMetadata } from "../../lib/pr/metadata";
 import {
   fetchComments,
+  fetchCommits,
   fetchFileContent,
   fetchPullRequest,
   fetchRemoteState,
+  fetchReviews,
   fetchThreads,
   fetchViewer,
   normalizeComments,
@@ -461,6 +463,8 @@ describe("remote-fetcher — fence identity binding (issue #190)", () => {
           user: { login: "alice", avatar_url: "" },
         });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments")) return jsonResponse(opts.reviewComments ?? []);
       if (req.url.includes("/issues/7/comments")) return jsonResponse(opts.issueComments ?? []);
       if (req.url.endsWith("/graphql"))
@@ -809,6 +813,8 @@ describe("remote-fetcher — fetchRemoteState", () => {
         viewerCalled = true;
         return jsonResponse({ login: "alice", avatar_url: "" });
       }
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
       if (req.url.endsWith("/graphql")) {
@@ -845,6 +851,8 @@ describe("remote-fetcher — fetchRemoteState", () => {
         viewerCalled = true;
         return jsonResponse({ login: "alice", avatar_url: "" });
       }
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
       if (req.url.endsWith("/graphql"))
@@ -884,6 +892,8 @@ describe("remote-fetcher — fetchRemoteState", () => {
           user: { login: "alice", avatar_url: "" },
         });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([
           {
@@ -956,6 +966,8 @@ describe("remote-fetcher — fetchRemoteState", () => {
           user: { login: "alice", avatar_url: "" },
         });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
       if (req.url.endsWith("/graphql"))
@@ -1005,6 +1017,8 @@ describe("remote-fetcher — fetchRemoteState", () => {
           user: { login: "alice", avatar_url: "" },
         });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([
           {
@@ -1065,6 +1079,8 @@ describe("remote-fetcher — fetchRemoteState", () => {
           user: { login: "alice", avatar_url: "" },
         });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([
           {
@@ -1117,6 +1133,8 @@ describe("remote-fetcher — fetchRemoteState", () => {
           user: { login: "alice", avatar_url: "" },
         });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([
           {
@@ -1149,5 +1167,167 @@ describe("remote-fetcher — fetchRemoteState", () => {
     // good.md survives; missing.md silently drops out — its comment will
     // re-anchor to 'outdated' downstream.
     expect(out.fileContents.map((f) => f.path)).toEqual(["good.md"]);
+  });
+});
+
+describe("remote-fetcher — fetchCommits", () => {
+  test("normalises commits and orders by committer date via committedAt", async () => {
+    const { fetch, calls } = makeFetch(async (req) => {
+      if (req.url.includes("/pulls/7/commits"))
+        return jsonResponse([
+          {
+            sha: "sha1",
+            commit: {
+              message: "first",
+              author: { name: "Alice", date: "2026-07-01T00:00:00Z" },
+              committer: { date: "2026-07-01T00:05:00Z" },
+            },
+            author: { login: "alice", avatar_url: "https://avatar/a" },
+            parents: [{ sha: "base0" }],
+          },
+        ]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchCommits({ token: "t", fetch }, PR);
+    expect(calls[0]?.url).toContain("/pulls/7/commits");
+    expect(out).toEqual([
+      {
+        sha: "sha1",
+        message: "first",
+        author: { login: "alice", avatarUrl: "https://avatar/a" },
+        committedAt: "2026-07-01T00:05:00Z",
+        parents: ["base0"],
+      },
+    ]);
+  });
+
+  test("falls back to commit.author.name when the top-level author is null", async () => {
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.includes("/pulls/7/commits"))
+        return jsonResponse([
+          {
+            sha: "sha2",
+            commit: {
+              message: "unmatched email",
+              author: { name: "Detached Dev", date: "2026-07-02T00:00:00Z" },
+              committer: { date: "2026-07-02T00:00:00Z" },
+            },
+            author: null,
+            parents: [],
+          },
+        ]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchCommits({ token: "t", fetch }, PR);
+    expect(out[0]?.author).toEqual({ login: "Detached Dev" });
+  });
+});
+
+describe("remote-fetcher — fetchReviews", () => {
+  test("normalises reviews without filtering (PENDING kept for the deriver)", async () => {
+    const { fetch, calls } = makeFetch(async (req) => {
+      if (req.url.includes("/pulls/7/reviews"))
+        return jsonResponse([
+          {
+            id: 10,
+            user: { login: "bob", avatar_url: "https://avatar/b" },
+            state: "CHANGES_REQUESTED",
+            submitted_at: "2026-07-01T10:00:00Z",
+            commit_id: "sha1",
+          },
+          {
+            id: 11,
+            user: { login: "bob", avatar_url: "https://avatar/b" },
+            state: "PENDING",
+            submitted_at: null,
+            commit_id: "sha2",
+          },
+        ]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchReviews({ token: "t", fetch }, PR);
+    expect(calls[0]?.url).toContain("/pulls/7/reviews");
+    expect(out).toEqual([
+      {
+        id: 10,
+        author: { login: "bob", avatarUrl: "https://avatar/b" },
+        state: "CHANGES_REQUESTED",
+        submittedAt: "2026-07-01T10:00:00Z",
+        commitId: "sha1",
+      },
+      {
+        id: 11,
+        author: { login: "bob", avatarUrl: "https://avatar/b" },
+        state: "PENDING",
+        submittedAt: null,
+        commitId: "sha2",
+      },
+    ]);
+  });
+
+  test("tolerates a null review user (ghost/deleted account)", async () => {
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.includes("/pulls/7/reviews"))
+        return jsonResponse([
+          { id: 12, user: null, state: "COMMENTED", submitted_at: null, commit_id: "sha1" },
+        ]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchReviews({ token: "t", fetch }, PR);
+    expect(out[0]?.author).toEqual({ login: "ghost" });
+    expect(out[0]?.submittedAt).toBeNull();
+  });
+});
+
+describe("remote-fetcher — fetchRemoteState wires commits/reviews", () => {
+  test("populates RemoteState.commits and RemoteState.reviews", async () => {
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7"))
+        return jsonResponse({
+          number: 7,
+          title: "T",
+          body: "B",
+          state: "open",
+          draft: false,
+          merged: false,
+          head: { sha: "h", ref: "topic" },
+          base: { ref: "main" },
+          user: { login: "alice", avatar_url: "" },
+        });
+      if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/commits"))
+        return jsonResponse([
+          {
+            sha: "sha1",
+            commit: {
+              message: "c",
+              author: { name: "Alice", date: "2026-07-01T00:00:00Z" },
+              committer: { date: "2026-07-01T00:00:00Z" },
+            },
+            author: { login: "alice", avatar_url: "" },
+            parents: [{ sha: "base0" }],
+          },
+        ]);
+      if (req.url.includes("/pulls/7/reviews"))
+        return jsonResponse([
+          {
+            id: 10,
+            user: { login: "bob", avatar_url: "" },
+            state: "APPROVED",
+            submitted_at: "2026-07-01T10:00:00Z",
+            commit_id: "sha1",
+          },
+        ]);
+      if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchRemoteState({ token: "t", fetch }, PR);
+    expect(out.commits.map((c) => c.sha)).toEqual(["sha1"]);
+    expect(out.reviews.map((r) => r.id)).toEqual([10]);
   });
 });

@@ -12,7 +12,16 @@ import { type GitHubClient, ghPaginate, ghRequest } from "./github-api";
 import type { PrRef } from "./github-transport";
 import { extractMetadata } from "./metadata";
 import { listReviewThreads, type RawReviewThread } from "./review-threads";
-import type { Comment, FileContent, PullRequest, RemoteState, Thread, User } from "./types";
+import type {
+  Comment,
+  FileContent,
+  PrCommit,
+  PrReview,
+  PullRequest,
+  RemoteState,
+  Thread,
+  User,
+} from "./types";
 
 // ---- PullRequest -------------------------------------------------------
 
@@ -448,6 +457,73 @@ function decodeBase64Utf8(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+// ---- Commits -----------------------------------------------------------
+
+type RawCommit = {
+  sha: string;
+  commit: {
+    message: string;
+    author: { name: string; date: string } | null;
+    committer: { date: string } | null;
+  };
+  author: RawUser | null;
+  parents: Array<{ sha: string }>;
+};
+
+function normalizeCommit(rc: RawCommit): PrCommit {
+  // The top-level `author` (a matched GitHub account) is null when the commit
+  // email maps to no user; fall back to the git author name from the commit.
+  const author: User = rc.author
+    ? { login: rc.author.login, avatarUrl: rc.author.avatar_url }
+    : { login: rc.commit.author?.name ?? "unknown" };
+  return {
+    sha: rc.sha,
+    message: rc.commit.message,
+    author,
+    committedAt: rc.commit.committer?.date ?? rc.commit.author?.date ?? "",
+    parents: rc.parents.map((p) => p.sha),
+  };
+}
+
+/** Fetch the PR's commits (paginated, oldest-first as GitHub returns them). */
+export async function fetchCommits(client: GitHubClient, ref: PrRef): Promise<PrCommit[]> {
+  const raw = await ghPaginate<RawCommit>(
+    client,
+    `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/commits?per_page=100`,
+  );
+  return raw.map(normalizeCommit);
+}
+
+// ---- Reviews -----------------------------------------------------------
+
+type RawReview = {
+  id: number;
+  user: RawUser | null;
+  state: PrReview["state"];
+  submitted_at: string | null;
+  commit_id: string;
+};
+
+function normalizeReview(rr: RawReview): PrReview {
+  return {
+    id: rr.id,
+    author: rr.user ? { login: rr.user.login, avatarUrl: rr.user.avatar_url } : { login: "ghost" },
+    state: rr.state,
+    submittedAt: rr.submitted_at,
+    commitId: rr.commit_id,
+  };
+}
+
+/** Fetch the PR's reviews (paginated, no filtering — PENDING is dropped later
+ *  by the round deriver, not here). */
+export async function fetchReviews(client: GitHubClient, ref: PrRef): Promise<PrReview[]> {
+  const raw = await ghPaginate<RawReview>(
+    client,
+    `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews?per_page=100`,
+  );
+  return raw.map(normalizeReview);
+}
+
 // ---- Orchestrator ------------------------------------------------------
 
 export type FetchRemoteStateOptions = {
@@ -483,13 +559,16 @@ export async function fetchRemoteState(
   // data is needed both to build Thread entities and to key foreign
   // comments' threadId off their GraphQL thread node id, so comment
   // normalisation waits on the raw fetch (not on a second round trip).
-  const [pullRequest, viewer, reviewRaw, issueRaw, rawThreads] = await Promise.all([
-    fetchPullRequest(client, ref),
-    opts.viewer ? Promise.resolve(opts.viewer) : fetchViewer(client),
-    fetchReviewCommentsRaw(client, ref),
-    fetchIssueCommentsRaw(client, ref),
-    listReviewThreads(client, ref),
-  ]);
+  const [pullRequest, viewer, reviewRaw, issueRaw, rawThreads, commits, reviews] =
+    await Promise.all([
+      fetchPullRequest(client, ref),
+      opts.viewer ? Promise.resolve(opts.viewer) : fetchViewer(client),
+      fetchReviewCommentsRaw(client, ref),
+      fetchIssueCommentsRaw(client, ref),
+      listReviewThreads(client, ref),
+      fetchCommits(client, ref),
+      fetchReviews(client, ref),
+    ]);
   const owners = buildFenceOwners(reviewRaw, issueRaw);
   const comments = normalizeComments(
     reviewRaw,
@@ -533,7 +612,7 @@ export async function fetchRemoteState(
     threads,
     fileEdits: [],
     fileContents,
-    commits: [],
-    reviews: [],
+    commits,
+    reviews,
   };
 }

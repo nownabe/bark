@@ -70,6 +70,8 @@ describe("bootstrap — full happy path", () => {
     const fetch = makeFetch(async (req) => {
       if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
       if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
       if (req.url.endsWith("/graphql"))
@@ -131,6 +133,8 @@ describe("bootstrap — full happy path", () => {
     const fetch = makeFetch(async (req) => {
       if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
       if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
       if (req.url.endsWith("/graphql"))
@@ -191,6 +195,8 @@ describe("bootstrap — full happy path", () => {
       }
       if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
       if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
       if (req.url.endsWith("/graphql"))
@@ -224,6 +230,8 @@ describe("bootstrap — full happy path", () => {
       calls.push(`${phase}:${req.url.replace("https://api.github.com", "")}`);
       if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
       if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
+      if (req.url.includes("/pulls/7/commits")) return jsonResponse([]);
+      if (req.url.includes("/pulls/7/reviews")) return jsonResponse([]);
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([
           {
