@@ -157,6 +157,16 @@ describe("suggestion block helpers", () => {
     const inner = "before\n```js\nconst x = 1;\n```\nafter";
     expect(stripSuggestionBlock("hi\n\n````suggestion\n" + inner + "\n````")).toBe("hi");
   });
+
+  // GitHub's API returns comment bodies with CRLF endings; the helpers must
+  // trim the outer \r so the extracted replacement matches \n-normalised source.
+  test("extractSuggestionBlock tolerates CRLF fence lines", () => {
+    expect(extractSuggestionBlock("hi\r\n\r\n```suggestion\r\nnew code\r\n```")).toBe("new code");
+  });
+
+  test("stripSuggestionBlock removes a CRLF fence", () => {
+    expect(stripSuggestionBlock("hi\r\n\r\n```suggestion\r\nnew\r\n```")).toBe("hi");
+  });
 });
 
 describe("charDiffs", () => {

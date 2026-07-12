@@ -3,6 +3,7 @@
 //
 // See docs/adr/0002-data-model.md §4.
 
+import { extractSuggestionBlock } from "../suggest";
 import { type DisplayPosition, reanchor } from "./reanchor";
 import type {
   Comment,
@@ -99,17 +100,15 @@ function buildCurrentFiles(files: FileContent[], headSha: string | null): FileCo
 
 // ---- Body parsing -------------------------------------------------------
 
-const SUGGESTION_FENCE_RE = /```suggestion\r?\n([\s\S]*?)\r?\n?```/m;
-
 export function parseSuggestion(body: string): {
   kind: "comment" | "suggestion";
   replacement?: string;
 } {
-  const match = SUGGESTION_FENCE_RE.exec(body);
-  if (!match) {
-    return { kind: "comment" };
-  }
-  return { kind: "suggestion", replacement: match[1] ?? "" };
+  // Delegate to the shared, fence-length-aware extractor (lib/suggest.ts) so
+  // both layers agree on how suggestions parse — in particular a longer outer
+  // fence wrapping an inner ``` code fence (issue #195).
+  const replacement = extractSuggestionBlock(body);
+  return replacement === null ? { kind: "comment" } : { kind: "suggestion", replacement };
 }
 
 // ---- CommentView build --------------------------------------------------
