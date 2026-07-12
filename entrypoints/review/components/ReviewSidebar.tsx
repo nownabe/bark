@@ -35,6 +35,9 @@ export type ReviewSidebarProps = {
   onDiscardComposer: () => void;
   renderLiveSuggestion: (s: PendingSuggestion) => ReactNode;
   renderThread: (t: ReviewThread) => ReactNode;
+  /** Sidebar-level control (e.g. the Review/History switch) rendered in the
+   *  panel head, opposite the facet filter. */
+  headerExtra?: ReactNode;
 };
 
 const FACETS = ["pending", "submitted", "resolved"] as const;
@@ -57,6 +60,7 @@ export function ReviewSidebar({
   onDiscardComposer,
   renderLiveSuggestion,
   renderThread,
+  headerExtra,
 }: ReviewSidebarProps) {
   return (
     <aside className="sidebar" ref={sidebarRef}>
@@ -64,6 +68,7 @@ export function ReviewSidebar({
           threads all live here — no separate comment / suggestion / review
           blocks. */}
       <section className="panel panel--bare">
+        {headerExtra ? <div className="panel__switch">{headerExtra}</div> : null}
         <div className="panel__head">
           <h2 className="panel__title">Review</h2>
           <div className="seg seg--sm">

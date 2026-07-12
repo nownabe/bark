@@ -1381,6 +1381,199 @@ select.input:focus {
 .snackbar__close:hover {
   opacity: 1;
 }
+
+/* ---- History (round timeline) ----
+   The read-only sidebar view: review↔fix rounds reconstructed from the PR's
+   reviews + commits. Calm and quiet like the rest of the chrome (design.md §1);
+   colour is reserved for state (badges) and the one interactive jump chip. */
+
+/* Sidebar-level Review/History switch sits above the panel head. */
+.panel__switch {
+  margin-bottom: 12px;
+}
+
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Monospace, digit-aligned SHAs everywhere in the history view. */
+.history .sha {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--fg-soft);
+}
+
+.history__round {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--bg);
+}
+/* Orphaned round (force-push rewrote its base commit) — subtle dashed edge. */
+.history__round--orphaned {
+  border-style: dashed;
+  border-color: var(--amber);
+  background: var(--amber-tint);
+}
+
+.history__round-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.history__round-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--fg);
+}
+.history__at {
+  color: var(--faint);
+  font-weight: 400;
+}
+.history__orphaned {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--amber);
+}
+
+.history__reviews {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.history__review {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.history__review-author {
+  color: var(--fg-soft);
+  font-weight: 500;
+}
+.history__review-state {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.history__comments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.history__comment {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
+.history__comment-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.history__comment-author {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-soft);
+}
+.history__comment-quote {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Clickable "fixed in <sha>" chip — the one interactive affordance in the
+   history view. Brand green = "go / positive / anchored" (design.md §2). */
+.history__addressed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--brand-tint);
+  color: var(--brand-strong);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.history__addressed-chip:hover {
+  background: #d7efdd;
+}
+.history__addressed-chip .sha {
+  font-size: 10px;
+  color: inherit;
+}
+
+.history__commits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.history__commit {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--border-subtle);
+}
+.history__commit-author {
+  color: var(--fg-soft);
+}
+.history__commit-msg {
+  color: var(--muted);
+}
+/* Flash when jumped to from a "fixed in" chip. */
+.history__commit--highlight {
+  animation: history-jump 1.6s var(--ease);
+  border-left-color: var(--brand);
+}
+@keyframes history-jump {
+  0% {
+    background: var(--brand-tint);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* Comment round-status badges specific to the history view. `outdated` reuses
+   the existing red-tint style; these two extend the vocabulary. */
+.badge--resolved {
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.badge--open {
+  background: var(--bg-inset);
+  color: var(--muted);
+}
+
 @keyframes snackbar-in {
   from {
     opacity: 0;

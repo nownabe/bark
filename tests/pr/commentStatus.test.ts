@@ -119,6 +119,24 @@ describe("commentStatus — deriveCommentStatuses", () => {
     expect(out.get("c1")).toEqual({ status: "open" });
   });
 
+  test("outdated carries addressedBySha when a first-touch commit is still identifiable", () => {
+    // The region was edited away in sha2 (so it is `addressed`) AND no longer
+    // maps to head (so the display position is `outdated`). The primary state
+    // stays `outdated`, but the informative first-touch sha rides along so the
+    // History UI can offer a "fixed in <sha>" jump.
+    const c = comment({ anchor: anchor({ sha: "sha0" }) });
+    const src0 = "top\nhello\nbottom";
+    const src2 = "top\nCHANGED\nbottom";
+    const out = deriveCommentStatuses([c], {
+      ...inputs({
+        displayPositions: { c1: { status: "outdated" } },
+        commits: [commit("sha0", "2026-07-01T00:00:00Z"), commit("sha2", "2026-07-01T02:00:00Z")],
+        files: { [`sha0\0f.md`]: src0, [`sha2\0f.md`]: src2 },
+      }),
+    });
+    expect(out.get("c1")).toEqual({ status: "outdated", addressedBySha: "sha2" });
+  });
+
   test("no addressed check when the anchor source itself is missing (outdated already)", () => {
     const c = comment({ anchor: anchor({ sha: "sha0" }) });
     const out = deriveCommentStatuses([c], {

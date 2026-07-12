@@ -5,7 +5,12 @@
 // Precedence (highest first):
 //   1. resolved  — the thread is resolved on GitHub.
 //   2. outdated  — the comment's region no longer maps to head (reuse the
-//                  AppState re-anchor result verbatim; no recompute).
+//                  AppState re-anchor result verbatim; no recompute). When a
+//                  first-touch commit can still be identified it is carried
+//                  along as `addressedBySha` so the History UI can offer a
+//                  "fixed in <sha>" jump even on an unmappable comment — in
+//                  practice a region that was edited is usually ALSO unmappable
+//                  at head, so without this the informative sha would be hidden.
 //   3. addressed — the region stopped surviving in some commit strictly after
 //                  comment.anchor.sha; the FIRST such commit is addressedBySha.
 //   4. open      — still standing, region intact through every later commit.
@@ -17,7 +22,7 @@ import type { Comment, LocalId, PrCommit } from "./types";
 
 export type CommentRoundStatus =
   | { status: "resolved" }
-  | { status: "outdated" }
+  | { status: "outdated"; addressedBySha?: string }
   | { status: "addressed"; addressedBySha: string }
   | { status: "open" };
 
@@ -71,10 +76,6 @@ function statusFor(
   if (input.resolvedByThreadId(comment.threadId)) {
     return { status: "resolved" };
   }
-  if (input.displayPositionOf(comment.id)?.status === "outdated") {
-    return { status: "outdated" };
-  }
-
   const addressedBySha = firstAddressingCommit(
     comment,
     input,
@@ -82,6 +83,13 @@ function statusFor(
     committedAtBySha,
     lineMapMemo,
   );
+  // A region that was edited is usually unmappable at head, so `outdated` and
+  // `addressed` co-occur. Keep `outdated` as the primary state (it drives the
+  // existing badge vocabulary) but attach the first-touch sha when we found one
+  // so the History UI can still offer a "fixed in <sha>" jump.
+  if (input.displayPositionOf(comment.id)?.status === "outdated") {
+    return addressedBySha ? { status: "outdated", addressedBySha } : { status: "outdated" };
+  }
   return addressedBySha ? { status: "addressed", addressedBySha } : { status: "open" };
 }
 

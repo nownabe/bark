@@ -30,6 +30,8 @@ import { LoginGate } from "./components/LoginGate";
 import { SuggestionDiff } from "./components/SuggestionDiff";
 import { Topbar } from "./components/Topbar";
 import { ReviewSidebar } from "./components/ReviewSidebar";
+import { HistoryPanel, type HistoryCommentRow } from "./components/HistoryPanel";
+import { SidebarViewSwitch, type SidebarView } from "./components/SidebarViewSwitch";
 import { SourceEditor } from "./components/SourceEditor";
 import { InstallGate } from "./components/InstallGate";
 import { DebugFab } from "./components/DebugFab";
@@ -344,6 +346,11 @@ function AppBody() {
   const [reviewFilter, setReviewFilter] = useState<Set<ReviewFacet>>(
     () => new Set<ReviewFacet>(["pending", "submitted"]),
   );
+  // Sidebar view switch (Review list vs. read-only round History). The
+  // history view derives everything from AppState — no transport, no extra
+  // state beyond this toggle and the transient jump-highlight below.
+  const [sidebarView, setSidebarView] = useState<SidebarView>("review");
+  const [historyHighlightSha, setHistoryHighlightSha] = useState<string | null>(null);
   const uiPanels = useUiPanels();
   const {
     showSubmitConfirm,
@@ -481,6 +488,44 @@ function AppBody() {
     }
     return out;
   }, [repositoryAppState, diffRangesByPath, ref]);
+  // History view-model, derived entirely from AppState (read-only). Rounds
+  // come from `timeline`; each comment is grouped under the round whose
+  // baseSha equals its anchor sha (the revision it was written against), with
+  // its round status looked up from `commentStatuses`.
+  const historyRounds = repositoryAppState?.timeline.rounds ?? [];
+  const historyCommentsByRound = useMemo(() => {
+    const out = new Map<string, HistoryCommentRow[]>();
+    if (!repositoryAppState) return out;
+    for (const v of repositoryAppState.commentViews.values()) {
+      const c = v.comment;
+      const status = repositoryAppState.commentStatuses.get(c.id);
+      if (!status) continue;
+      const list = out.get(c.anchor.sha);
+      const row: HistoryCommentRow = {
+        id: c.id,
+        author: c.author.login,
+        quote: c.anchor.quote,
+        status,
+      };
+      if (list) list.push(row);
+      else out.set(c.anchor.sha, [row]);
+    }
+    return out;
+  }, [repositoryAppState]);
+  // Jump from a "fixed in <sha>" chip to the commit's entry in the history
+  // panel: scroll it into view and flash a brief highlight. View-only; no
+  // transport. The highlight auto-clears so a re-jump to the same sha re-flashes.
+  const onJumpToCommit = useCallback((sha: string) => {
+    setSidebarView("history");
+    setHistoryHighlightSha(sha);
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-commit-sha="${CSS.escape(sha)}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    window.setTimeout(() => {
+      setHistoryHighlightSha((cur) => (cur === sha ? null : cur));
+    }, 1600);
+  }, []);
   const suggestionHunks = useMemo(
     () =>
       role === "reviewer" && source !== baseSource ? diffToSuggestions(baseSource, source) : [],
@@ -1705,20 +1750,40 @@ function AppBody() {
           onMouseUp={onEditorMouseUp}
         />
 
-        <ReviewSidebar
-          sidebarRef={sidebarRef}
-          reviewFilter={reviewFilter}
-          counts={counts}
-          onToggleFacet={toggleFacet}
-          visibleEntries={visibleEntries}
-          anchor={anchor}
-          commentBody={commentBody}
-          onChangeComposer={setCommentBody}
-          onAddDraft={addDraft}
-          onDiscardComposer={discardComposer}
-          renderLiveSuggestion={renderLiveSuggestion}
-          renderThread={renderThread}
-        />
+        {sidebarView === "history" ? (
+          <aside className="sidebar" ref={sidebarRef}>
+            <section className="panel panel--bare">
+              <div className="panel__switch">
+                <SidebarViewSwitch view={sidebarView} onChange={setSidebarView} />
+              </div>
+              <div className="panel__head">
+                <h2 className="panel__title">History</h2>
+              </div>
+              <HistoryPanel
+                rounds={historyRounds}
+                commentsByRound={historyCommentsByRound}
+                highlightedSha={historyHighlightSha}
+                onJumpToCommit={onJumpToCommit}
+              />
+            </section>
+          </aside>
+        ) : (
+          <ReviewSidebar
+            sidebarRef={sidebarRef}
+            reviewFilter={reviewFilter}
+            counts={counts}
+            onToggleFacet={toggleFacet}
+            visibleEntries={visibleEntries}
+            anchor={anchor}
+            commentBody={commentBody}
+            onChangeComposer={setCommentBody}
+            onAddDraft={addDraft}
+            onDiscardComposer={discardComposer}
+            renderLiveSuggestion={renderLiveSuggestion}
+            renderThread={renderThread}
+            headerExtra={<SidebarViewSwitch view={sidebarView} onChange={setSidebarView} />}
+          />
+        )}
       </div>
 
       <SelectionBubble pos={bubblePos} onClick={openComposer} />

@@ -125,7 +125,19 @@ heavy drop shadows.
   `.comment*`): emphasized state uses the accent tint + ring; pending items use a
   left accent border.
 - **Badges** (`.badge--*`): pill, soft tint background + matching saturated text,
-  one per state.
+  one per state. The round-history view extends the set with `.badge--resolved`
+  (brand tint), `.badge--outdated` (red tint) and `.badge--open` (neutral inset).
+- **History view** (`.history*`): the read-only round-timeline sidebar (toggled
+  from the review list via the sidebar-level `.seg` Review/History switch, wrapped
+  in `.panel__switch`). Each round is a quiet card (`.history__round`); an
+  `orphaned` round — its base commit force-pushed away — uses a dashed amber edge
+  (`.history__round--orphaned`), never a loud alert. SHAs render in `--font-mono`
+  with `tabular-nums` (`.history .sha`). The one interactive affordance is the
+  `.history__addressed-chip` ("fixed in `<sha7>`"): a brand-green pill that jumps
+  to and briefly flashes (`history-jump`) the addressing commit — green = "go /
+  positive / resolved", consistent with primary actions. This is the sanctioned
+  pattern for a "jump to related item" chip; reuse it rather than inventing a new
+  link style.
 - **Gates** (`.gate`): the full-screen auth / device-code / install screens.
   Branded header (logo + name), gradient accent bar at the top, gentle entrance.
   Reuse this pattern for any "blocking, you-must-act" screen rather than dropping
