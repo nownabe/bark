@@ -406,8 +406,91 @@ describe("applyAcceptedSuggestion", () => {
       replacement: "",
       displayPosition: dpCurrent(meta.range),
     });
-    // Replaces "b" with "" — the trailing newline before "c" remains.
-    expect(out).toBe("a\n\nc\n");
+    // Deleting "b" removes its trailing newline too (matching GitHub's Apply),
+    // so no stray blank line remains.
+    expect(out).toBe("a\nc\n");
+  });
+
+  // Issue #191: accepting a line-deletion suggestion (empty replacement) left a
+  // stray blank line because the replaced span excluded the deleted line's
+  // trailing newline. When the replacement is empty and the span covers whole
+  // line(s), the newline must be absorbed too so the result matches GitHub's
+  // own Apply button.
+  describe("line-deletion trailing newline (issue #191)", () => {
+    test("deleting a middle line removes its trailing newline", () => {
+      const source = "a\nb\nc\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "b" });
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource: source,
+        lineStarts,
+        meta,
+        replacement: "",
+        displayPosition: dpCurrent(meta.range),
+      });
+      expect(out).toBe("a\nc\n");
+    });
+
+    test("deleting the last line (file has a trailing newline) leaves no blank line", () => {
+      const source = "a\nb\nc\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ range: { sl: 3, sc: 1, el: 3, ec: 1 }, quote: "c" });
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource: source,
+        lineStarts,
+        meta,
+        replacement: "",
+        displayPosition: dpCurrent(meta.range),
+      });
+      expect(out).toBe("a\nb\n");
+    });
+
+    test("deleting the last line (no trailing newline) absorbs the preceding newline", () => {
+      const source = "a\nb\nc";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ range: { sl: 3, sc: 1, el: 3, ec: 1 }, quote: "c" });
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource: source,
+        lineStarts,
+        meta,
+        replacement: "",
+        displayPosition: dpCurrent(meta.range),
+      });
+      expect(out).toBe("a\nb");
+    });
+
+    test("multi-line deletion removes the whole block plus its trailing newline", () => {
+      const source = "a\nb\nc\nd\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 3, ec: 1 }, quote: "b\nc" });
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource: source,
+        lineStarts,
+        meta,
+        replacement: "",
+        displayPosition: dpCurrent(meta.range),
+      });
+      expect(out).toBe("a\nd\n");
+    });
+
+    test("non-empty replacement is unaffected (no newline absorbed)", () => {
+      const source = "a\nb\nc\n";
+      const lineStarts = buildLineIndex(source);
+      const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "b" });
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource: source,
+        lineStarts,
+        meta,
+        replacement: "B",
+        displayPosition: dpCurrent(meta.range),
+      });
+      expect(out).toBe("a\nB\nc\n");
+    });
   });
 
   // Issue #177: displayPosition is computed against the head-SHA file

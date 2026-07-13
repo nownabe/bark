@@ -72,8 +72,17 @@ export function applyAcceptedSuggestion(args: {
   }
   const from = lineColToOffset(targetLine, displayPosition.range.sc, lineStarts);
   const quote = meta.quote ?? "";
-  const to = from + quote.length;
+  let to = from + quote.length;
   if (source.slice(from, to) !== quote) return null;
+  // Issue #191: a line-deletion suggestion (empty replacement) whose span
+  // covers whole line(s) must also drop the deleted line's trailing newline —
+  // otherwise a stray blank line remains, diverging from GitHub's Apply. Absorb
+  // the following "\n" when present; at EOF with no trailing newline, absorb
+  // the preceding "\n" instead so the line above doesn't gain a blank tail.
+  if (replacement === "" && from < to) {
+    if (source[to] === "\n") to += 1;
+    else if (source[from - 1] === "\n") return source.slice(0, from - 1) + source.slice(to);
+  }
   return source.slice(0, from) + replacement + source.slice(to);
 }
 
