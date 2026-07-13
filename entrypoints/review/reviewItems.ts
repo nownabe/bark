@@ -47,7 +47,7 @@ export interface ReviewThread {
   /** First pending draft, used as the anchor when the thread has no submitted comment yet. */
   rootDraft: PendingDraft | null;
   path: string | undefined;
-  pos: number;
+  pos: PosKey;
   quote: string | undefined;
   hasPending: boolean;
   hasSubmitted: boolean;
@@ -127,8 +127,8 @@ export function buildAllPendingSuggestions(
 export type ReviewFacet = "pending" | "submitted" | "resolved";
 
 export type ReviewEntry =
-  | { kind: "thread"; sortPath: string; sortPos: number; thread: ReviewThread }
-  | { kind: "liveSuggestion"; sortPath: string; sortPos: number; suggestion: PendingSuggestion };
+  | { kind: "thread"; sortPath: string; sortPos: PosKey; thread: ReviewThread }
+  | { kind: "liveSuggestion"; sortPath: string; sortPos: PosKey; suggestion: PendingSuggestion };
 
 /** Info needed to render an author-accepted suggestion in the pending list. */
 export interface AcceptedSuggestionInfo {
@@ -199,14 +199,24 @@ export function threadRangeAt(ranges: ThreadRange[], offset: number): ThreadRang
   return best;
 }
 
-// Position key: line dominates, column breaks ties. Shared so the selection
-// composer can be spliced into the (already position-sorted) entry list at the
-// spot matching the selection's own line/column.
-export function sortPos(line: number, col: number): number {
-  return line * 100000 + col;
+// Position key: line dominates, column breaks ties. A [line, col] tuple rather
+// than a packed integer (line * 100000 + col) — the packed form overflowed for
+// columns >= 100000 on a single very long line, leaking into the next line's
+// range and misordering entries (issue #196). Shared so the selection composer
+// can be spliced into the (already position-sorted) entry list at the spot
+// matching the selection's own line/column.
+export type PosKey = [line: number, col: number];
+
+export function sortPos(line: number, col: number): PosKey {
+  return [line, col];
 }
 
-function posOf(range: AnchorRange): number {
+/** Compare two position keys: line first, then column. */
+export function comparePos(a: PosKey, b: PosKey): number {
+  return a[0] - b[0] || a[1] - b[1];
+}
+
+function posOf(range: AnchorRange): PosKey {
   return sortPos(range.sl, range.sc);
 }
 
@@ -216,8 +226,8 @@ function posOf(range: AnchorRange): number {
  * composer sorts *after* an entry at the same position, so a comment already on
  * the selected line stays above the new composer.
  */
-export function composerInsertIndex(entries: { sortPos: number }[], pos: number): number {
-  const i = entries.findIndex((e) => e.sortPos > pos);
+export function composerInsertIndex(entries: { sortPos: PosKey }[], pos: PosKey): number {
+  const i = entries.findIndex((e) => comparePos(e.sortPos, pos) > 0);
   return i === -1 ? entries.length : i;
 }
 
@@ -225,11 +235,13 @@ function rank(path: string | undefined, currentPath: string): number {
   return path === currentPath ? 0 : 1;
 }
 
-function threadPos(rootComment: ExistingComment | null, rootDraft: PendingDraft | null): number {
+// A line with no known column sorts at its start; 1e9 is the "unknown position"
+// line, kept larger than any real line so anchorless roots sink to the end.
+function threadPos(rootComment: ExistingComment | null, rootDraft: PendingDraft | null): PosKey {
   if (rootComment?.meta) return posOf(rootComment.meta.range);
-  if (rootComment) return (rootComment.line ?? 1e9) * 100000;
+  if (rootComment) return sortPos(rootComment.line ?? 1e9, 1);
   if (rootDraft) return posOf(rootDraft.range);
-  return 1e9 * 100000;
+  return sortPos(1e9, 1);
 }
 
 /**
@@ -334,7 +346,9 @@ export function buildThreads(
       resolved: resolvedByRepository || resolvedByEvent || acceptedSuggestion,
     };
   });
-  list.sort((a, b) => rank(a.path, currentPath) - rank(b.path, currentPath) || a.pos - b.pos);
+  list.sort(
+    (a, b) => rank(a.path, currentPath) - rank(b.path, currentPath) || comparePos(a.pos, b.pos),
+  );
   return list;
 }
 
@@ -371,7 +385,7 @@ export function buildReviewEntries(args: {
         }),
       ),
   ];
-  entries.sort((a, b) => a.sortPos - b.sortPos);
+  entries.sort((a, b) => comparePos(a.sortPos, b.sortPos));
   return entries;
 }
 

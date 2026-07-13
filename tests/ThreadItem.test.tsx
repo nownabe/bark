@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { ThreadItem, type ThreadItemProps } from "../entrypoints/review/components/ThreadItem";
 import type { ExistingComment } from "../lib/comments";
-import type { ReviewThread } from "../entrypoints/review/reviewItems";
+import { sortPos, type ReviewThread } from "../entrypoints/review/reviewItems";
 
 afterEach(cleanup);
 
@@ -37,7 +37,7 @@ function thread(over: Partial<ReviewThread> = {}): ReviewThread {
     rootComment: root,
     rootDraft: null,
     path: "a.md",
-    pos: 0,
+    pos: sortPos(0, 0),
     quote: "line two",
     hasPending: false,
     hasSubmitted: true,

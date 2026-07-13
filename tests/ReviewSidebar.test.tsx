@@ -10,11 +10,12 @@ import {
   type ReviewSidebarProps,
 } from "../entrypoints/review/components/ReviewSidebar";
 import type { SourceAnchor } from "../lib/anchor";
-import type {
-  PendingSuggestion,
-  ReviewEntry,
-  ReviewFacet,
-  ReviewThread,
+import {
+  sortPos,
+  type PendingSuggestion,
+  type ReviewEntry,
+  type ReviewFacet,
+  type ReviewThread,
 } from "../entrypoints/review/reviewItems";
 
 afterEach(() => {
@@ -28,7 +29,7 @@ function makeThread(overrides: Partial<ReviewThread> = {}): ReviewThread {
     rootComment: null,
     rootDraft: null,
     path: "f.md",
-    pos: 0,
+    pos: sortPos(0, 0),
     quote: undefined,
     hasPending: false,
     hasSubmitted: true,
@@ -132,11 +133,11 @@ describe("ReviewSidebar — filter facets", () => {
 
 describe("ReviewSidebar — entries", () => {
   test("delegates rendering of each entry to renderThread / renderLiveSuggestion in list order", () => {
-    const t = makeThread({ id: "t-a", pos: 0 });
+    const t = makeThread({ id: "t-a", pos: sortPos(0, 0) });
     const s = makeSuggestion({ cid: "live:2:2", replacement: "X" });
     const visibleEntries: ReviewEntry[] = [
-      { kind: "thread", sortPath: "f.md", sortPos: 0, thread: t },
-      { kind: "liveSuggestion", sortPath: "f.md", sortPos: 1, suggestion: s },
+      { kind: "thread", sortPath: "f.md", sortPos: sortPos(0, 0), thread: t },
+      { kind: "liveSuggestion", sortPath: "f.md", sortPos: sortPos(0, 1), suggestion: s },
     ];
     const renderThread = mock((tt: ReviewThread) => (
       <div key={tt.id} data-testid={`thr-${tt.id}`}>
@@ -172,9 +173,9 @@ describe("ReviewSidebar — SelectionComposer placement", () => {
 
   test("with an anchor + entries, the composer is inserted at the position dictated by composerInsertIndex", () => {
     // Two threads at line 1 and line 5; an anchor at line 3 should land between them.
-    // sortPos(line, col) = line * 100000 + col (see reviewItems.ts).
-    const t1 = makeThread({ id: "t-1", pos: 100001 });
-    const t5 = makeThread({ id: "t-5", pos: 500001 });
+    // sortPos(line, col) is a [line, col] tuple (see reviewItems.ts).
+    const t1 = makeThread({ id: "t-1", pos: sortPos(1, 1) });
+    const t5 = makeThread({ id: "t-5", pos: sortPos(5, 1) });
     const visibleEntries: ReviewEntry[] = [
       { kind: "thread", sortPath: "f.md", sortPos: t1.pos, thread: t1 },
       { kind: "thread", sortPath: "f.md", sortPos: t5.pos, thread: t5 },
