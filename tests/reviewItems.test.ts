@@ -26,6 +26,7 @@ import {
   composerInsertIndex,
   type AcceptedSuggestionInfo,
   type PendingSuggestion,
+  type PosKey,
   type ThreadRange,
 } from "../entrypoints/review/reviewItems";
 import type { SuggestionEdit } from "../lib/drafts";
@@ -823,10 +824,10 @@ describe("groupPendingByFile — author variants", () => {
 });
 
 describe("composerInsertIndex", () => {
-  const entries = (...positions: number[]) => positions.map((sortPos) => ({ sortPos }));
+  const entries = (...positions: PosKey[]) => positions.map((sortPos) => ({ sortPos }));
 
   test("returns 0 for an empty list", () => {
-    expect(composerInsertIndex([], 12345)).toBe(0);
+    expect(composerInsertIndex([], sortPos(1, 2345))).toBe(0);
   });
 
   test("inserts before the first entry positioned after it", () => {
