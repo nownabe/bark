@@ -412,6 +412,38 @@ describe("buildReviewEntries / filter", () => {
   });
 });
 
+describe("filterReviewEntries — pending reply on a resolved thread (#193)", () => {
+  // A resolved thread that carries an unsubmitted reply draft. Its pending
+  // content is part of the Submit count, so the sidebar must surface it too —
+  // otherwise Pending says (0) while Submit says (1) and the draft is invisible.
+  const comments = [
+    comment({ id: 1, meta: meta(5, "a.md", "t1") }),
+    comment({ id: 2, meta: { ...meta(5, "a.md", "t1"), cid: "e2", event: "resolve" } }),
+  ];
+  const drafts = [draft({ cid: "d1", thread: "t1", range: { sl: 5, sc: 1, el: 5, ec: 5 } })];
+  const threads = buildThreads(comments, drafts, "a.md");
+  const entries = buildReviewEntries({ threads, pendingSuggestions: [], currentPath: "a.md" });
+
+  test("the resolved thread's pending reply shows under the pending facet", () => {
+    const pending = filterReviewEntries(entries, new Set(["pending"] as const));
+    expect(pending).toHaveLength(1);
+    expect(pending[0].kind === "thread" && pending[0].thread.id).toBe("t1");
+  });
+
+  test("pending count agrees with the submit count (both include the reply)", () => {
+    const counts = reviewEntryCounts(entries);
+    expect(counts.pending).toBe(1);
+    // Submit consumes buildPendingItems, which counts every draft with no
+    // resolved check — so 1 pending item must match the 1 pending sidebar entry.
+    expect(buildPendingItems(drafts, [])).toHaveLength(1);
+  });
+
+  test("it still counts under resolved (a resolved thread is resolved)", () => {
+    const counts = reviewEntryCounts(entries);
+    expect(counts.resolved).toBe(1);
+  });
+});
+
 describe("revealSubmittedFacets", () => {
   test("adds 'submitted' so just-submitted items stay visible", () => {
     expect(revealSubmittedFacets(new Set(["pending"]))).toEqual(new Set(["pending", "submitted"]));
