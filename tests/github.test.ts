@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import {
   avatarUrl,
   buildBlobPermalink,
   buildSuggestionBlock,
+  clearGitHubEtagCache,
   findThreadNodeId,
   GitHubApiError,
   GitHubClient,
@@ -14,6 +15,9 @@ import {
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
+});
+beforeEach(() => {
+  clearGitHubEtagCache();
 });
 function stubFetch(impl: (url: string, init?: RequestInit) => Promise<Response> | Response) {
   globalThis.fetch = mock(impl) as unknown as typeof fetch;
@@ -248,5 +252,112 @@ describe("GitHubClient.updateRef", () => {
     const err = await client.updateRef(gdRef, "main", "commit-sha").catch((e) => e);
     expect(err).toBeInstanceOf(GitHubApiError);
     expect(err.status).toBe(422);
+  });
+});
+
+// ---- GET hardening: ETag caching + retry (issue #9) --------------------
+
+/** A response whose `headers.get(name)` honours the given header map (for
+ *  ETag / Link). `text()` returns the JSON string so both `.json()` and
+ *  `.text()` consumers work. */
+function respWithHeaders(status: number, body: unknown, headers: Record<string, string>): Response {
+  const lower: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v;
+  const text = typeof body === "string" ? body : JSON.stringify(body);
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    headers: { get: (n: string) => lower[n.toLowerCase()] ?? null } as unknown as Headers,
+    json: async () => JSON.parse(text),
+    text: async () => text,
+  } as unknown as Response;
+}
+
+const noDelay = () => Promise.resolve();
+
+describe("GitHubClient — ETag caching", () => {
+  test("sends If-None-Match after a 200+ETag and replays the cached body on 304", async () => {
+    const responses = [
+      respWithHeaders(200, { head: { sha: "s", ref: "r" }, title: "T" }, { ETag: '"v1"' }),
+      respWithHeaders(304, "", {}),
+    ];
+    let i = 0;
+    const { calls } = recordFetch(() => responses[i++]);
+    const client = new GitHubClient("tok");
+    const first = await client.getPull(gdRef);
+    expect(first.headSha).toBe("s");
+    expect((calls[0].init!.headers as Record<string, string>)["If-None-Match"]).toBeUndefined();
+
+    const second = await client.getPull(gdRef);
+    expect(second.headSha).toBe("s"); // replayed from cache
+    expect((calls[1].init!.headers as Record<string, string>)["If-None-Match"]).toBe('"v1"');
+  });
+
+  test("getAllPages replays a cached page body on 304", async () => {
+    const responses = [
+      respWithHeaders(200, [{ filename: "a.md", status: "modified" }], { ETag: '"p1"' }),
+      respWithHeaders(304, "", {}),
+    ];
+    let i = 0;
+    const { calls } = recordFetch(() => responses[i++]);
+    const client = new GitHubClient("tok");
+    const first = await client.listMarkdownFiles(gdRef);
+    expect(first).toEqual([{ path: "a.md", status: "modified", patch: undefined }]);
+    const second = await client.listMarkdownFiles(gdRef);
+    expect(second).toEqual([{ path: "a.md", status: "modified", patch: undefined }]);
+    expect((calls[1].init!.headers as Record<string, string>)["If-None-Match"]).toBe('"p1"');
+  });
+});
+
+describe("GitHubClient — GET retry with backoff", () => {
+  test("retries a 5xx GET and succeeds", async () => {
+    const responses = [
+      jsonResponse(503, { message: "unavailable" }),
+      respWithHeaders(200, { head: { sha: "s", ref: "r" }, title: "T" }, {}),
+    ];
+    let i = 0;
+    recordFetch(() => responses[i++]);
+    const client = new GitHubClient("tok", noDelay);
+    const info = await client.getPull(gdRef);
+    expect(info.headSha).toBe("s");
+    expect(i).toBe(2);
+  });
+
+  test("retries a network error (fetch rejection) on GET and succeeds", async () => {
+    let i = 0;
+    globalThis.fetch = mock(async () => {
+      i++;
+      if (i === 1) throw new TypeError("network down");
+      return respWithHeaders(200, { head: { sha: "s", ref: "r" }, title: "T" }, {});
+    }) as unknown as typeof fetch;
+    const client = new GitHubClient("tok", noDelay);
+    const info = await client.getPull(gdRef);
+    expect(info.headSha).toBe("s");
+    expect(i).toBe(2);
+  });
+
+  test("surfaces the error after retries are exhausted", async () => {
+    let i = 0;
+    recordFetch(() => {
+      i++;
+      return jsonResponse(503, { message: "unavailable" });
+    });
+    const client = new GitHubClient("tok", noDelay);
+    const err = await client.getPull(gdRef).catch((e) => e);
+    expect(err).toBeInstanceOf(GitHubApiError);
+    expect(err.status).toBe(503);
+    expect(i).toBe(3); // initial + 2 retries
+  });
+
+  test("does not retry a mutation (post) on 5xx", async () => {
+    let i = 0;
+    recordFetch(() => {
+      i++;
+      return jsonResponse(503, { message: "unavailable" });
+    });
+    const client = new GitHubClient("tok", noDelay);
+    const err = await client.createIssueComment(gdRef, "hi").catch((e) => e);
+    expect(err).toBeInstanceOf(GitHubApiError);
+    expect(i).toBe(1); // ran exactly once
   });
 });
