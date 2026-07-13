@@ -160,6 +160,15 @@ function fencedCodeBody(state: EditorState, node: SyntaxNode): string {
   return "";
 }
 
+/** The language info string of a fenced block (the CodeInfo child), lowercased,
+ *  or "" when the fence has none. Read from the syntax tree, not re-parsed. */
+function fencedCodeLang(state: EditorState, node: SyntaxNode): string {
+  for (let c = node.firstChild; c; c = c.nextSibling) {
+    if (c.name === "CodeInfo") return state.doc.sliceString(c.from, c.to).trim().toLowerCase();
+  }
+  return "";
+}
+
 function buildDecorations(state: EditorState): DecorationSet {
   const decos: Array<Range<Decoration>> = [];
   const cursor = state.selection.main.head;
@@ -222,6 +231,25 @@ function buildDecorations(state: EditorState): DecorationSet {
             }).range(node.from, node.to),
           );
           return false; // skip default code-block styling / children
+        }
+      }
+
+      // Code block language label: tag the opening fence line with the
+      // language (e.g. `ts`) so CSS can show a small Obsidian-style label in
+      // its top-right corner. Hidden while the cursor is on that line (the info
+      // string is then being edited), matching the marker-hiding convention.
+      // Mermaid fences are handled above (they render as diagrams, not labels).
+      if (node.name === "FencedCode") {
+        const openLine = state.doc.lineAt(node.from);
+        const lang = fencedCodeLang(state, node.node);
+        if (lang && openLine.number !== cursorLine) {
+          seenLines.add(openLine.number);
+          decos.push(
+            Decoration.line({
+              class: "dr-codeblock dr-codeblock--labelled",
+              attributes: { "data-lang": lang },
+            }).range(openLine.from),
+          );
         }
       }
 
@@ -299,6 +327,21 @@ export const richMarkdownTheme = EditorView.baseTheme({
   ".dr-codeblock": {
     fontFamily: "monospace",
     backgroundColor: "rgba(175,184,193,0.15)",
+  },
+  // Language label on the opening fence line — small, muted, top-right, quiet
+  // until the reader looks for it (Obsidian Live Preview style).
+  ".dr-codeblock--labelled": { position: "relative" },
+  ".dr-codeblock--labelled::after": {
+    content: "attr(data-lang)",
+    position: "absolute",
+    top: "0",
+    right: "6px",
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.75em",
+    lineHeight: "1.6",
+    color: "var(--faint)",
+    pointerEvents: "none",
+    userSelect: "none",
   },
   ".dr-quote": {
     borderLeft: "3px solid #d0d7de",
