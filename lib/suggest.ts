@@ -14,9 +14,13 @@ import type { DisplayPosition } from "./pr/reanchor";
  * contains an inner code fence — wrapped by `buildSuggestionBlock` with a
  * longer outer fence — round-trips intact. The closing fence is matched at
  * the same length via the backreference; trailing backticks (CommonMark
- * allows a longer close) are tolerated by `[^\`]` lookahead/end-of-string. */
+ * allows a longer close) are tolerated by `[^\`]` lookahead/end-of-string.
+ *
+ * `\r?\n` around the fence lines tolerates CRLF bodies (GitHub's API returns
+ * comment bodies with `\r\n` endings) so the outer `\r` is trimmed off the
+ * extracted replacement, matching the `\n`-normalised source. */
 export function extractSuggestionBlock(body: string): string | null {
-  const m = body.match(/(`{3,})suggestion\n?([\s\S]*?)\n?\1(?!`)/);
+  const m = body.match(/(`{3,})suggestion\r?\n?([\s\S]*?)\r?\n?\1(?!`)/);
   return m ? m[2] : null;
 }
 
@@ -75,7 +79,7 @@ export function applyAcceptedSuggestion(args: {
 
 /** The visible text of a comment body with the suggestion block removed. */
 export function stripSuggestionBlock(body: string): string {
-  return body.replace(/(`{3,})suggestion\n?[\s\S]*?\n?\1(?!`)/g, "").trim();
+  return body.replace(/(`{3,})suggestion\r?\n?[\s\S]*?\r?\n?\1(?!`)/g, "").trim();
 }
 
 /** Char-level diff [op(-1 del / 0 eq / 1 ins), text]. For inline tracked-changes decoration. */

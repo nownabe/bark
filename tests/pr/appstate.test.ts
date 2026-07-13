@@ -104,6 +104,23 @@ describe("appstate — parseSuggestion", () => {
       replacement: "first",
     });
   });
+
+  test("a longer outer fence keeps an inner ``` fence intact (issue #195)", () => {
+    const inner = "```js\nconst x = 1;\n```";
+    const body = "Try:\n````suggestion\n" + inner + "\n````";
+    expect(parseSuggestion(body)).toEqual({
+      kind: "suggestion",
+      replacement: inner,
+    });
+  });
+
+  test("CRLF suggestion body round-trips (GitHub API line endings)", () => {
+    const body = "Try this:\r\n```suggestion\r\nnew line\r\n```";
+    expect(parseSuggestion(body)).toEqual({
+      kind: "suggestion",
+      replacement: "new line",
+    });
+  });
 });
 
 describe("appstate — deriveAppState: role", () => {
