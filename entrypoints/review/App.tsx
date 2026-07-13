@@ -68,14 +68,8 @@ import {
 } from "../../lib/suggest";
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
 import type { ExistingComment } from "../../lib/comments";
-import {
-  buildBlobPermalink,
-  buildSuggestionBlock,
-  findThreadNodeId,
-  GitHubClient,
-  pullStatus,
-  type PrRef,
-} from "../../lib/github";
+import { buildBlobPermalink, buildSuggestionBlock, pullStatus, type PrRef } from "../../lib/github";
+import { fetchFileContent } from "../../lib/pr/remote-fetcher";
 import { isRangeInDiff, parseRightRanges } from "../../lib/pr/diff";
 import {
   clearAcceptedDecisions,
@@ -134,7 +128,11 @@ export function App() {
     completeAuth,
     clearToken: clearAuthToken,
   } = auth;
-  const client = useMemo(() => (token ? new GitHubClient(token) : null), [token]);
+  // New-layer GitHub client (lib/pr/github-api): a plain token-carrying
+  // object consumed by the remote-fetcher functions — same shape the
+  // Repository bootstrap builds internally, so all GETs share one ETag
+  // cache and retry policy.
+  const client = useMemo(() => (token ? { token } : null), [token]);
   const prData = usePullRequestData(client, ref);
   const {
     pull,
@@ -262,26 +260,24 @@ export function App() {
   // an existing item, not starting a new comment).
   const suppressNextAnchor = useRef(false);
 
-  // New data layer (lib/pr/) — phase L1 of the legacy-on-new-data-layer plan.
-  // We bootstrap a Repository as soon as we have a token + PR ref so the
-  // review tree can read from AppState in follow-up phases. Legacy data
-  // paths are untouched; if bootstrap fails, the rest of App keeps working
-  // through its own fetchers.
+  // New data layer (lib/pr/): bootstrap a Repository as soon as we have a
+  // token + PR ref so the review tree can read from AppState. The PR-level
+  // read hooks (usePullRequestData / useSelectedFileContent) fetch through
+  // the same lib/pr primitives; if bootstrap fails, they keep the surface
+  // alive on their own.
   const [prRepository, setPrRepository] = useState<PullRequestRepository | null>(null);
-  const [refreshPr, setRefreshPr] = useState<(() => Promise<void>) | null>(null);
   useEffect(() => {
     if (!token || !ref) return;
     let cancelled = false;
     void (async () => {
       try {
-        const { repository, refresh } = await bootstrapPullRequest({
+        const { repository } = await bootstrapPullRequest({
           token,
           prRef: ref,
           storage: browser.storage.local,
         });
         if (!cancelled) {
           setPrRepository(repository);
-          setRefreshPr(() => refresh);
         }
       } catch (e) {
         if (!cancelled) setError(errMessage(e));
@@ -919,21 +915,17 @@ export function App() {
       return next;
     });
 
-  // Two paths share the same UI affordance:
-  //  - Bark-authored thread (root.meta exists): route through Repository.
-  //    setThreadResolved (L6b) — the Reconciler flips Thread.resolved and
-  //    the Executor calls GraphQL resolveReviewThread / unresolveReviewThread
-  //    once the sync cycle runs. No legacy marker-comment is posted any
-  //    more (ADR 0001 §3 puts resolved state on the Thread entity, not in
-  //    a comment body). Falls back to legacy if Repository isn't ready.
-  //  - Foreign in-diff review thread (root present, meta null, line known):
-  //    flip GitHub's native resolve only. No marker comment to post —
-  //    there's no Bark identity to point at.
-  // Both finish with a reload so the new resolved state is visible.
+  // Bark-authored and foreign review threads take the same path: the
+  // sidebar's t.id equals the Repository Thread id (see resolvableThreadKeys
+  // above), and the Resolve affordance is gated on that Thread carrying a
+  // remoteThreadId — so setThreadResolved always finds its target entity,
+  // whether the thread was created by Bark or natively on GitHub. The
+  // Reconciler flips Thread.resolved and the Executor runs the GraphQL
+  // resolve/unresolve mutation in its sync cycle; commentViews picks up the
+  // change via the listener — no extra refresh needed. (Issue-comment
+  // threads never get a remoteThreadId, so the button never shows there.)
   const setThreadResolved = async (t: ReviewThread, resolved: boolean) => {
-    if (!client || !ref) return;
-    const root = t.rootComment;
-    if (!root) return;
+    if (!t.rootComment) return;
     setResolvingId(t.id);
     setError(null);
     try {
@@ -941,26 +933,7 @@ export function App() {
         setError("Data layer is not ready yet. Try again in a moment.");
         return;
       }
-      if (root.meta) {
-        // ---- Bark-authored path (A) -------------------------------------
-        // setThreadResolved updates LocalState immediately and runs its own
-        // sync cycle (GraphQL resolveReviewThread). commentViews picks up
-        // the new state via the listener — no extra refresh needed.
-        await prRepository.setThreadResolved(t.id, resolved);
-      } else if (root.source === "review") {
-        // ---- Foreign review path (B) ------------------------------------
-        // GraphQL mutation happens outside the Repository. Refresh
-        // RemoteState afterwards so commentViews reflects the change.
-        const nodeId = findThreadNodeId(await client.listReviewThreads(ref), root.id);
-        if (!nodeId) {
-          setError("Could not find the GitHub review thread for this comment.");
-          return;
-        }
-        if (resolved) await client.resolveReviewThread(nodeId);
-        else await client.unresolveReviewThread(nodeId);
-        if (refreshPr) await refreshPr();
-      }
-      // Issue comments (D) are filtered out in L3a; nothing to do.
+      await prRepository.setThreadResolved(t.id, resolved);
     } catch (e) {
       setError(errMessage(e));
     } finally {
@@ -1238,7 +1211,7 @@ export function App() {
       if (newHeadSha !== headSha) {
         setHeadSha(newHeadSha);
         if (selectedPath) {
-          const newText = await client.getFileContent(ref, selectedPath, newHeadSha);
+          const newText = (await fetchFileContent(client, ref, newHeadSha, selectedPath)).source;
           setSource(newText);
           setBaseSource(newText);
           setSuggestionComments({});
@@ -1266,14 +1239,13 @@ export function App() {
     resetPrData();
     // Drop the token-bound Repository built with the now-revoked token.
     // resetPrData() only clears usePullRequestData's own state; prRepository
-    // and refreshPr are App-local, and the bootstrap effect early-returns
-    // once the token is null, so it never clears them itself. Without this,
-    // the previous session's Repository (and its stale transport) survives
-    // sign-out and keeps rendering until the next bootstrap resolves (#192).
+    // is App-local, and the bootstrap effect early-returns once the token is
+    // null, so it never clears it itself. Without this, the previous
+    // session's Repository (and its stale transport) survives sign-out and
+    // keeps rendering until the next bootstrap resolves (#192).
     // Storage is not cleared (consistent with logging back in as the same
     // user). Suggestion edits + dismissed still own their own legacy state.
     setPrRepository(null);
-    setRefreshPr(null);
     resetSuggestionEdits();
     resetDismissed();
     setSelectedPath(null);

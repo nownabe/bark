@@ -3,7 +3,8 @@
 // Anything that is purely about turning data into a label / error message
 // for the UI lives here. No React state, no fetchers, no side effects.
 
-import { GitHubApiError, type PullStatus } from "../../lib/github";
+import type { PullStatus } from "../../lib/github";
+import { GitHubApiError } from "../../lib/pr/github-api";
 import type { DisplayPosition } from "../../lib/pr/reanchor";
 import type { AnchorStatus } from "./adapters/displayPositionToAnchorStatus";
 

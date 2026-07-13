@@ -6,12 +6,12 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import {
   type SelectedFileContentCallbacks,
-  type SelectedFileContentClient,
   type SelectedFileContentDeps,
   useSelectedFileContent,
 } from "../entrypoints/review/hooks/useSelectedFileContent";
 import type { SuggestionEdit } from "../lib/drafts";
 import type { PrRef } from "../lib/github";
+import type { GitHubClient } from "../lib/pr/github-api";
 
 afterEach(() => {
   cleanup();
@@ -19,10 +19,22 @@ afterEach(() => {
 
 const PR: PrRef = { owner: "o", repo: "r", number: 7 };
 
-function makeClient(overrides: Partial<SelectedFileContentClient> = {}): SelectedFileContentClient {
+/** A GitHub contents-API response body carrying `text`. */
+function contentsJson(text: string): Response {
+  return new Response(JSON.stringify({ content: btoa(text), encoding: "base64" }), {
+    status: 200,
+  });
+}
+
+/** New-layer client with a stubbed fetch (the data layer's injection seam). */
+function makeClient(handler: () => Response | Promise<Response> = () => contentsJson("FETCHED")): {
+  client: GitHubClient;
+  fetch: ReturnType<typeof mock>;
+} {
+  const f = mock(async () => handler());
   return {
-    getFileContent: mock(async () => "FETCHED"),
-    ...overrides,
+    client: { token: "t", fetch: f as unknown as typeof fetch, delay: async () => {} },
+    fetch: f,
   };
 }
 
@@ -47,7 +59,7 @@ function makeCallbacks(
 
 describe("useSelectedFileContent — gating", () => {
   test("does nothing while client / ref / headSha / selectedPath is null", async () => {
-    const client = makeClient();
+    const { client, fetch } = makeClient();
     const deps = makeDeps();
     const callbacks = makeCallbacks();
 
@@ -57,7 +69,7 @@ describe("useSelectedFileContent — gating", () => {
     renderHook(() => useSelectedFileContent(client, PR, "h", null, "", deps, callbacks));
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(client.getFileContent).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
     expect(deps.listSuggestionEdits).not.toHaveBeenCalled();
     expect(callbacks.onLoadingChange).not.toHaveBeenCalled();
   });
@@ -70,7 +82,7 @@ describe("useSelectedFileContent — happy path", () => {
       base: "FETCHED",
       comments: { "c-1": "hi" },
     };
-    const client = makeClient({ getFileContent: mock(async () => "FETCHED") });
+    const { client } = makeClient(() => contentsJson("FETCHED"));
     const deps = makeDeps({
       listSuggestionEdits: mock(async () => ({ "f.md": edit })),
     });
@@ -97,7 +109,7 @@ describe("useSelectedFileContent — happy path", () => {
   });
 
   test("no persisted edit: source equals fetched text and onLoaded reports edit=undefined", async () => {
-    const client = makeClient({ getFileContent: mock(async () => "FRESH") });
+    const { client } = makeClient(() => contentsJson("FRESH"));
     const deps = makeDeps();
     const callbacks = makeCallbacks();
     const { result } = renderHook(() =>
@@ -123,32 +135,26 @@ describe("useSelectedFileContent — ready gating (issue #185)", () => {
   });
 
   test("stays not-ready while the fetch is in flight, then flips ready", async () => {
-    let resolveFetch: ((v: string) => void) | undefined;
-    const client = makeClient({
-      getFileContent: mock(
-        () =>
-          new Promise<string>((r) => {
-            resolveFetch = r;
-          }),
-      ),
-    });
+    let resolveFetch: ((v: Response) => void) | undefined;
+    const { client } = makeClient(
+      () =>
+        new Promise<Response>((r) => {
+          resolveFetch = r;
+        }),
+    );
     const { result } = renderHook(() =>
       useSelectedFileContent(client, PR, "h", "f.md", "", makeDeps(), makeCallbacks()),
     );
     // Content still loading → editor must be held read-only.
     await waitFor(() => expect(result.current.ready).toBe(false));
-    resolveFetch?.("FRESH");
+    resolveFetch?.(contentsJson("FRESH"));
     await waitFor(() => expect(result.current.ready).toBe(true));
   });
 });
 
 describe("useSelectedFileContent — error path", () => {
-  test("getFileContent throwing surfaces via onError and never calls onLoaded", async () => {
-    const client = makeClient({
-      getFileContent: mock(async () => {
-        throw new Error("boom");
-      }),
-    });
+  test("a failing fetch surfaces via onError and never calls onLoaded", async () => {
+    const { client } = makeClient(() => new Response("{}", { status: 404 }));
     const callbacks = makeCallbacks();
     const { result } = renderHook(() =>
       useSelectedFileContent(client, PR, "h", "f.md", "", makeDeps(), callbacks),
@@ -157,7 +163,7 @@ describe("useSelectedFileContent — error path", () => {
     await waitFor(() => expect(callbacks.onError).toHaveBeenCalled());
     const errCall = (callbacks.onError as unknown as { mock: { calls: unknown[][] } }).mock
       .calls[0];
-    expect(errCall?.[0]).toBe("boom");
+    expect(String(errCall?.[0])).toContain("404");
     expect(callbacks.onLoaded).not.toHaveBeenCalled();
     // A failed load leaves the editor read-only (source still holds the
     // previous file's text).
@@ -168,8 +174,9 @@ describe("useSelectedFileContent — error path", () => {
 describe("useSelectedFileContent — cleanup", () => {
   test("unmounting fires onCleanup (lets the parent flush pending writes)", async () => {
     const callbacks = makeCallbacks();
+    const { client } = makeClient();
     const { unmount } = renderHook(() =>
-      useSelectedFileContent(makeClient(), PR, "h", "f.md", "", makeDeps(), callbacks),
+      useSelectedFileContent(client, PR, "h", "f.md", "", makeDeps(), callbacks),
     );
     await waitFor(() => expect(callbacks.onLoaded).toHaveBeenCalled());
     unmount();

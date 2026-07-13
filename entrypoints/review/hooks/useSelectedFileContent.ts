@@ -14,11 +14,11 @@
 
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 import type { SuggestionEdit } from "../../../lib/drafts";
-import type { GitHubClient, PrRef } from "../../../lib/github";
+import type { PrRef } from "../../../lib/github";
+import type { GitHubClient } from "../../../lib/pr/github-api";
+import { fetchFileContent } from "../../../lib/pr/remote-fetcher";
 import { isMeaningfulEdit } from "../../../lib/suggest";
 import { errMessage } from "../uiHelpers";
-
-export type SelectedFileContentClient = Pick<GitHubClient, "getFileContent">;
 
 export type SelectedFileContentDeps = {
   /** Read fresh — avoid a restore race with useSuggestionEdits's own
@@ -53,7 +53,7 @@ export type FileSource = {
 };
 
 export function useSelectedFileContent(
-  client: SelectedFileContentClient | null,
+  client: GitHubClient | null,
   ref: PrRef | null,
   headSha: string | null,
   selectedPath: string | null,
@@ -88,7 +88,7 @@ export function useSelectedFileContent(
     callbacksRef.current.onLoadingChange(true);
     (async () => {
       try {
-        const text = await client.getFileContent(ref, selectedPath, headSha);
+        const text = (await fetchFileContent(client, ref, headSha, selectedPath)).source;
         const edits = await listRef.current(ref);
         if (cancelled) return;
         const stored = edits[selectedPath];
