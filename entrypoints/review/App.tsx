@@ -62,6 +62,7 @@ import {
   applyAcceptedSuggestion,
   diffToSuggestions,
   extractSuggestionBlock,
+  isMeaningfulEdit,
   rebaseLoadedEdit,
   suggestionEditRanges,
 } from "../../lib/suggest";
@@ -574,7 +575,7 @@ export function App() {
     void (async () => {
       const wanted = new Map<string, { path: string; source: string; baseSha: string }>();
       for (const [path, edit] of Object.entries(suggestionEdits)) {
-        if (edit.source === edit.base) continue;
+        if (!isMeaningfulEdit(edit.base, edit.source)) continue;
         // The edit's own baseSha (the head its base text was fetched at) is
         // what the commit conflict check compares (issue #187); edits
         // persisted before the field existed fall back to the current head.
@@ -1154,7 +1155,7 @@ export function App() {
       //    effort; this is the source of truth for the impending commit).
       const wantedFileEdits = new Map<string, { path: string; source: string; baseSha: string }>();
       for (const [path, edit] of Object.entries(suggestionEdits)) {
-        if (edit.source === edit.base) continue;
+        if (!isMeaningfulEdit(edit.base, edit.source)) continue;
         wantedFileEdits.set(`fileedit-${path}`, {
           path,
           source: edit.source,

@@ -15,6 +15,7 @@
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 import type { SuggestionEdit } from "../../../lib/drafts";
 import type { PrRef } from "../../../lib/github";
+import { isMeaningfulEdit } from "../../../lib/suggest";
 
 const SAVE_DEBOUNCE_MS = 400;
 
@@ -103,8 +104,12 @@ export function useSuggestionEdits(
     baseSha?: string,
   ) => {
     if (!ref) return;
-    const edit: SuggestionEdit | null =
-      src !== base ? { source: src, base, ...(baseSha ? { baseSha } : {}), comments } : null;
+    // A trailing-newline-only difference is not a submittable change (issue
+    // #194): persisting it would strand the reviewer in an unsubmittable
+    // tracked-changes state, so clear the path instead.
+    const edit: SuggestionEdit | null = isMeaningfulEdit(base, src)
+      ? { source: src, base, ...(baseSha ? { baseSha } : {}), comments }
+      : null;
     // Keep the in-memory all-files map fresh immediately (storage write
     // is debounced below) so the submit count / modal reflect the
     // latest edit.

@@ -15,6 +15,7 @@
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 import type { SuggestionEdit } from "../../../lib/drafts";
 import type { GitHubClient, PrRef } from "../../../lib/github";
+import { isMeaningfulEdit } from "../../../lib/suggest";
 import { errMessage } from "../uiHelpers";
 
 export type SelectedFileContentClient = Pick<GitHubClient, "getFileContent">;
@@ -90,7 +91,12 @@ export function useSelectedFileContent(
         const text = await client.getFileContent(ref, selectedPath, headSha);
         const edits = await listRef.current(ref);
         if (cancelled) return;
-        const edit = edits[selectedPath];
+        const stored = edits[selectedPath];
+        // A previously persisted trailing-newline-only edit is a phantom
+        // pending change (issue #194): ignore it on load so it neither restores
+        // as tracked changes nor re-populates the edit map (the onLoaded
+        // handler clears it via persistSuggestionEdit).
+        const edit = stored && isMeaningfulEdit(stored.base, stored.source) ? stored : undefined;
         setBaseSource(text);
         setSource(edit?.source ?? text);
         callbacksRef.current.onLoaded({ path: selectedPath, text, edit });
