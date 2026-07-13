@@ -1263,10 +1263,16 @@ export function App() {
   const handleClearToken = async () => {
     await clearAuthToken();
     resetPrData();
-    // Drafts live in Repository.LocalState; resetPrData → setPrRepository(null)
-    // drops the in-memory view. Storage is not cleared (consistent with
-    // logging back in as the same user). Suggestion edits + dismissed still
-    // own their own legacy state.
+    // Drop the token-bound Repository built with the now-revoked token.
+    // resetPrData() only clears usePullRequestData's own state; prRepository
+    // and refreshPr are App-local, and the bootstrap effect early-returns
+    // once the token is null, so it never clears them itself. Without this,
+    // the previous session's Repository (and its stale transport) survives
+    // sign-out and keeps rendering until the next bootstrap resolves (#192).
+    // Storage is not cleared (consistent with logging back in as the same
+    // user). Suggestion edits + dismissed still own their own legacy state.
+    setPrRepository(null);
+    setRefreshPr(null);
     resetSuggestionEdits();
     resetDismissed();
     setSelectedPath(null);
