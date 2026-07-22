@@ -1,22 +1,4 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  extends: [
-    "config:recommended",
-    // Workflow actions are pinned to commit SHAs; keep them pinned and updated.
-    "helpers:pinGitHubActionDigests",
-  ],
-  // The mise manager reads mise.toml (bun, oxlint, oxfmt, actionlint, ghalint, zizmor, direnv).
-  packageRules: [
-    {
-      matchManagers: ["mise"],
-      groupName: "mise tools",
-    },
-    {
-      // Keep noise down: group non-major npm devDependency bumps.
-      matchManagers: ["npm"],
-      matchDepTypes: ["devDependencies"],
-      matchUpdateTypes: ["minor", "patch"],
-      groupName: "npm devDependencies (non-major)",
-    },
-  ],
+  extends: ["github>nownabe/renovate-config"],
 }
