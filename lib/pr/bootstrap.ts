@@ -51,8 +51,11 @@ export async function bootstrapPullRequest(
   const storageAdapter = new BrowserStorageAdapter(key, opts.storage);
   const transport = createGitHubTransport(client, opts.prRef);
 
-  // Diff data lives outside RemoteState (see phase 6a). The closure
-  // rebuilds on every refresh; intervening calls use the most recent build.
+  // The raw changed-file listing rides into RemoteState.changedFiles (per
+  // ADR 0003 §5 the current diff is fetched "as part of RemoteState");
+  // only this derived isInDiff *predicate* stays outside, as
+  // a closure rebuilt on every refresh. Intervening calls use the most
+  // recent build.
   let isInDiffImpl: (c: Comment) => boolean = () => false;
 
   const repository = new PullRequestRepository({
