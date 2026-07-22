@@ -149,6 +149,8 @@ Field-by-field, which side conventionally populates each:
 
 `PullRequest`, `viewer`, and `fileContents` are read-only mirrors of GitHub; the Reconciler does not diff them against `LocalState`. They are fetched at bootstrap (and refreshed on demand per the refresh policy) and treated as input by the Executor.
 
+> **Amendment (2026-07-22).** `RemoteState` additionally carries an optional `changedFiles?: ChangedFile[]` — the `GET /pulls/{n}/files` listing already fetched every refresh for in-diff routing ([ADR 0003 §5](0003-operations-and-execution.md) treats the current diff as "part of `RemoteState`") — so `AppState` can derive the changed-`.md` file selector from the Repository. It is deliberately **not** part of the shared `PRState` shape: the Reconciler never diffs it, `LocalState` never populates it, and the unified-diff patches must not be persisted to `chrome.storage.local`. This is the one intentional exception to `RemoteState = PRState`.
+
 `User` is a single value-object type used wherever a GitHub identity appears — `Comment.author`, `PullRequest.author`, and `PRState.viewer`. There is no GitHub-side user table to normalise against; the inlined form stays small and avoids reference indirection.
 
 ### 4. Derived data (`AppState`)

@@ -68,9 +68,16 @@ import {
 } from "../../lib/suggest";
 import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
 import type { ExistingComment } from "../../lib/comments";
-import { buildBlobPermalink, buildSuggestionBlock, pullStatus, type PrRef } from "../../lib/github";
+import {
+  buildBlobPermalink,
+  buildSuggestionBlock,
+  pullStatus,
+  type PrRef,
+  type PullInfo,
+} from "../../lib/github";
+import { GitHubApiError } from "../../lib/pr/github-api";
 import { fetchFileContent } from "../../lib/pr/remote-fetcher";
-import { isRangeInDiff, parseRightRanges } from "../../lib/pr/diff";
+import { type ChangedFile, isRangeInDiff, parseRightRanges } from "../../lib/pr/diff";
 import {
   clearAcceptedDecisions,
   listSuggestionEdits,
@@ -92,7 +99,6 @@ import {
 import { pendingDraftToComment } from "./adapters/pendingDraftToComment";
 import { useAuthFlow } from "./hooks/useAuthFlow";
 import { productionAuthDeps } from "./hooks/useAuthFlow.deps";
-import { usePullRequestData } from "./hooks/usePullRequestData";
 import { useSuggestionEdits } from "./hooks/useSuggestionEdits";
 import { productionSuggestionEditsDeps } from "./hooks/useSuggestionEdits.deps";
 import { useDismissedSuggestions } from "./hooks/useDismissedSuggestions";
@@ -108,6 +114,9 @@ import {
   installUrl,
   type ViewMode,
 } from "./uiHelpers";
+
+/** Stable empty file list for renders before AppState exists. */
+const NO_FILES: ChangedFile[] = [];
 
 export function App() {
   const params = new URLSearchParams(window.location.search);
@@ -133,22 +142,78 @@ export function App() {
   // Repository bootstrap builds internally, so all GETs share one ETag
   // cache and retry policy.
   const client = useMemo(() => (token ? { token } : null), [token]);
-  const prData = usePullRequestData(client, ref);
-  const {
-    pull,
-    files,
-    headSha,
-    headRef,
-    viewerLogin,
-    needsInstall,
-    error,
-    loading,
-    reload: retryLoad,
-    reset: resetPrData,
-    setHeadSha,
-    setLoading,
-    setError,
-  } = prData;
+
+  // ---- PR load lifecycle --------------------------------------------------
+  // The Repository bootstrap IS the initial PR load: these flags wrap the
+  // bootstrap effect below, and the submit/save flows further down reuse the
+  // same loading/error surface.
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [needsInstall, setNeedsInstall] = useState(false);
+  // Bumping re-runs the bootstrap effect (the "Retry" affordance).
+  const [bootKey, setBootKey] = useState(0);
+  const retryLoad = () => setBootKey((k) => k + 1);
+
+  // New data layer (lib/pr/): bootstrap a Repository as soon as we have a
+  // token + PR ref. Everything the surface renders — PR metadata, viewer,
+  // the changed-.md selector, comment/thread views — derives from its
+  // AppState below (ADR 0001 §4: React reads AppState).
+  const [prRepository, setPrRepository] = useState<PullRequestRepository | null>(null);
+  useEffect(() => {
+    if (!token || !ref) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setNeedsInstall(false);
+    void (async () => {
+      try {
+        const { repository } = await bootstrapPullRequest({
+          token,
+          prRef: ref,
+          storage: browser.storage.local,
+        });
+        if (!cancelled) setPrRepository(repository);
+      } catch (e) {
+        if (cancelled) return;
+        setError(errMessage(e));
+        // A 404/403 on the PR load usually means the GitHub App is not
+        // installed on this repo (§7.6) — offer the install screen.
+        setNeedsInstall(e instanceof GitHubApiError && (e.status === 404 || e.status === 403));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, ref?.owner, ref?.repo, ref?.number, bootKey]);
+
+  const deriveCtx = useMemo(() => ({ isInDiff: () => false }), []);
+  const repositoryAppState = useAppStateFromRepository(prRepository, deriveCtx);
+  const pullRequest = repositoryAppState?.pullRequest ?? null;
+  // Legacy PullInfo shape for Topbar & friends (author flattened to login).
+  const pull = useMemo<PullInfo | null>(
+    () =>
+      pullRequest && {
+        headSha: pullRequest.headSha,
+        headRef: pullRequest.headRef,
+        title: pullRequest.title,
+        body: pullRequest.body,
+        author: pullRequest.author.login,
+        state: pullRequest.state,
+        draft: pullRequest.draft,
+        merged: pullRequest.merged,
+      },
+    [pullRequest],
+  );
+  const files = repositoryAppState?.changedMarkdownFiles ?? NO_FILES;
+  // headSha advances automatically when a commit lands: the Executor's
+  // apply step writes the new head into RemoteState.pullRequest and the
+  // subscription re-derives (no manual setHeadSha anywhere).
+  const headSha = pullRequest?.headSha ?? null;
+  const headRef = pullRequest?.headRef ?? null;
+  const viewerLogin = repositoryAppState?.viewer?.login ?? null;
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
@@ -260,39 +325,6 @@ export function App() {
   // an existing item, not starting a new comment).
   const suppressNextAnchor = useRef(false);
 
-  // New data layer (lib/pr/): bootstrap a Repository as soon as we have a
-  // token + PR ref so the review tree can read from AppState. The PR-level
-  // read hooks (usePullRequestData / useSelectedFileContent) fetch through
-  // the same lib/pr primitives; if bootstrap fails, they keep the surface
-  // alive on their own.
-  const [prRepository, setPrRepository] = useState<PullRequestRepository | null>(null);
-  useEffect(() => {
-    if (!token || !ref) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const { repository } = await bootstrapPullRequest({
-          token,
-          prRef: ref,
-          storage: browser.storage.local,
-        });
-        if (!cancelled) {
-          setPrRepository(repository);
-        }
-      } catch (e) {
-        if (!cancelled) setError(errMessage(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [token, ref?.owner, ref?.repo, ref?.number]);
-
-  // Read the Repository's AppState: Bark-authored and foreign comments alike
-  // flow through commentViews, so the rendered comment list is fully driven
-  // by the new data layer (no legacy REST polling).
-  const deriveCtx = useMemo(() => ({ isInDiff: () => false }), []);
-  const repositoryAppState = useAppStateFromRepository(prRepository, deriveCtx);
   // CommentView lookup by GitHub REST id — used by statusFor (L5) so it
   // can read the new layer's displayPosition instead of running legacy
   // reanchorComment on its own.
@@ -549,9 +581,10 @@ export function App() {
   }, [anchor]);
 
   // Restore + device-flow polling now live in useAuthFlow.
-  // Initial PR fetch (pull / files / head SHA + ref / viewer) now lives in
-  // usePullRequestData. Pick the first file once the file list arrives, and
-  // derive role once we know both the viewer and the PR author.
+  // pull / files / head SHA + ref / viewer derive from the Repository's
+  // AppState (see the bootstrap block above). Pick the first file once the
+  // file list arrives, and derive role once we know both the viewer and the
+  // PR author.
   useEffect(() => {
     if (files.length === 0) return;
     setSelectedPath((prev) => prev ?? files[0]?.path ?? null);
@@ -1184,13 +1217,11 @@ export function App() {
           `Commit failed: ${commitFailure.message} Your pending edits are kept — ` +
             `review the reloaded file and submit again.`,
         );
-        // Recovery: advance to the remote head so the open file reloads and
-        // the load-time rebase (rebaseLoadedEdit) merges the upstream
-        // changes into the author's edits; other conflicted files re-base
-        // when opened. Without this, App would keep fetching at the stale
-        // head and never see the upstream content.
-        const remoteHead = prRepository.getRemoteState().pullRequest?.headSha;
-        if (remoteHead && remoteHead !== headSha) setHeadSha(remoteHead);
+        // Recovery: headSha derives from RemoteState.pullRequest, so if the
+        // conflict check advanced the remote head, the open file already
+        // reloads at it and the load-time rebase (rebaseLoadedEdit) merges
+        // the upstream changes into the author's edits; other conflicted
+        // files re-base when opened. Nothing to poke here.
       } else {
         await discardAllPersistedEdits();
         if (acceptedResolvedRemoteIds.length > 0) {
@@ -1207,9 +1238,9 @@ export function App() {
         }
       }
 
-      // 6. New head SHA → reload the open file.
+      // 6. New head SHA → reload the open file. (headSha itself advanced
+      //    already: the commit's apply step wrote it into RemoteState.)
       if (newHeadSha !== headSha) {
-        setHeadSha(newHeadSha);
         if (selectedPath) {
           const newText = (await fetchFileContent(client, ref, newHeadSha, selectedPath)).source;
           setSource(newText);
@@ -1236,13 +1267,14 @@ export function App() {
   // legacy in-line implementation did).
   const handleClearToken = async () => {
     await clearAuthToken();
-    resetPrData();
-    // Drop the token-bound Repository built with the now-revoked token.
-    // resetPrData() only clears usePullRequestData's own state; prRepository
-    // is App-local, and the bootstrap effect early-returns once the token is
-    // null, so it never clears it itself. Without this, the previous
-    // session's Repository (and its stale transport) survives sign-out and
-    // keeps rendering until the next bootstrap resolves (#192).
+    setError(null);
+    setNeedsInstall(false);
+    // Drop the token-bound Repository built with the now-revoked token —
+    // pull / files / viewer all derive from it, so this alone returns the
+    // PR-derived surface to its baseline. The bootstrap effect early-returns
+    // once the token is null, so it never clears it itself. Without this,
+    // the previous session's Repository (and its stale transport) survives
+    // sign-out and keeps rendering until the next bootstrap resolves (#192).
     // Storage is not cleared (consistent with logging back in as the same
     // user). Suggestion edits + dismissed still own their own legacy state.
     setPrRepository(null);

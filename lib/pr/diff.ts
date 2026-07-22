@@ -7,15 +7,11 @@
 // CreateComment ops to PostReviewBatch (in-diff) or PostIssueComment
 // (out-of-diff).
 
-import type { Comment } from "./types";
+import type { ChangedFile, Comment } from "./types";
 
-/** A file changed by the PR, as returned by `GET /pulls/{n}/files`. */
-export type ChangedFile = {
-  path: string;
-  status: "added" | "modified" | "removed" | "renamed" | "copied" | "changed" | "unchanged";
-  /** Unified-diff patch. May be absent for very large or binary files. */
-  patch?: string;
-};
+// ChangedFile lives in types.ts (RemoteState carries the list); re-export so
+// existing importers of the diff module keep working.
+export type { ChangedFile } from "./types";
 
 /** Commentable line range on the RIGHT (new file) side, inclusive. */
 export type RightRange = {

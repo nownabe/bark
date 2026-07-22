@@ -6,6 +6,7 @@
 import { extractSuggestionBlock } from "../suggest";
 import { type DisplayPosition, reanchor } from "./reanchor";
 import type {
+  ChangedFile,
   Comment,
   FileContent,
   LocalId,
@@ -35,6 +36,12 @@ export type AppState = {
    *  RemoteState directly. Empty until both PullRequest and matching
    *  FileContent entries are present. */
   currentFiles: FileContent[];
+
+  /** The PR's changed `.md` files still present at head (Bark's review
+   *  scope), in GitHub API order, patches included so the UI can derive
+   *  in-diff ranges. Empty until the remote snapshot carries the
+   *  changed-file listing. */
+  changedMarkdownFiles: ChangedFile[];
 };
 
 export type CommentView = {
@@ -83,7 +90,13 @@ export function deriveAppState(
     commentViews,
     threadGroups,
     currentFiles,
+    changedMarkdownFiles: buildChangedMarkdownFiles(remote.changedFiles),
   };
+}
+
+function buildChangedMarkdownFiles(changed: ChangedFile[] | undefined): ChangedFile[] {
+  if (!changed) return [];
+  return changed.filter((f) => f.path.toLowerCase().endsWith(".md") && f.status !== "removed");
 }
 
 function buildCurrentFiles(files: FileContent[], headSha: string | null): FileContent[] {

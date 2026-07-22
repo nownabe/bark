@@ -323,3 +323,28 @@ describe("appstate — deriveAppState: currentFiles", () => {
     expect(out.currentFiles).toEqual([]);
   });
 });
+
+describe("appstate — deriveAppState: changedMarkdownFiles", () => {
+  test("keeps only non-removed .md entries (case-insensitive), preserving API order", () => {
+    const out = deriveAppState(
+      localState(),
+      remoteState({
+        changedFiles: [
+          { path: "z-guide.md", status: "modified", patch: "@@ z" },
+          { path: "src/app.ts", status: "modified", patch: "@@ ts" },
+          { path: "GONE.md", status: "removed", patch: "@@ gone" },
+          { path: "README.MD", status: "added", patch: "@@ readme" },
+        ],
+      }),
+      { isInDiff: () => false },
+    );
+    expect(out.changedMarkdownFiles.map((f) => f.path)).toEqual(["z-guide.md", "README.MD"]);
+    // The patch rides along — the UI derives in-diff ranges from it.
+    expect(out.changedMarkdownFiles[0]?.patch).toBe("@@ z");
+  });
+
+  test("is empty when the remote snapshot has no changedFiles yet", () => {
+    const out = deriveAppState(localState(), remoteState(), { isInDiff: () => false });
+    expect(out.changedMarkdownFiles).toEqual([]);
+  });
+});

@@ -102,6 +102,14 @@ export type FileContent = {
   source: string;
 };
 
+/** A file changed by the PR, as returned by `GET /pulls/{n}/files`. */
+export type ChangedFile = {
+  path: string;
+  status: "added" | "modified" | "removed" | "renamed" | "copied" | "changed" | "unchanged";
+  /** Unified-diff patch. May be absent for very large or binary files. */
+  patch?: string;
+};
+
 /** Shape shared by `LocalState` and `RemoteState`. Both sides carry the same
  *  fields so the Reconciler can diff them field-by-field; individual fields are
  *  conventionally populated on one side or the other (see ADR 0002). */
@@ -117,8 +125,17 @@ export type PRState = {
 /** User-intended state, persisted to chrome.storage.local. */
 export type LocalState = PRState;
 
-/** Last-known GitHub state, in-memory only, refetched each session. */
-export type RemoteState = PRState;
+/** Last-known GitHub state, in-memory only, refetched each session.
+ *
+ *  `changedFiles` is remote-only and optional: the bootstrap orchestrator
+ *  attaches the `GET /pulls/{n}/files` listing it already fetches for the
+ *  isInDiff predicate, so AppState can derive the file selector from the
+ *  Repository instead of a parallel fetch. It is deliberately NOT part of
+ *  PRState — the Reconciler never diffs it and LocalState must not persist
+ *  patches to storage. */
+export type RemoteState = PRState & {
+  changedFiles?: ChangedFile[];
+};
 
 /** Empty PRState helper (used for both LocalState and RemoteState). */
 export function emptyState(): PRState {
