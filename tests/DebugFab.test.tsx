@@ -59,6 +59,27 @@ describe("DebugFab — popover (hidden)", () => {
   });
 });
 
+describe("DebugFab — manual refresh (ADR 0005 §5)", () => {
+  test("a 'Refresh' button calls onRefresh", () => {
+    const onRefresh = mock(() => {});
+    const { container } = render(<DebugFab {...makeProps({ show: true, onRefresh })} />);
+    const btn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent === "Refresh",
+    ) as HTMLButtonElement;
+    expect(btn).toBeDefined();
+    fireEvent.click(btn);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  test("without onRefresh (not wired yet), no Refresh button renders", () => {
+    const { container } = render(<DebugFab {...makeProps({ show: true })} />);
+    const btn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent === "Refresh",
+    );
+    expect(btn).toBeUndefined();
+  });
+});
+
 describe("DebugFab — popover (visible)", () => {
   test("shows role / viewMode / head SHA / edited yes-no / draft count", () => {
     const { container } = render(

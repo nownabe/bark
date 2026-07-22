@@ -19,6 +19,7 @@ import { RepositoryProvider, useAppState, useRepository } from "../../lib/pr/rea
 import type { PullRequestRepository } from "../../lib/pr/repository";
 import type { Comment, FileContent, LocalId } from "../../lib/pr/types";
 import { SnackbarProvider, useSnackbar } from "./components/Snackbar";
+import { useVisibilityRefresh } from "./hooks/useVisibilityRefresh";
 
 /** Live editor selection — sufficient to construct a Comment.anchor. */
 export type EditorSelection = {
@@ -655,27 +656,6 @@ function countDrafts(views: Map<LocalId, { comment: Comment }>): number {
     if (v.comment.state === "draft") n++;
   }
   return n;
-}
-
-const VISIBILITY_THRESHOLD_MS = 30_000;
-
-function useVisibilityRefresh(onRefresh: () => Promise<void>) {
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    let hiddenAt = 0;
-    const handle = () => {
-      if (document.visibilityState === "hidden") {
-        hiddenAt = Date.now();
-      } else if (document.visibilityState === "visible" && hiddenAt > 0) {
-        if (Date.now() - hiddenAt >= VISIBILITY_THRESHOLD_MS) {
-          void onRefresh();
-        }
-        hiddenAt = 0;
-      }
-    };
-    document.addEventListener("visibilitychange", handle);
-    return () => document.removeEventListener("visibilitychange", handle);
-  }, [onRefresh]);
 }
 
 function errMessage(e: unknown): string {

@@ -106,6 +106,7 @@ import { productionDismissedDeps } from "./hooks/useDismissedSuggestions.deps";
 import { useSelectedFileContent } from "./hooks/useSelectedFileContent";
 import { useUiPanels } from "./hooks/useUiPanels";
 import { useThreadActions } from "./hooks/useThreadActions";
+import { useVisibilityRefresh } from "./hooks/useVisibilityRefresh";
 import { sampleDoc } from "./sample";
 import {
   canAcceptSuggestion,
@@ -159,6 +160,10 @@ export function App() {
   // the changed-.md selector, comment/thread views — derives from its
   // AppState below (ADR 0001 §4: React reads AppState).
   const [prRepository, setPrRepository] = useState<PullRequestRepository | null>(null);
+  // Full-refresh function from the bootstrap; drives the ADR 0005 §1
+  // triggers below (visibility change, debug button). Null until bootstrap
+  // resolves and after logout.
+  const [refreshPr, setRefreshPr] = useState<(() => Promise<void>) | null>(null);
   useEffect(() => {
     if (!token || !ref) return;
     let cancelled = false;
@@ -167,12 +172,15 @@ export function App() {
     setNeedsInstall(false);
     void (async () => {
       try {
-        const { repository } = await bootstrapPullRequest({
+        const { repository, refresh } = await bootstrapPullRequest({
           token,
           prRef: ref,
           storage: browser.storage.local,
         });
-        if (!cancelled) setPrRepository(repository);
+        if (!cancelled) {
+          setPrRepository(repository);
+          setRefreshPr(() => refresh);
+        }
       } catch (e) {
         if (cancelled) return;
         setError(errMessage(e));
@@ -188,6 +196,24 @@ export function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, ref?.owner, ref?.repo, ref?.number, bootKey]);
+
+  // Error-wrapped full refresh shared by the ADR 0005 triggers below
+  // (visibility change §1, debug button §5). A refresh failure keeps the
+  // previous RemoteState (bootstrap's refresh replaces it only on success);
+  // surface the reason and let the next trigger retry (§4).
+  const safeRefresh = useMemo(
+    () =>
+      refreshPr &&
+      (async () => {
+        try {
+          await refreshPr();
+        } catch (e) {
+          setError(errMessage(e));
+        }
+      }),
+    [refreshPr],
+  );
+  useVisibilityRefresh(safeRefresh);
 
   const deriveCtx = useMemo(() => ({ isInDiff: () => false }), []);
   const repositoryAppState = useAppStateFromRepository(prRepository, deriveCtx);
@@ -1278,6 +1304,7 @@ export function App() {
     // Storage is not cleared (consistent with logging back in as the same
     // user). Suggestion edits + dismissed still own their own legacy state.
     setPrRepository(null);
+    setRefreshPr(null);
     resetSuggestionEdits();
     resetDismissed();
     setSelectedPath(null);
@@ -1696,6 +1723,7 @@ export function App() {
         show={showDebug}
         onToggle={toggleDebug}
         onClose={closeDebug}
+        onRefresh={safeRefresh ? () => void safeRefresh() : undefined}
         role={role}
         viewMode={viewMode}
         headSha={headSha}
