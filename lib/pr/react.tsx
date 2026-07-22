@@ -10,8 +10,8 @@
 //     exported.
 //
 // Two `useAppState` flavours, same semantics:
-//   - `useAppState(ctx)`            — for a tree under `<RepositoryProvider>`.
-//   - `useAppStateFromRepository(repo, ctx)` — pass the repository directly,
+//   - `useAppState()`            — for a tree under `<RepositoryProvider>`.
+//   - `useAppStateFromRepository(repo)` — pass the repository directly,
 //     so a single component (the legacy `App.tsx` during the
 //     legacy-on-new-data-layer rollout) can read AppState without
 //     restructuring around the Provider. Returns `null` when `repo` is null.
@@ -24,7 +24,7 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react";
-import { type AppState, deriveAppState, type DeriveContext } from "./appstate";
+import { type AppState, deriveAppState } from "./appstate";
 import type { PullRequestRepository } from "./repository";
 import type { LocalState, RemoteState } from "./types";
 
@@ -62,18 +62,16 @@ function useRemoteStateInternal(): RemoteState {
   return useSyncExternalStore(subscribe, getSnapshot);
 }
 
-/** Derive AppState from the subscribed LocalState + RemoteState. The
- *  `ctx` argument should be memoised by the caller — a new identity on
- *  every render forces a re-derivation each time. */
-export function useAppState(ctx: DeriveContext): AppState {
+/** Derive AppState from the subscribed LocalState + RemoteState. */
+export function useAppState(): AppState {
   const local = useLocalStateInternal();
   const remote = useRemoteStateInternal();
-  return useMemo(() => deriveAppState(local, remote, ctx), [local, remote, ctx]);
+  return useMemo(() => deriveAppState(local, remote), [local, remote]);
 }
 
 const NO_OP_UNSUBSCRIBE = () => {};
 
-/** Same semantics as `useAppState(ctx)` but takes the repository
+/** Same semantics as `useAppState()` but takes the repository
  *  directly. Used by callers that can't sit under a
  *  `<RepositoryProvider>` — the legacy `App.tsx` during the
  *  legacy-on-new-data-layer rollout, where the bootstrapped repository
@@ -83,10 +81,7 @@ const NO_OP_UNSUBSCRIBE = () => {};
  *  no PR, no token, or bootstrap in flight). The hook always subscribes
  *  — passing `null` for `repo` does NOT change the hook call order, so
  *  it's safe to flip between repo and null on subsequent renders. */
-export function useAppStateFromRepository(
-  repo: PullRequestRepository | null,
-  ctx: DeriveContext,
-): AppState | null {
+export function useAppStateFromRepository(repo: PullRequestRepository | null): AppState | null {
   const subscribe = useCallback(
     (cb: () => void) => (repo ? repo.subscribe(cb) : NO_OP_UNSUBSCRIBE),
     [repo],
@@ -97,6 +92,6 @@ export function useAppStateFromRepository(
   const remote = useSyncExternalStore(subscribe, getRemote);
   return useMemo(() => {
     if (!local || !remote) return null;
-    return deriveAppState(local, remote, ctx);
-  }, [local, remote, ctx]);
+    return deriveAppState(local, remote);
+  }, [local, remote]);
 }

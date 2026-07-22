@@ -4,6 +4,7 @@
 // See docs/adr/0002-data-model.md §4.
 
 import { extractSuggestionBlock } from "../suggest";
+import { buildIsInDiff } from "./diff";
 import { type DisplayPosition, reanchor } from "./reanchor";
 import type {
   ChangedFile,
@@ -61,23 +62,17 @@ export type ThreadGroup = {
   comments: CommentView[];
 };
 
-/** Inputs the derivation needs beyond LocalState/RemoteState. */
-export type DeriveContext = {
-  /** Decides whether a Comment's anchor falls within the current PR diff. */
-  isInDiff: (comment: Comment) => boolean;
-};
-
-export function deriveAppState(
-  local: LocalState,
-  remote: RemoteState,
-  ctx: DeriveContext,
-): AppState {
+export function deriveAppState(local: LocalState, remote: RemoteState): AppState {
   const fileContents = indexFileContents(remote.fileContents);
   const headSha = remote.pullRequest?.headSha ?? null;
+  // inDiff derives from the current PR diff carried on the remote snapshot
+  // (ADR 0002 §4) — no caller-supplied predicate; absent changedFiles means
+  // nothing is in-diff, matching the pre-listing behavior.
+  const isInDiff = buildIsInDiff(remote.changedFiles ?? []);
 
   const commentViews = new Map<LocalId, CommentView>();
   for (const comment of local.comments) {
-    commentViews.set(comment.id, deriveCommentView(comment, fileContents, headSha, ctx));
+    commentViews.set(comment.id, deriveCommentView(comment, fileContents, headSha, isInDiff));
   }
 
   const threadGroups = buildThreadGroups(local.threads, commentViews);
@@ -130,7 +125,7 @@ function deriveCommentView(
   comment: Comment,
   fileContents: Map<string, string>,
   headSha: string | null,
-  ctx: DeriveContext,
+  isInDiff: (comment: Comment) => boolean,
 ): CommentView {
   const { kind, replacement } = parseSuggestion(comment.body);
   const displayPosition: DisplayPosition = headSha
@@ -146,7 +141,7 @@ function deriveCommentView(
     kind,
     replacement,
     displayPosition,
-    inDiff: ctx.isInDiff(comment),
+    inDiff: isInDiff(comment),
     isMyDraft: comment.state === "draft",
   };
 }

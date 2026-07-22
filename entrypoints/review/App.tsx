@@ -215,8 +215,7 @@ export function App() {
   );
   useVisibilityRefresh(safeRefresh);
 
-  const deriveCtx = useMemo(() => ({ isInDiff: () => false }), []);
-  const repositoryAppState = useAppStateFromRepository(prRepository, deriveCtx);
+  const repositoryAppState = useAppStateFromRepository(prRepository);
   const pullRequest = repositoryAppState?.pullRequest ?? null;
   // Legacy PullInfo shape for Topbar & friends (author flattened to login).
   const pull = useMemo<PullInfo | null>(

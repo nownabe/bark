@@ -106,8 +106,7 @@ describe("react — useRepository", () => {
 describe("react — useAppState", () => {
   test("derives AppState from LocalState + RemoteState", async () => {
     const repo = makeRepo();
-    const ctx = { isInDiff: () => true };
-    const { result } = renderHook(() => useAppState(ctx), { wrapper: wrap(repo) });
+    const { result } = renderHook(() => useAppState(), { wrapper: wrap(repo) });
 
     expect(result.current.role).toBeNull();
     expect(result.current.commentViews.size).toBe(0);
@@ -131,15 +130,13 @@ describe("react — useAppState", () => {
 
 describe("react — useAppStateFromRepository", () => {
   test("returns null while repo is null", () => {
-    const ctx = { isInDiff: () => false };
-    const { result } = renderHook(() => useAppStateFromRepository(null, ctx));
+    const { result } = renderHook(() => useAppStateFromRepository(null));
     expect(result.current).toBeNull();
   });
 
   test("with a repo, derives AppState and updates on every mutation", async () => {
     const repo = makeRepo();
-    const ctx = { isInDiff: () => true };
-    const { result } = renderHook(() => useAppStateFromRepository(repo, ctx));
+    const { result } = renderHook(() => useAppStateFromRepository(repo));
 
     expect(result.current).not.toBeNull();
     expect(result.current?.commentViews.size).toBe(0);
@@ -162,9 +159,8 @@ describe("react — useAppStateFromRepository", () => {
 
   test("works without a <RepositoryProvider /> ancestor (Provider-free use)", async () => {
     const repo = makeRepo();
-    const ctx = { isInDiff: () => false };
     function Inner() {
-      const state = useAppStateFromRepository(repo, ctx);
+      const state = useAppStateFromRepository(repo);
       return <div data-count={state?.commentViews.size ?? -1} />;
     }
     const { container } = render(<Inner />);
@@ -175,9 +171,8 @@ describe("react — useAppStateFromRepository", () => {
 describe("react — RepositoryProvider integration", () => {
   test("children rendered with the Repository can subscribe via useAppState", () => {
     const repo = makeRepo();
-    const ctx = { isInDiff: () => false };
     function Inner() {
-      const state = useAppState(ctx);
+      const state = useAppState();
       return <div data-count={state.commentViews.size} />;
     }
     const { container } = render(
