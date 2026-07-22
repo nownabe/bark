@@ -92,6 +92,11 @@ describe("bootstrap — full happy path", () => {
 
     expect(repository.getRemoteState().pullRequest?.headSha).toBe("headsha");
     expect(repository.getRemoteState().viewer?.login).toBe("alice");
+    // The changed-file listing rides into RemoteState so AppState can derive
+    // the file selector from the Repository (no parallel fetch in the UI).
+    expect(repository.getRemoteState().changedFiles).toEqual([
+      { path: "README.md", status: "modified", patch: PATCH },
+    ]);
     expect(refresh).toBeInstanceOf(Function);
   });
 

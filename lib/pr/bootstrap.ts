@@ -70,7 +70,9 @@ export async function bootstrapPullRequest(
       fetchChangedFiles(client, opts.prRef),
     ]);
     isInDiffImpl = buildIsInDiff(changedFiles);
-    await repository.setRemoteState(remoteState);
+    // Attach the listing so AppState can derive the changed-.md selector
+    // from the Repository (RemoteState.changedFiles is remote-only).
+    await repository.setRemoteState({ ...remoteState, changedFiles });
   }
 
   await refresh();
