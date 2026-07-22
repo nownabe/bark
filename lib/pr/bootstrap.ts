@@ -22,7 +22,7 @@ import type { GitHubClient } from "./github-api";
 import { createGitHubTransport, type PrRef } from "./github-transport";
 import { fetchChangedFiles, fetchRemoteState } from "./remote-fetcher";
 import { PullRequestRepository } from "./repository";
-import type { Comment, LocalState } from "./types";
+import type { Comment, LocalState, User } from "./types";
 
 export type BootstrapOptions = {
   token: string;
@@ -66,12 +66,17 @@ export async function bootstrapPullRequest(
 
   await repository.hydrate();
 
+  // The viewer identity changes only on re-auth, so it is fetched on the
+  // first round and reused by every subsequent refresh (ADR 0005 §2).
+  let knownViewer: User | undefined;
+
   async function refresh(): Promise<void> {
     const fileContentTargets = anchorTargets(repository.getLocalState());
     const [remoteState, changedFiles] = await Promise.all([
-      fetchRemoteState(client, opts.prRef, { fileContentTargets }),
+      fetchRemoteState(client, opts.prRef, { fileContentTargets, viewer: knownViewer }),
       fetchChangedFiles(client, opts.prRef),
     ]);
+    knownViewer = remoteState.viewer ?? undefined;
     isInDiffImpl = buildIsInDiff(changedFiles);
     // Attach the listing so AppState can derive the changed-.md selector
     // from the Repository (RemoteState.changedFiles is remote-only).

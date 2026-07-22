@@ -826,6 +826,40 @@ describe("remote-fetcher — fetchRemoteState", () => {
     expect(out.fileContents).toEqual([]);
   });
 
+  test("a known viewer skips the /user fetch (ADR 0005 §2: fetched once at bootstrap)", async () => {
+    let viewerCalled = false;
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7"))
+        return jsonResponse({
+          number: 7,
+          title: "T",
+          body: "B",
+          state: "open",
+          draft: false,
+          merged: false,
+          head: { sha: "h", ref: "topic" },
+          base: { ref: "main" },
+          user: { login: "alice", avatar_url: "" },
+        });
+      if (req.url.endsWith("/user")) {
+        viewerCalled = true;
+        return jsonResponse({ login: "alice", avatar_url: "" });
+      }
+      if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchRemoteState({ token: "t", fetch }, PR, {
+      viewer: { login: "cached", avatarUrl: "" },
+    });
+    expect(viewerCalled).toBe(false);
+    expect(out.viewer?.login).toBe("cached");
+  });
+
   test("a native reply in a mixed thread adopts the Bark threadId end-to-end (#181 / #183)", async () => {
     // GitHub thread: Bark root (metadata threadId "local-t1") + a foreign
     // reply. The Thread entity takes the Bark id; the foreign reply's

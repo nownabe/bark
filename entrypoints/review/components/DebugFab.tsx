@@ -21,6 +21,9 @@ export type DebugFabProps = {
   anchor: SourceAnchor | null;
   previewBody: string;
   restored: { meta: CommentMetadata | null } | null;
+  /** Debug-only manual full refresh (ADR 0005 §5). Omitted while the
+   *  bootstrap refresh function is not available; the button then hides. */
+  onRefresh?: () => void;
 };
 
 export function DebugFab({
@@ -35,6 +38,7 @@ export function DebugFab({
   anchor,
   previewBody,
   restored,
+  onRefresh,
 }: DebugFabProps) {
   return (
     <>
@@ -51,9 +55,22 @@ export function DebugFab({
         <div className="debug-popover debug" role="dialog">
           <div className="composer__row" style={{ justifyContent: "space-between", marginTop: 0 }}>
             <strong>Debug</strong>
-            <button type="button" className="btn btn--sm" onClick={onClose}>
-              Close
-            </button>
+            <span>
+              {onRefresh ? (
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  style={{ marginRight: 8 }}
+                  onClick={onRefresh}
+                  title="Force a full RemoteState refresh from GitHub"
+                >
+                  Refresh
+                </button>
+              ) : null}
+              <button type="button" className="btn btn--sm" onClick={onClose}>
+                Close
+              </button>
+            </span>
           </div>
           <dl>
             <dt>role / view</dt>

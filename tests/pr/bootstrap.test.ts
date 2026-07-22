@@ -262,5 +262,9 @@ describe("bootstrap — full happy path", () => {
     const secondPhaseCalls = calls.filter((c) => c.startsWith("second:"));
     expect(secondPhaseCalls.some((c) => c.includes("/pulls/7/files"))).toBe(true);
     expect(secondPhaseCalls.some((c) => c.includes("/pulls/7"))).toBe(true);
+    // The viewer is fetched once at bootstrap and NOT refreshed (ADR 0005
+    // §2: it changes only on re-auth) — but it stays populated.
+    expect(secondPhaseCalls.some((c) => c.includes("/user"))).toBe(false);
+    expect(repository.getRemoteState().viewer?.login).toBe("alice");
   });
 });

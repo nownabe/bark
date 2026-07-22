@@ -460,6 +460,11 @@ export type FetchRemoteStateOptions = {
    *  inputs for submitted comments without the caller having to know
    *  them up front. */
   fileContentTargets?: Array<{ sha: string; path: string }>;
+  /** Already-known authenticated user. When provided, the `/user` fetch is
+   *  skipped and this value is used verbatim — per ADR 0005 §2 the viewer
+   *  is fetched once at bootstrap and not refreshed (it changes only on
+   *  re-auth). */
+  viewer?: User;
 };
 
 /** Build a RemoteState from one parallel fetch round.
@@ -480,7 +485,7 @@ export async function fetchRemoteState(
   // normalisation waits on the raw fetch (not on a second round trip).
   const [pullRequest, viewer, reviewRaw, issueRaw, rawThreads] = await Promise.all([
     fetchPullRequest(client, ref),
-    fetchViewer(client),
+    opts.viewer ? Promise.resolve(opts.viewer) : fetchViewer(client),
     fetchReviewCommentsRaw(client, ref),
     fetchIssueCommentsRaw(client, ref),
     listReviewThreads(client, ref),
