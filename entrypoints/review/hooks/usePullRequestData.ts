@@ -12,21 +12,10 @@
 // Splitting that here would only push the coupling around.
 
 import { useEffect, useState } from "react";
-import {
-  type ChangedFile,
-  GitHubApiError,
-  type GitHubClient,
-  type PrRef,
-  type PullInfo,
-} from "../../../lib/github";
+import type { ChangedFile, PrRef, PullInfo } from "../../../lib/github";
+import { GitHubApiError, type GitHubClient } from "../../../lib/pr/github-api";
+import { fetchChangedFiles, fetchPullRequest, fetchViewer } from "../../../lib/pr/remote-fetcher";
 import { errMessage } from "../uiHelpers";
-
-/** Just enough of GitHubClient for this hook; lets tests pass a plain
- *  object without having to construct a real class instance. */
-export type PullRequestClient = Pick<
-  GitHubClient,
-  "getPull" | "listMarkdownFiles" | "getAuthenticatedUser"
->;
 
 export type PullRequestData = {
   pull: PullInfo | null;
@@ -55,7 +44,7 @@ export type PullRequestData = {
 };
 
 export function usePullRequestData(
-  client: PullRequestClient | null,
+  client: GitHubClient | null,
   ref: PrRef | null,
 ): PullRequestData {
   const [pull, setPull] = useState<PullInfo | null>(null);
@@ -76,15 +65,27 @@ export function usePullRequestData(
     setNeedsInstall(false);
     (async () => {
       try {
-        const info = await client.getPull(ref);
-        const md = await client.listMarkdownFiles(ref);
+        const pr = await fetchPullRequest(client, ref);
+        // Bark's scope is Markdown review: keep only .md files still present.
+        const md = (await fetchChangedFiles(client, ref)).filter(
+          (f) => f.path.toLowerCase().endsWith(".md") && f.status !== "removed",
+        );
         if (cancelled) return;
-        setPull(info);
-        setHeadSha(info.headSha);
-        setHeadRef(info.headRef);
+        setPull({
+          headSha: pr.headSha,
+          headRef: pr.headRef,
+          title: pr.title,
+          body: pr.body,
+          author: pr.author.login,
+          state: pr.state,
+          draft: pr.draft,
+          merged: pr.merged,
+        });
+        setHeadSha(pr.headSha);
+        setHeadRef(pr.headRef);
         setFiles(md);
         try {
-          const viewer = await client.getAuthenticatedUser();
+          const viewer = await fetchViewer(client);
           if (!cancelled) setViewerLogin(viewer.login);
         } catch (identityError) {
           // Identity lookup failed (network / missing scope). Don't fail

@@ -6,7 +6,7 @@ import {
   PR_STATUS_LABEL,
   STATUS_LABEL,
 } from "../entrypoints/review/uiHelpers";
-import { GitHubApiError } from "../lib/github";
+import { GitHubApiError } from "../lib/pr/github-api";
 
 describe("errMessage", () => {
   test("401 → user-facing authentication error message", () => {
@@ -28,7 +28,7 @@ describe("errMessage", () => {
   });
 
   test("other GitHubApiError status passes the underlying message through", () => {
-    expect(errMessage(new GitHubApiError(500, "Boom"))).toBe("Boom");
+    expect(errMessage(new GitHubApiError(500, "Boom"))).toBe("GitHub API 500: Boom");
   });
 
   test("plain Error → its message", () => {
