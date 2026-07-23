@@ -49,12 +49,7 @@ export function AppV2({ repository, refresh }: AppV2Props) {
 }
 
 function ReviewSurface({ refresh }: { refresh: () => Promise<void> }) {
-  // For now `isInDiff` defaults to false here; the entrypoint wires it
-  // through the bootstrapped repository's `runSyncCycles` already. Once
-  // we display in-diff state in the sidebar we will read it from a
-  // memoised closure tied to RemoteState.
-  const ctx = useMemo(() => ({ isInDiff: () => false }), []);
-  const state = useAppState(ctx);
+  const state = useAppState();
   const snackbar = useSnackbar();
   const repository = useRepository();
   const [refreshing, setRefreshing] = useState(false);

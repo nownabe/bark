@@ -125,7 +125,7 @@ describe("appstate — parseSuggestion", () => {
 
 describe("appstate — deriveAppState: role", () => {
   test("role is null until both viewer and pullRequest are loaded", () => {
-    const out = deriveAppState(localState(), remoteState(), { isInDiff: () => false });
+    const out = deriveAppState(localState(), remoteState());
     expect(out.role).toBeNull();
   });
 
@@ -134,7 +134,6 @@ describe("appstate — deriveAppState: role", () => {
     const out = deriveAppState(
       localState(),
       remoteState({ viewer, pullRequest: pr({ author: { login: "ALICE" } }) }),
-      { isInDiff: () => false },
     );
     expect(out.role).toBe("author");
   });
@@ -146,7 +145,6 @@ describe("appstate — deriveAppState: role", () => {
         viewer: { login: "bob" },
         pullRequest: pr({ author: { login: "alice" } }),
       }),
-      { isInDiff: () => false },
     );
     expect(out.role).toBe("reviewer");
   });
@@ -155,27 +153,15 @@ describe("appstate — deriveAppState: role", () => {
 describe("appstate — deriveAppState: CommentView", () => {
   test("a draft Comment is marked isMyDraft", () => {
     const c = comment({ state: "draft" });
-    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }), {
-      isInDiff: () => true,
-    });
+    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }));
     expect(out.commentViews.get("c1")?.isMyDraft).toBe(true);
-  });
-
-  test("inDiff is taken from the DeriveContext callback", () => {
-    const c = comment();
-    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }), {
-      isInDiff: () => false,
-    });
-    expect(out.commentViews.get("c1")?.inDiff).toBe(false);
   });
 
   test("kind / replacement are derived from the body", () => {
     const c = comment({
       body: "Try:\n```suggestion\nfixed\n```",
     });
-    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }), {
-      isInDiff: () => true,
-    });
+    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }));
     const view = out.commentViews.get("c1");
     expect(view?.kind).toBe("suggestion");
     expect(view?.replacement).toBe("fixed");
@@ -185,9 +171,7 @@ describe("appstate — deriveAppState: CommentView", () => {
     const c = comment({
       anchor: { sha: "head", range: { sl: 1, sc: 1, el: 1, ec: 6 }, quote: "hi" },
     });
-    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }), {
-      isInDiff: () => true,
-    });
+    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }));
     expect(out.commentViews.get("c1")?.displayPosition.status).toBe("current");
   });
 
@@ -195,9 +179,7 @@ describe("appstate — deriveAppState: CommentView", () => {
     const c = comment({
       anchor: { sha: "older", range: { sl: 1, sc: 1, el: 1, ec: 6 }, quote: "x" },
     });
-    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }), {
-      isInDiff: () => true,
-    });
+    const out = deriveAppState(localState({ comments: [c] }), remoteState({ pullRequest: pr() }));
     expect(out.commentViews.get("c1")?.displayPosition.status).toBe("outdated");
   });
 
@@ -214,7 +196,6 @@ describe("appstate — deriveAppState: CommentView", () => {
         pullRequest: pr(),
         fileContents: [fileContent("head", "f.md", newS), fileContent("old", "f.md", oldS)],
       }),
-      { isInDiff: () => true },
     );
     const dp = out.commentViews.get("c1")?.displayPosition;
     expect(dp).toEqual({ status: "mapped", range: { sl: 3, sc: 1, el: 3, ec: 5 } });
@@ -222,9 +203,7 @@ describe("appstate — deriveAppState: CommentView", () => {
 
   test("displayPosition is outdated when no PullRequest is loaded yet", () => {
     const c = comment();
-    const out = deriveAppState(localState({ comments: [c] }), remoteState(), {
-      isInDiff: () => true,
-    });
+    const out = deriveAppState(localState({ comments: [c] }), remoteState());
     expect(out.commentViews.get("c1")?.displayPosition.status).toBe("outdated");
   });
 });
@@ -239,7 +218,6 @@ describe("appstate — deriveAppState: threadGroups", () => {
     const out = deriveAppState(
       localState({ comments: [c1, c2, c3], threads: [t1, t2] }),
       remoteState({ pullRequest: pr() }),
-      { isInDiff: () => true },
     );
     const ids = (id: string) =>
       out.threadGroups.find((g) => g.thread.id === id)?.comments.map((c) => c.comment.id);
@@ -249,9 +227,7 @@ describe("appstate — deriveAppState: threadGroups", () => {
 
   test("a thread with no comments still appears (empty group)", () => {
     const t = thread({ id: "orphan" });
-    const out = deriveAppState(localState({ threads: [t] }), remoteState({ pullRequest: pr() }), {
-      isInDiff: () => true,
-    });
+    const out = deriveAppState(localState({ threads: [t] }), remoteState({ pullRequest: pr() }));
     expect(out.threadGroups[0]).toMatchObject({
       thread: t,
       comments: [],
@@ -278,7 +254,6 @@ describe("appstate — deriveAppState: threadGroups", () => {
     const out = deriveAppState(
       localState({ comments: [foreignReview, foreignIssue], threads: [] }),
       remoteState({ pullRequest: pr() }),
-      { isInDiff: () => false },
     );
 
     const findGroup = (tid: string) => out.threadGroups.find((g) => g.thread.id === tid);
@@ -306,7 +281,6 @@ describe("appstate — deriveAppState: currentFiles", () => {
           fileContent("head", "a.md", "A-dupe"),
         ],
       }),
-      { isInDiff: () => false },
     );
     expect(out.currentFiles.map((f) => f.path)).toEqual(["a.md", "z.md"]);
     expect(out.currentFiles.find((f) => f.path === "a.md")?.source).toBe("A");
@@ -318,9 +292,44 @@ describe("appstate — deriveAppState: currentFiles", () => {
       remoteState({
         fileContents: [fileContent("anything", "a.md", "A")],
       }),
-      { isInDiff: () => false },
     );
     expect(out.currentFiles).toEqual([]);
+  });
+});
+
+describe("appstate — deriveAppState: inDiff derives from RemoteState.changedFiles (ADR 0002 §4)", () => {
+  // Patch with RIGHT-side commentable lines 1-3 on README.md.
+  const PATCH = "@@ -1,3 +1,3 @@\n line1\n-old\n+new\n line3";
+
+  test("a comment anchored inside a changed file's diff hunk is inDiff", () => {
+    const c = comment({
+      anchor: { sha: "head", range: { sl: 2, sc: 1, el: 2, ec: 4 }, quote: "x" },
+    });
+    const out = deriveAppState(
+      localState({ comments: [c] }),
+      remoteState({
+        pullRequest: pr(),
+        changedFiles: [{ path: "README.md", status: "modified", patch: PATCH }],
+      }),
+    );
+    expect(out.commentViews.get("c1")?.inDiff).toBe(true);
+  });
+
+  test("a comment outside every hunk — or with no changedFiles at all — is not inDiff", () => {
+    const c = comment({
+      anchor: { sha: "head", range: { sl: 99, sc: 1, el: 99, ec: 4 }, quote: "x" },
+    });
+    const withFiles = deriveAppState(
+      localState({ comments: [c] }),
+      remoteState({
+        pullRequest: pr(),
+        changedFiles: [{ path: "README.md", status: "modified", patch: PATCH }],
+      }),
+    );
+    expect(withFiles.commentViews.get("c1")?.inDiff).toBe(false);
+
+    const noFiles = deriveAppState(localState({ comments: [c] }), remoteState());
+    expect(noFiles.commentViews.get("c1")?.inDiff).toBe(false);
   });
 });
 
@@ -336,7 +345,6 @@ describe("appstate — deriveAppState: changedMarkdownFiles", () => {
           { path: "README.MD", status: "added", patch: "@@ readme" },
         ],
       }),
-      { isInDiff: () => false },
     );
     expect(out.changedMarkdownFiles.map((f) => f.path)).toEqual(["z-guide.md", "README.MD"]);
     // The patch rides along — the UI derives in-diff ranges from it.
@@ -344,7 +352,7 @@ describe("appstate — deriveAppState: changedMarkdownFiles", () => {
   });
 
   test("is empty when the remote snapshot has no changedFiles yet", () => {
-    const out = deriveAppState(localState(), remoteState(), { isInDiff: () => false });
+    const out = deriveAppState(localState(), remoteState());
     expect(out.changedMarkdownFiles).toEqual([]);
   });
 });
