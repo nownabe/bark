@@ -107,6 +107,7 @@ import { useSelectedFileContent } from "./hooks/useSelectedFileContent";
 import { useUiPanels } from "./hooks/useUiPanels";
 import { useThreadActions } from "./hooks/useThreadActions";
 import { useVisibilityRefresh } from "./hooks/useVisibilityRefresh";
+import { SnackbarProvider, useSnackbar } from "./components/Snackbar";
 import { sampleDoc } from "./sample";
 import {
   canAcceptSuggestion,
@@ -119,7 +120,19 @@ import {
 /** Stable empty file list for renders before AppState exists. */
 const NO_FILES: ChangedFile[] = [];
 
+/** The review surface wrapped in its global error channel: every
+ *  user-relevant error is announced via the Snackbar (ADR 0005 §4 /
+ *  design.md §3), so AppBody must sit under the provider to call
+ *  useSnackbar. */
 export function App() {
+  return (
+    <SnackbarProvider>
+      <AppBody />
+    </SnackbarProvider>
+  );
+}
+
+function AppBody() {
   const params = new URLSearchParams(window.location.search);
   const owner = params.get("owner");
   const repo = params.get("repo");
@@ -151,6 +164,18 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsInstall, setNeedsInstall] = useState(false);
+  // Global error surface (ADR 0005 §4): the Snackbar is ALWAYS used for a
+  // user-relevant error; the persistent inline notice stays as the
+  // additional in-context reflection design.md §3 allows. `show` is
+  // referentially stable, so reportError is too.
+  const { show: showSnackbar } = useSnackbar();
+  const reportError = useCallback(
+    (msg: string) => {
+      setError(msg);
+      showSnackbar(msg);
+    },
+    [showSnackbar],
+  );
   // Bumping re-runs the bootstrap effect (the "Retry" affordance).
   const [bootKey, setBootKey] = useState(0);
   const retryLoad = () => setBootKey((k) => k + 1);
@@ -183,7 +208,7 @@ export function App() {
         }
       } catch (e) {
         if (cancelled) return;
-        setError(errMessage(e));
+        reportError(errMessage(e));
         // A 404/403 on the PR load usually means the GitHub App is not
         // installed on this repo (§7.6) — offer the install screen.
         setNeedsInstall(e instanceof GitHubApiError && (e.status === 404 || e.status === 403));
@@ -208,7 +233,7 @@ export function App() {
         try {
           await refreshPr();
         } catch (e) {
-          setError(errMessage(e));
+          reportError(errMessage(e));
         }
       }),
     [refreshPr],
@@ -287,7 +312,7 @@ export function App() {
     { listSuggestionEdits },
     {
       onLoadingChange: setLoading,
-      onError: setError,
+      onError: reportError,
       onLoaded: ({ path, text, edit }) => {
         setSuggestionComments(edit?.comments ?? {});
         if (!edit) return;
@@ -301,7 +326,7 @@ export function App() {
         if (result.status === "rebased") {
           setSource(result.edit.source);
         } else if (result.status === "conflict") {
-          setError(
+          reportError(
             `${path} changed upstream and your edits could not be merged automatically. ` +
               `Review your version in the editor, or use "Discard edits" and re-apply them ` +
               `on the latest content.`,
@@ -988,12 +1013,12 @@ export function App() {
     setError(null);
     try {
       if (!prRepository) {
-        setError("Data layer is not ready yet. Try again in a moment.");
+        reportError("Data layer is not ready yet. Try again in a moment.");
         return;
       }
       await prRepository.setThreadResolved(t.id, resolved);
     } catch (e) {
-      setError(errMessage(e));
+      reportError(errMessage(e));
     } finally {
       setResolvingId(null);
     }
@@ -1023,7 +1048,7 @@ export function App() {
       // The target text moved or changed since the suggestion was written
       // (quote no longer matches at the reanchored position) — applying
       // would corrupt the document (issue #176).
-      setError(
+      reportError(
         "Can't apply this suggestion: the document changed and its target text no longer matches.",
       );
       return;
@@ -1089,7 +1114,7 @@ export function App() {
   const submitReview = async () => {
     if (!client || !ref) return;
     if (!prRepository) {
-      setError("Data layer is not ready yet. Try again in a moment.");
+      reportError("Data layer is not ready yet. Try again in a moment.");
       return;
     }
     const toSubmit = [...drafts, ...suggestionsToDrafts()];
@@ -1141,7 +1166,7 @@ export function App() {
       setReviewFilter(revealSubmittedFacets);
       setEmphasizedThreadId(null);
     } catch (e) {
-      setError(errMessage(e));
+      reportError(errMessage(e));
     } finally {
       setLoading(false);
       setShowSubmitConfirm(false);
@@ -1154,7 +1179,7 @@ export function App() {
   const submitAuthor = async () => {
     if (!client || !ref || !headRef || !headSha) return;
     if (!prRepository) {
-      setError("Data layer is not ready yet. Try again in a moment.");
+      reportError("Data layer is not ready yet. Try again in a moment.");
       return;
     }
     setLoading(true);
@@ -1238,7 +1263,7 @@ export function App() {
       //    once submitDrafts flips them past "draft"; only suggestionEdits +
       //    accepted-decision state still own their own storage.
       if (commitFailure) {
-        setError(
+        reportError(
           `Commit failed: ${commitFailure.message} Your pending edits are kept — ` +
             `review the reloaded file and submit again.`,
         );
@@ -1280,7 +1305,7 @@ export function App() {
       setReviewFilter(revealSubmittedFacets);
       setEmphasizedThreadId(null);
     } catch (e) {
-      setError(errMessage(e));
+      reportError(errMessage(e));
     } finally {
       setLoading(false);
       setShowSubmitConfirm(false);
