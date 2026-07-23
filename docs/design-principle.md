@@ -4,7 +4,8 @@ Reference for anyone (human or agent) styling Bark's UI. It captures the intent
 behind the design system so changes stay cohesive. The **source of truth for
 the actual values is the `:root` token block in
 `entrypoints/review/styles.css`** — this document explains the _why_ and the
-_how to use_, not a second copy of the numbers.
+_how to use_, not a second copy of the numbers. For product and architecture, see
+[`design-doc.md`](design-doc.md).
 
 ## 1. North star
 

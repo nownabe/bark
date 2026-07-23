@@ -7,7 +7,7 @@ Guidance for AI agents working in this repository. It introduces the project, th
 **Bark is a Chrome MV3 browser extension that brings a Google Docs–like reviewing experience to Markdown documents in GitHub Pull Requests.** Instead of GitHub's line-based "Files changed" diff, it renders the changed `.md` files in full and lets reviewers drag-select any text range to attach comments and Suggestions, while authors can edit the document in-place and commit back to the PR branch.
 
 - **Serverless, two-layer persistence.** There is no backend. State lives in a local **draft layer** (comments/Suggestions drafted in the browser) and is reflected to **GitHub via its API** (the shared source of truth), mirroring GitHub's "Start a review → Submit" flow. The extension fully reconstructs comment positions, threads, and history on top of that.
-- **Scope.** v1 targets `github.com` only (no GHES) and is asynchronous review — no real-time collaboration. See [`docreview-design-doc.md`](docreview-design-doc.md) for the full design and goals/non-goals, and [`design.md`](design.md) for the UI design system.
+- **Scope.** v1 targets `github.com` only (no GHES) and is asynchronous review — no real-time collaboration. See [`docs/design-doc.md`](docs/design-doc.md) for the full design and goals/non-goals (and [`docs/adr/`](docs/adr/) for the current data-layer architecture), and [`docs/design-principle.md`](docs/design-principle.md) for the UI design system.
 - **Tech stack.** Built with [WXT](https://wxt.dev) (MV3 framework), React 18, and CodeMirror 6 for the editor; `react-markdown` + `rehype-sanitize` for rendering and `mermaid` for diagrams. Tooling is `bun` (runtime + test runner), `oxlint`, and `oxfmt`; tests use `@testing-library/react` on `happy-dom`.
 - **Layout.** `entrypoints/` holds the extension surfaces — `background.ts`, `content.ts`, and the `review/` page (the React review UI: `App.tsx`, CodeMirror anchoring, suggestion rendering, components). `lib/` holds the shared, surface-agnostic logic — GitHub API (`github.ts`), auth (`auth.ts`), draft/comment storage (`drafts.ts`, `comments.ts`, `storage.ts`), text anchoring/re-anchoring (`anchor.ts`, `reanchor.ts`), Suggestions (`suggest.ts`), and Markdown/diff helpers. `tests/` mirrors these modules.
 
@@ -43,7 +43,7 @@ in English.
 
 ## UI / design
 
-- **Before changing the review UI's look and feel, read [`design.md`](design.md).** It documents Bark's design principles and token system (color, typography, spacing, radii, shadows, motion) and how to extend them cohesively. Styling is token-driven from the `:root` block in `entrypoints/review/styles.css` (the source of truth for values) — edit tokens rather than literals, preserve class names, keep the light GitHub-adjacent tone, and use no remote fonts (offline/privacy). Keep `design.md` in sync when the system changes.
+- **Before changing the review UI's look and feel, read [`docs/design-principle.md`](docs/design-principle.md).** It documents Bark's design principles and token system (color, typography, spacing, radii, shadows, motion) and how to extend them cohesively. Styling is token-driven from the `:root` block in `entrypoints/review/styles.css` (the source of truth for values) — edit tokens rather than literals, preserve class names, keep the light GitHub-adjacent tone, and use no remote fonts (offline/privacy). Keep `docs/design-principle.md` in sync when the system changes.
 
 ## Sandbox (the autonomy engine)
 
@@ -86,7 +86,7 @@ git hooks run as children of the unsandboxed git process, so they execute **outs
 
 ## When a sandboxed command fails
 
-When work fails because of a sandbox or toolchain configuration restriction (not a real bug), **do not silently fall back to `dangerouslyDisableSandbox`**. Diagnose the cause and **record the proposed fix in `env-suggestion.md`** (at the repo root) instead of changing the config yourself. Append one entry per failure: the symptom, the diagnosed cause, and the narrowest config change that would fix it, following the most-secure-first principle. The user reviews `env-suggestion.md` and applies the changes; this keeps every environment-loosening decision human-gated. Use this table to map the failure to the right setting to write down:
+When work fails because of a sandbox or toolchain configuration restriction (not a real bug), **do not silently fall back to `dangerouslyDisableSandbox`**. Diagnose the cause and **propose the fix to the user directly in chat** instead of changing the config yourself: state the symptom, the diagnosed cause, and the narrowest config change that would fix it, following the most-secure-first principle. The user applies config changes; this keeps every environment-loosening decision human-gated. Use this table to map the failure to the right setting to propose:
 
 | Failure symptom                                                                                 | Likely cause                                      | Proposed setting (narrowest first)                                                                                                                                   |
 | ----------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -98,8 +98,8 @@ When work fails because of a sandbox or toolchain configuration restriction (not
 
 Rules of thumb:
 
-- Write every proposal to `env-suggestion.md` — do not edit `.claude/settings.json`, `mise.toml`, or other config yourself. The file is the single place where all environment-improvement suggestions accumulate for the user to review.
-- Each entry must propose the **most specific** change that unblocks the task (one host, one path, one subcommand) — never widen with `~/`, `/`, or `*` — and explain why it is safe. Prefer changing the tool's behavior (caches/output into the project) over loosening the sandbox.
+- Propose every change to the user — do not edit `.claude/settings.json`, `mise.toml`, or other config yourself.
+- Each proposal must be the **most specific** change that unblocks the task (one host, one path, one subcommand) — never widen with `~/`, `/`, or `*` — and explain why it is safe. Prefer changing the tool's behavior (caches/output into the project) over loosening the sandbox.
 - `dangerouslyDisableSandbox` is a last resort for genuine one-offs, always with user confirmation — not a substitute for fixing the config.
 - Remember settings changes apply on the **next** session, so a settings fix needs a restart to take effect (a `dangerouslyDisableSandbox` retry can unblock the current session in the meantime).
 
