@@ -1,4 +1,4 @@
-// CodeMirror selection -> SourceAnchor conversion (anchoring from §7.1, CM version).
+// CodeMirror selection -> SourceAnchor conversion.
 // The CM document is always the Markdown source itself, so the selection from/to
 // map directly to source offsets, with no DOM reverse-lookup needed (the earlier
 // react-markdown rendering required mapping rendered DOM back to source offsets).

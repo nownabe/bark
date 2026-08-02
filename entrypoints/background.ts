@@ -1,6 +1,6 @@
-// Background service worker — Design Doc §6.
+// Background service worker.
 //  - Opens the review SPA page on request from the content script.
-//  - Runs the GitHub App device-flow network calls (§7.6 / D10). Those endpoints
+//  - Runs the GitHub App device-flow network calls. Those endpoints
 //    live on github.com and send no CORS headers, so they must run here, where
 //    host_permissions grants the worker a CORS bypass — a page fetch would fail.
 import type { TokenMessage } from "../lib/auth";
@@ -45,7 +45,7 @@ export default defineBackground(() => {
         void browser.tabs.create({ url });
         return undefined;
       }
-      // Device flow (§7.6): returning a Promise sends its resolved value as the
+      // Device flow: returning a Promise sends its resolved value as the
       // response. GitHub's JSON is forwarded verbatim; lib/auth.ts normalizes it.
       case "bark/auth/device-code": {
         if (!CLIENT_ID) return Promise.resolve(missingClientId);

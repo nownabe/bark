@@ -16,7 +16,7 @@ export type ViewMode = "raw" | "preview";
  *  of HTTP codes get a specific hint:
  *   - 401/403 → most commonly an auth issue (expired/under-scoped token)
  *   - 404      → repo/PR not visible to this token (often the App is not
- *                installed on the repo, §7.6) */
+ *                installed on the repo) */
 export function errMessage(e: unknown): string {
   if (e instanceof GitHubApiError) {
     if (e.status === 401 || e.status === 403) {
@@ -60,7 +60,7 @@ export const DEV_ROLE_SWITCH = Boolean(import.meta.env.BARK_DEV_ROLE_SWITCH);
 
 /** Public slug of the Bark GitHub App, used to build the install URL so
  *  a 404 / 403 (likely "not installed on this repo") can offer a
- *  one-click install (§7.6). */
+ *  one-click install. */
 export const APP_SLUG = import.meta.env.BARK_GITHUB_APP_SLUG;
 
 /** GitHub App install URL, or null when no slug is configured. */

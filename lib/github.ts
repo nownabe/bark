@@ -11,32 +11,32 @@ export interface PrRef {
   number: number;
 }
 
-/** Precise anchor in the source (Design Doc §7.1 / §7.2). */
+/** Precise anchor in the source. */
 export interface CommentAnchor {
   startLine: number;
   endLine: number;
   startCol: number;
   endCol: number;
-  /** Text for fuzzy matching during re-anchoring (§7.8). */
+  /** Text for fuzzy matching during re-anchoring. */
   quotedText: string;
-  /** Which document version the comment targets (basis for history tracking, §7.9). */
+  /** Which document version the comment targets (basis for history tracking). */
   createdAtSha: string;
 }
 
 export type CommentKind = "comment" | "suggestion";
 export type CommentStatus = "pending" | "open" | "addressed" | "resolved" | "outdated";
 
-/** Comment structure shared by local drafts and embedded metadata (Design Doc §7.2). */
+/** Comment structure shared by local drafts and embedded metadata. */
 export interface ReviewComment {
   id: string;
   path: string;
   anchor: CommentAnchor;
   body: string;
   kind: CommentKind;
-  /** Conversation grouping (the thread in §7.1). */
+  /** Conversation grouping. */
   threadId: string;
   status: CommentStatus;
-  /** Recorded when a later commit addresses the comment (§7.9). */
+  /** Recorded when a later commit addresses the comment. */
   addressedBySha: string | null;
 }
 
@@ -44,7 +44,7 @@ export interface ReviewComment {
 export interface ChangedFile {
   path: string;
   status: string; // added | modified | removed | renamed | ...
-  /** unified-diff (for the in/out-of-diff decision, §7.1). undefined when large/binary. */
+  /** unified-diff (for the in/out-of-diff decision). undefined when large/binary. */
   patch?: string;
 }
 
@@ -70,7 +70,7 @@ export function pullStatus(info: { state: string; draft?: boolean; merged?: bool
   return info.state === "closed" ? "closed" : "open";
 }
 
-/** A GitHub suggestion block (§7.3). Shows "Apply suggestion" when in-diff.
+/** A GitHub suggestion block. Shows "Apply suggestion" when in-diff.
  *
  * Picks a fence length one longer than the longest backtick run inside
  * `replacement` (min 3) so an inner ``` code fence in the suggestion content
@@ -89,7 +89,9 @@ export function avatarUrl(login: string, size = 40): string {
   return `https://github.com/${encodeURIComponent(login)}.png?size=${size}`;
 }
 
-/** Blob permalink for out-of-diff comments (§7.1, D4). */
+/** Blob permalink for out-of-diff comments — GitHub review comments can only
+ * target diff-hunk lines, so out-of-diff feedback is posted as a regular
+ * comment quoting this permalink. */
 export function buildBlobPermalink(
   ref: PrRef,
   path: string,

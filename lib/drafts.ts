@@ -11,16 +11,16 @@ import type { PrRef } from "./github";
 export interface PendingDraft {
   cid: string;
   path: string;
-  /** Whether all lines are in-diff (true=review comment / false=regular comment, §7.1). */
+  /** Whether all lines are in-diff (true=review comment / false=regular comment). */
   inDiff: boolean;
   range: AnchorRange;
   quote: string;
-  /** createdAtSha (§7.9). */
+  /** Source revision the draft was anchored against (createdAtSha). */
   sha: string;
   thread: string;
   /** Visible body. */
   body: string;
-  /** comment | suggestion (§7.3). */
+  /** comment | suggestion. */
   kind: "comment" | "suggestion";
   /** Replacement source lines for a suggestion (when kind==='suggestion'). */
   suggestion?: string;

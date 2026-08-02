@@ -1,5 +1,5 @@
 // Snackbar — global user-facing error / warning surface.
-// Per ADR 0005 §4 and design-principle.md §3, every refresh / sync / fetch failure
+// Per ADR 0005 §4, every refresh / sync / fetch failure
 // is announced via this Snackbar; components may additionally reflect
 // errors inline where context helps.
 

@@ -1,11 +1,10 @@
 import { defineConfig } from "wxt";
 
 // WXT config — see https://wxt.dev/api/config.html
-// Manifest maps to Design Doc §10 (Manifest V3 / permissions).
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
-  // Expose BARK_-prefixed env vars to the bundle (e.g. BARK_GITHUB_CLIENT_ID,
-  // §7.6). The prefix gate keeps non-prefixed secrets like GH_PAT out of the
+  // Expose BARK_-prefixed env vars to the bundle (e.g. BARK_GITHUB_CLIENT_ID).
+  // The prefix gate keeps non-prefixed secrets like GH_PAT out of the
   // shipped extension; WXT_/VITE_ stay enabled for WXT's own conventions.
   vite: () => ({ envPrefix: ["WXT_", "VITE_", "BARK_"] }),
   manifest: {
@@ -18,7 +17,7 @@ export default defineConfig({
       48: "icon/48.png",
       128: "icon/128.png",
     },
-    // §10: storage for the draft layer. The content script is statically
+    // "storage" for the draft layer. The content script is statically
     // declared (defineContentScript matches), so no "scripting" permission is
     // needed — Chrome Web Store rejects it as declared-but-unused.
     permissions: ["storage"],

@@ -1,4 +1,4 @@
-// Embedded-metadata codec — Design Doc §7.1 / decision D5.
+// Embedded-metadata codec.
 //
 // Append an invisible "tool-only" marker (an HTML comment) to the end of a
 // review comment body so the tool can fully restore char-level anchors, threads,
@@ -8,7 +8,7 @@
 // payload breaks when quotedText contains `--` (e.g. `---`). The JSON is therefore
 // UTF-8-safe base64 encoded (non-ASCII quotes are safe too).
 
-/** Range in the source (start/end line・col). The `range` of §7.1. */
+/** Range in the source (start/end line・col). */
 export interface AnchorRange {
   sl: number;
   sc: number;
@@ -16,19 +16,19 @@ export interface AnchorRange {
   ec: number;
 }
 
-/** Structured metadata embedded in a comment body (§7.1). */
+/** Structured metadata embedded in a comment body. */
 export interface CommentMetadata {
   /** comment id (local uuid). */
   cid: string;
   path: string;
   range: AnchorRange;
-  /** quoted text used for re-anchoring (§7.8). */
+  /** quoted text used for re-anchoring. */
   quote: string;
-  /** which source revision the comment was made against (createdAtSha, §7.9). */
+  /** which source revision the comment was made against (createdAtSha). */
   sha: string;
-  /** conversation grouping (threadId, §7.1). */
+  /** conversation grouping (threadId). */
   thread: string;
-  /** comment | suggestion (§7.2). Treated as comment when omitted. */
+  /** comment | suggestion. Treated as comment when omitted. */
   kind?: "comment" | "suggestion";
   /** Set only on resolution-marker comments; toggles a thread's resolved state. */
   event?: "resolve" | "unresolve";
@@ -59,7 +59,7 @@ export function embedMetadata(visibleBody: string, meta: CommentMetadata): strin
 
 /**
  * Extract metadata from a comment body and split off the visible text.
- * If the marker is missing or corrupt, meta is null (degrade to line anchor, §12-8).
+ * If the marker is missing or corrupt, meta is null (degrade to line anchor).
  */
 export function extractMetadata(body: string): { body: string; meta: CommentMetadata | null } {
   const m = body.match(MARKER_RE);

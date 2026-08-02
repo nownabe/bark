@@ -68,7 +68,7 @@ export function useAuthFlow(deps: AuthFlowDeps): AuthFlow {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Device-flow polling (§7.6): once a grant exists, poll GitHub at its
+  // Device-flow polling: once a grant exists, poll GitHub at its
   // interval until authorization succeeds, the code expires, or we hit an
   // error. A self-scheduling timeout lets us honor `slow_down` widening.
   useEffect(() => {

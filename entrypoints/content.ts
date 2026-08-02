@@ -1,7 +1,7 @@
 // Content script — injects the "Open in Bark" entry point on PR pages.
 // Runs on all github.com pages so Turbo navigation onto a PR still injects.
-// Design Doc §6 (Content Script). It only injects the button; the review
-// experience (rendering, anchoring) lives in the SPA page.
+// It only injects the button; the review experience (rendering,
+// anchoring) lives in the SPA page.
 export default defineContentScript({
   // Match every github.com page, not just /pull/: GitHub navigates via Turbo
   // (same-document pushState), so a /pull/-only match never injects when the

@@ -1,5 +1,5 @@
 // Line-level mapping between two revisions of a document — the deterministic
-// core of diff-based re-anchoring (Design Doc §7.8). Given the source as of a
+// core of diff-based re-anchoring. Given the source as of a
 // comment's createdAtSha (old) and the current head source (new), map an old
 // 1-based line number to its line in the new source.
 //

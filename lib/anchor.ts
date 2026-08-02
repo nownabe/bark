@@ -1,8 +1,8 @@
-// Source anchor model and offset ↔ line/col conversion — Design Doc §7.1.
+// Source anchor model and offset ↔ line/col conversion.
 //
 // `SourceAnchor` describes a selected range in the canonical source as
 // `{startOffset, endOffset, line/col, quotedText}` (quotedText drives fuzzy
-// re-anchoring §7.8). The helpers below convert between source offsets and
+// re-anchoring). The helpers below convert between source offsets and
 // 1-based line/col against a line index built from the source.
 
 export interface SourceAnchor {
