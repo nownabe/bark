@@ -26,7 +26,7 @@ in English.
 
 ## Toolchain: mise
 
-The project toolchain (`bun`, `oxlint`, `oxfmt`, `actionlint`, `ghalint`, `zizmor`, `direnv`) is declared in `mise.toml` with pinned versions; `mise.lock` records the resolved versions (`[settings] lockfile = true`). Run `mise run setup` (= `mise install` + `bun install`) once after cloning to materialize the toolchain and dependencies.
+The project toolchain (`bun`, `oxlint`, `oxfmt`, `actionlint`, `ghalint`, `zizmor`, `direnv`) is declared in `mise.toml` with pinned versions; `mise.lock` records the resolved versions (`[settings] lockfile = true`). Run `mise run setup` once after cloning.
 
 ## Development workflow
 
