@@ -1,4 +1,4 @@
-// Reviewer edit → suggestion conversion + diff for tracked changes (R3/§7.3, equivalent to Google Docs suggestions).
+// Reviewer edit → suggestion conversion + diff for tracked changes (equivalent to Google Docs suggestions).
 //  - charDiffs: char-level diff (for inline decoration: insert=underline / delete=strikethrough widget)
 //  - diffToSuggestions: split into hunks via line-level LCS and convert to GitHub suggestions (line replacement)
 import { diff_match_patch } from "diff-match-patch";

@@ -1,4 +1,4 @@
-// GitHub App Device Flow — Design Doc §7.6 / decision D10 (v2 auth).
+// GitHub App Device Flow.
 //
 // We acquire a non-expiring user-to-server token via the OAuth device flow:
 // the user authorizes a GitHub App (client_id only, no secret) and picks which

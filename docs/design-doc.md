@@ -16,9 +16,9 @@ relevant parts of §7–§8 here:
 - [ADR 0005](adr/0005-refresh-policy.md) — refresh triggers, Snackbar as the global error surface
 
 When an ADR and this doc disagree, the ADR wins for anything about state, storage,
-operations, or re-anchoring. The section numbers (`§7.1`, `§7.6`, `D5`, `D10`, …)
-are referenced from code comments throughout `lib/` and `entrypoints/`; keep them
-stable.
+operations, or re-anchoring. Code comments do not reference this doc's section
+numbers (only the ADRs are referenced from code); rationale that code needs lives
+in the code as self-contained comments.
 
 ---
 

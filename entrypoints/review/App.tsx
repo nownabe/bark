@@ -1,5 +1,5 @@
-// SPA shell — Design Doc §6.
-// The document surface is CodeMirror 6 (always editable, source canonical §13),
+// SPA shell.
+// The document surface is CodeMirror 6 (always editable, source canonical),
 // Obsidian-style Raw/Preview. Controls live in a sticky header; comments are
 // position-sorted and threaded; debug info is collapsible.
 import {
@@ -121,9 +121,8 @@ import {
 const NO_FILES: ChangedFile[] = [];
 
 /** The review surface wrapped in its global error channel: every
- *  user-relevant error is announced via the Snackbar (ADR 0005 §4 /
- *  design-principle.md §3), so AppBody must sit under the provider to call
- *  useSnackbar. */
+ *  user-relevant error is announced via the Snackbar (ADR 0005 §4), so
+ *  AppBody must sit under the provider to call useSnackbar. */
 export function App() {
   return (
     <SnackbarProvider>
@@ -166,7 +165,7 @@ function AppBody() {
   const [needsInstall, setNeedsInstall] = useState(false);
   // Global error surface (ADR 0005 §4): the Snackbar is ALWAYS used for a
   // user-relevant error; the persistent inline notice stays as the
-  // additional in-context reflection design-principle.md §3 allows. `show` is
+  // additional in-context reflection the same policy allows. `show` is
   // referentially stable, so reportError is too.
   const { show: showSnackbar } = useSnackbar();
   const reportError = useCallback(
@@ -210,7 +209,7 @@ function AppBody() {
         if (cancelled) return;
         reportError(errMessage(e));
         // A 404/403 on the PR load usually means the GitHub App is not
-        // installed on this repo (§7.6) — offer the install screen.
+        // installed on this repo — offer the install screen.
         setNeedsInstall(e instanceof GitHubApiError && (e.status === 404 || e.status === 403));
       } finally {
         if (!cancelled) setLoading(false);
@@ -402,7 +401,7 @@ function AppBody() {
   // carries Bark-authored synced comments (via LocalState) and foreign comments
   // (via RemoteState). The downstream reviewItems pipeline filters out C/D
   // (foreign issue / out-of-diff review) since Bark's scope is line-bound
-  // markdown review (Design Doc §1).
+  // markdown review.
   const comments = useMemo<ExistingComment[]>(() => {
     if (!repositoryAppState) return [];
     return commentViewsToExisting(repositoryAppState.commentViews.values());
@@ -1515,7 +1514,7 @@ function AppBody() {
 
   // Authorized, but the initial load failed with 404/403 — almost always the
   // App isn't installed on this repo. Show a dedicated gate instead of dropping
-  // the user into the review UI with a confusing "Not Found" notice (§7.6).
+  // the user into the review UI with a confusing "Not Found" notice.
   if (ref && needsInstall) {
     return (
       <InstallGate
