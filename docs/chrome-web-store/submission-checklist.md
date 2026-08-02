@@ -26,7 +26,7 @@ The `site/` directory is published via GitHub Actions
 ## 3. Build the production package
 
 The production build must bake in the **production** GitHub App `client_id`
-(`BARK_GITHUB_CLIENT_ID`). The build runs **outside the sandbox** (see AGENTS.md).
+(`BARK_GITHUB_CLIENT_ID`).
 
 ```sh
 # Use the production client_id, not the dev one.

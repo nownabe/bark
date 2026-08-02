@@ -16,21 +16,13 @@ language.
 
 ## Prerequisites
 
-- `git` and `gh` run **outside the sandbox** in this repo. Run each as a single
-  standalone Bash command — never chain them with `&&`, `;`, pipes, or other
-  commands, or the whole line runs sandboxed and git writes fail with
-  `Read-only file system` on `.git`. Re-run as a clean standalone command if that
-  happens.
-- The **unsandboxed `git status` is ground truth.** A sandboxed view reports
-  phantom changes for masked files (`.envrc`, `.claude/settings*.json`, masked
-  workflow files) and bogus untracked `$HOME` dotfiles — ignore those.
 - Stage **explicit paths** only. Never `git add -A` / `git add .`.
 
 ## Stage 1 — Confirm the branch is appropriate
 
 1. Get the current branch and its state:
    - `git branch --show-current` — current branch name.
-   - `git status` — working tree (ground truth, run unsandboxed).
+   - `git status` — working tree state.
    - `git log --oneline main..HEAD` — commits unique to this branch (adjust base
      if the project's default branch differs; this repo's PR base is `main`).
 2. Check whether a PR already exists for this branch:
@@ -63,20 +55,18 @@ unchecked. Run each as its own command and fix failures before continuing:
 - `bun run check:lint` — lint (warnings fail).
 - `bun run check:format` — format check (`bun run fmt` to auto-fix).
 - `bun run typecheck` — type check.
-- `bun run build` — build. **Runs outside the sandbox**; if it ever lands
-  sandboxed it fails with `Cannot find package 'js-tokens'`, so re-run it as a
-  clean standalone command.
+- `bun run build` — build.
 
-If a check fails for a real bug, fix it and re-run. If it fails because of a
-sandbox/toolchain restriction (not a real bug), follow the repo policy: propose
-the narrowest config fix to the user rather than loosening config yourself.
+If a check fails for a real bug, fix it and re-run. If it fails because of an
+environment restriction (not a real bug), follow the repo policy: propose the
+narrowest fix to the user rather than working around it silently.
 
 ## Stage 3 — Commit the session's related files
 
 1. Review exactly what changed: `git status` and `git diff` (and
    `git diff --staged` once staged).
 2. Stage only files **related to this session's work**, by explicit path:
-   `git add <path> <path> …`. Leave unrelated or incidental changes (e.g. masked
+   `git add <path> <path> …`. Leave unrelated or incidental changes (e.g. local
    config files) unstaged. If the working tree mixes unrelated changes, ask the
    user how to split them rather than lumping everything into one commit.
 3. Commit with a **Conventional Commits** message:

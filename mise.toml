@@ -14,3 +14,7 @@
 lockfile = true
 locked = true
 minimum_release_age = "3d"
+
+[tasks.setup]
+description = "Install the toolchain and dependencies"
+run = "mise install && bun install"

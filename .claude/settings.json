@@ -21,18 +21,5 @@
       "Bash(git switch *)"
     ],
     "deny": ["Edit(.git/**)"]
-  },
-  "sandbox": {
-    "enabled": true,
-    "autoAllowBashIfSandboxed": true,
-    "excludedCommands": ["git", "gh", "bun run build"],
-    "network": {
-      "allowedDomains": ["registry.npmjs.org"]
-    },
-    "filesystem": {
-      "denyRead": ["~/"],
-      "allowRead": ["."],
-      "denyWrite": [".git"]
-    }
   }
 }
