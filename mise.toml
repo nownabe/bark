@@ -16,5 +16,9 @@ locked = true
 minimum_release_age = "3d"
 
 [tasks.setup]
-description = "Install the toolchain and dependencies"
-run = "mise install && bun install"
+description = "Initialize the repository"
+run = ["mise install", "bun install", "mise generate git-pre-commit --task pre-commit --write"]
+
+[tasks.pre-commit]
+description = "Scan staged changes for secrets with betterleaks"
+run = "betterleaks git --staged --no-banner --redact"

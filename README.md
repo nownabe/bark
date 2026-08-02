@@ -36,7 +36,7 @@ mise install
 `.envrc` sources the git-ignored `.envrc.local` (environment variables, see
 below). With direnv active, the toolchain is on `PATH` inside the project.
 
-`mise run setup` runs this and the dependency install below in one step.
+`mise run setup` runs the whole setup in one step.
 
 ### Install dependencies
 
