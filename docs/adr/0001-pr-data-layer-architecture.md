@@ -259,5 +259,5 @@ No data-migration plan is required: Bark is pre-release, so no production data e
 ## References
 
 - Data-flow audit: `/.local/tmp/architecture-data-model.md` (not committed; analysis notes).
-- Original design doc: `docreview-design-doc.md` (describes the existing implementation, including the hidden-metadata format and the current re-anchoring strategy this ADR proposes to restructure).
+- Original design doc: [`../design-doc.md`](../design-doc.md) (describes the existing implementation, including the hidden-metadata format and the current re-anchoring strategy this ADR proposes to restructure).
 - Recent bugs motivating the rewrite: PR #105, #106, #108, #109.

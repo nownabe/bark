@@ -122,7 +122,7 @@ const NO_FILES: ChangedFile[] = [];
 
 /** The review surface wrapped in its global error channel: every
  *  user-relevant error is announced via the Snackbar (ADR 0005 §4 /
- *  design.md §3), so AppBody must sit under the provider to call
+ *  design-principle.md §3), so AppBody must sit under the provider to call
  *  useSnackbar. */
 export function App() {
   return (
@@ -166,7 +166,7 @@ function AppBody() {
   const [needsInstall, setNeedsInstall] = useState(false);
   // Global error surface (ADR 0005 §4): the Snackbar is ALWAYS used for a
   // user-relevant error; the persistent inline notice stays as the
-  // additional in-context reflection design.md §3 allows. `show` is
+  // additional in-context reflection design-principle.md §3 allows. `show` is
   // referentially stable, so reportError is too.
   const { show: showSnackbar } = useSnackbar();
   const reportError = useCallback(

@@ -68,8 +68,8 @@ unchecked. Run each as its own command and fix failures before continuing:
   clean standalone command.
 
 If a check fails for a real bug, fix it and re-run. If it fails because of a
-sandbox/toolchain restriction (not a real bug), follow the repo policy: record
-the proposed fix in `env-suggestion.md` rather than loosening config yourself.
+sandbox/toolchain restriction (not a real bug), follow the repo policy: propose
+the narrowest config fix to the user rather than loosening config yourself.
 
 ## Stage 3 — Commit the session's related files
 
