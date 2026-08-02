@@ -157,7 +157,7 @@ heavy drop shadows.
   extend the existing scales first.
 - **English** for everything committed (this file, comments, commits, PRs).
 - Run the checks before committing: `bun run test`, `check:lint`,
-  `check:format`, `typecheck`, `build` (build runs outside the sandbox).
+  `check:format`, `typecheck`, `build`.
 
 ## 5. Hard constraints
 

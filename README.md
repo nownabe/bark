@@ -33,8 +33,10 @@ The toolchain (`bun`, `oxlint`, `oxfmt`, Node, and CI linters) is pinned in
 mise install
 ```
 
-`.envrc` sets `MISE_DATA_DIR` to an in-tree location and sources the git-ignored
-`.envrc.local`. With direnv active, the toolchain is on `PATH` inside the project.
+`.envrc` sources the git-ignored `.envrc.local` (environment variables, see
+below). With direnv active, the toolchain is on `PATH` inside the project.
+
+`mise run setup` runs this and the dependency install below in one step.
 
 ### Install dependencies
 
@@ -69,8 +71,7 @@ loaded. Open a GitHub PR with changed `.md` files and click **Open in Bark**.
 
 ### Build
 
-`wxt build` runs outside the sandbox (some `node_modules` paths are read-denied
-inside it). Produce the unpacked extension:
+Produce the unpacked extension:
 
 ```bash
 bun run build   # outputs .output/chrome-mv3
@@ -107,4 +108,4 @@ End-to-end tests use Playwright: `bun run test:e2e` (run
 
 Development follows TDD and Conventional Commits; everything committed is written
 in English. Read [`AGENTS.md`](AGENTS.md) for the full development workflow,
-sandbox policy, and repository conventions before making changes.
+environment notes, and repository conventions before making changes.
