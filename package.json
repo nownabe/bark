@@ -44,7 +44,7 @@
     "happy-dom": "^20.10.4",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.70.0",
-    "typescript": "^5.5.0",
+    "typescript": "^7.0.0",
     "wxt": "^0.20.0"
   },
   "overrides": {
