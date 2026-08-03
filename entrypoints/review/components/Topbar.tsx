@@ -34,10 +34,10 @@ export type TopbarProps = {
   token: string | null;
   showPrInfo: boolean;
   showHelp: boolean;
-  prInfoBtnRef: RefObject<HTMLButtonElement>;
-  prInfoRef: RefObject<HTMLDivElement>;
-  helpBtnRef: RefObject<HTMLButtonElement>;
-  helpRef: RefObject<HTMLDivElement>;
+  prInfoBtnRef: RefObject<HTMLButtonElement | null>;
+  prInfoRef: RefObject<HTMLDivElement | null>;
+  helpBtnRef: RefObject<HTMLButtonElement | null>;
+  helpRef: RefObject<HTMLDivElement | null>;
   onSelectPath: (path: string) => void;
   onChangeViewMode: (mode: ViewMode) => void;
   onAskSubmit: () => void;

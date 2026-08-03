@@ -24,14 +24,14 @@ export type UiPanels = {
   showPrInfo: boolean;
   togglePrInfo: () => void;
   closePrInfo: () => void;
-  prInfoBtnRef: RefObject<HTMLButtonElement>;
-  prInfoRef: RefObject<HTMLDivElement>;
+  prInfoBtnRef: RefObject<HTMLButtonElement | null>;
+  prInfoRef: RefObject<HTMLDivElement | null>;
 
   showHelp: boolean;
   toggleHelp: () => void;
   closeHelp: () => void;
-  helpBtnRef: RefObject<HTMLButtonElement>;
-  helpRef: RefObject<HTMLDivElement>;
+  helpBtnRef: RefObject<HTMLButtonElement | null>;
+  helpRef: RefObject<HTMLDivElement | null>;
 
   showDebug: boolean;
   toggleDebug: () => void;
