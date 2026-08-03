@@ -23,7 +23,7 @@ import {
 import { SelectionComposer } from "./SelectionComposer";
 
 export type ReviewSidebarProps = {
-  sidebarRef: RefObject<HTMLElement>;
+  sidebarRef: RefObject<HTMLElement | null>;
   reviewFilter: Set<ReviewFacet>;
   counts: { pending: number; submitted: number; resolved: number };
   onToggleFacet: (f: ReviewFacet) => void;

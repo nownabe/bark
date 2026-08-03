@@ -10,7 +10,7 @@ import type { MouseEventHandler, RefObject } from "react";
 import type { ViewMode } from "../uiHelpers";
 
 export type SourceEditorProps = {
-  cmRef: RefObject<ReactCodeMirrorRef>;
+  cmRef: RefObject<ReactCodeMirrorRef | null>;
   source: string;
   cmExtensions: Extension[];
   viewMode: ViewMode;
