@@ -25,7 +25,7 @@ import {
 import type { StorageAdapter } from "./storage";
 import type { Transport } from "./transport";
 import type { Comment, FileEdit, LocalId, LocalState, RemoteState, Thread } from "./types";
-import { emptyState, hasRemoteIdentity } from "./types";
+import { emptyState, hasRemoteIdentity, normalizeAnchor } from "./types";
 
 export type RepositoryOptions = {
   storage: StorageAdapter;
@@ -77,7 +77,7 @@ export class PullRequestRepository {
   async hydrate(): Promise<void> {
     const loaded = await this.storage.load();
     if (loaded) {
-      this.localState = revertOrphanedSyncing(loaded);
+      this.localState = revertOrphanedSyncing(withNormalizedAnchors(loaded));
       this.notify();
       if (this.localState !== loaded) await this.persist();
     }
@@ -323,6 +323,17 @@ export class PullRequestRepository {
       await this.persist();
     }
   }
+}
+
+/** Bring persisted legacy line-based anchors to the single `quote`-at-`range`
+ *  rule (issue #276). Returns `state` itself when nothing changed, so hydrate
+ *  still skips the re-persist. */
+function withNormalizedAnchors(state: LocalState): LocalState {
+  const comments = state.comments.map((c) => {
+    const anchor = normalizeAnchor(c.anchor);
+    return anchor === c.anchor ? c : { ...c, anchor };
+  });
+  return comments.some((c, i) => c !== state.comments[i]) ? { ...state, comments } : state;
 }
 
 function upsertById<T extends { id: LocalId }>(items: T[], next: T): T[] {

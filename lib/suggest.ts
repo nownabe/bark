@@ -32,13 +32,11 @@ export function extractSuggestionBlock(body: string): string | null {
  * Apply an accepted suggestion to the current source, returning the new text
  * (or null when the target text is no longer locatable).
  *
- * Suggestion anchors are stored line-based (sc=1, ec=1), so the
- * displayPosition's start and end collapse to a zero-width span for a
- * single-line replacement. Slicing with that range would *insert* the
- * replacement next to the original instead of overwriting it, producing
- * concatenated old+new text on commit. Size the replaced span from
- * `meta.quote.length` instead — the same approach `buildSuggestionMarks`
- * already uses for rendering.
+ * The replaced span is sized from `meta.quote.length` rather than from the
+ * displayPosition's end column — the same approach `buildSuggestionMarks`
+ * already uses for rendering. The quote is the source text at the range
+ * (ADR 0002 §3), so the two agree; sizing by the quote also stays right when
+ * a re-anchor shift moved the end column.
  *
  * The fast path applies the replaced span only when it is byte-identical to
  * `meta.quote` (ADR 0004's quote-match check): a "shifted" target — the

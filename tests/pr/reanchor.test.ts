@@ -116,57 +116,66 @@ describe("reanchor", () => {
     expect(result).toEqual({ status: "outdated" });
   });
 
-  // Suggestion anchors are stored line-based (sc=1, ec=1) with quote = the
-  // full lines sl..el joined by "\n" (issue #176). The char-based
-  // extractTextAtRange can never reproduce that quote — it collapses to zero
-  // width on a single line and drops the end line on multi-line ranges — so
-  // byte-identical targets were misclassified "shifted" and the ADR-0004
-  // quote-match safety check was inert for suggestions.
-  describe("line-based (sc=1, ec=1) suggestion anchors", () => {
+  // A line-based suggestion anchor is not a second convention but the case
+  // `sc = 1`, `ec = length(last quoted line) + 1` of the single "quote is the
+  // source text at range" rule (issue #276, ADR 0002 §3). The same
+  // extractTextAtRange therefore verifies comments and suggestions alike.
+  describe("line-based suggestion anchors", () => {
     test("single-line anchor over unchanged content → mapped, not shifted", () => {
       const src = "line1\nhello\nline3";
       const result = reanchor(
-        anchor({ sha: "old", range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "hello" }),
+        anchor({ sha: "old", range: { sl: 2, sc: 1, el: 2, ec: 6 }, quote: "hello" }),
         src,
         "head",
         src,
       );
-      expect(result).toEqual({ status: "mapped", range: { sl: 2, sc: 1, el: 2, ec: 1 } });
+      expect(result).toEqual({ status: "mapped", range: { sl: 2, sc: 1, el: 2, ec: 6 } });
     });
 
     test("multi-line anchor over unchanged content → mapped", () => {
       const src = "a\nx\ny\nz\nb";
       const result = reanchor(
-        anchor({ sha: "old", range: { sl: 2, sc: 1, el: 4, ec: 1 }, quote: "x\ny\nz" }),
+        anchor({ sha: "old", range: { sl: 2, sc: 1, el: 4, ec: 2 }, quote: "x\ny\nz" }),
         src,
         "head",
         src,
       );
-      expect(result).toEqual({ status: "mapped", range: { sl: 2, sc: 1, el: 4, ec: 1 } });
+      expect(result).toEqual({ status: "mapped", range: { sl: 2, sc: 1, el: 4, ec: 2 } });
     });
 
     test("anchor moved by an insertion but byte-identical → mapped at the new lines", () => {
       const oldSrc = "a\nx\ny\nb";
       const newSrc = "INSERTED\na\nx\ny\nb";
       const result = reanchor(
-        anchor({ sha: "old", range: { sl: 2, sc: 1, el: 3, ec: 1 }, quote: "x\ny" }),
+        anchor({ sha: "old", range: { sl: 2, sc: 1, el: 3, ec: 2 }, quote: "x\ny" }),
         newSrc,
         "head",
         oldSrc,
       );
-      expect(result).toEqual({ status: "mapped", range: { sl: 3, sc: 1, el: 4, ec: 1 } });
+      expect(result).toEqual({ status: "mapped", range: { sl: 3, sc: 1, el: 4, ec: 2 } });
     });
 
     test("interior line changed between mapped endpoints → shifted", () => {
       const oldSrc = "a\nx\ny\nz\nb";
       const newSrc = "a\nx\nY-CHANGED\nz\nb";
       const result = reanchor(
-        anchor({ sha: "old", range: { sl: 2, sc: 1, el: 4, ec: 1 }, quote: "x\ny\nz" }),
+        anchor({ sha: "old", range: { sl: 2, sc: 1, el: 4, ec: 2 }, quote: "x\ny\nz" }),
         newSrc,
         "head",
         oldSrc,
       );
-      expect(result).toEqual({ status: "shifted", range: { sl: 2, sc: 1, el: 4, ec: 1 } });
+      expect(result).toEqual({ status: "shifted", range: { sl: 2, sc: 1, el: 4, ec: 2 } });
+    });
+
+    test("a zero-width range with a non-empty quote never verifies (no legacy branch)", () => {
+      const src = "a\nhello\nb";
+      const result = reanchor(
+        anchor({ sha: "old", range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "hello" }),
+        src,
+        "head",
+        src,
+      );
+      expect(result).toEqual({ status: "shifted", range: { sl: 2, sc: 1, el: 2, ec: 1 } });
     });
 
     test("char-based anchor that happens to end at column 1 still verifies → mapped", () => {
@@ -268,14 +277,18 @@ describe("region search (issue #269)", () => {
     expect(result).toEqual({ status: "outdated" });
   });
 
-  test("a line-based suggestion anchor whose line was edited → shifted, columns stay 1/1", () => {
+  test("a line-based suggestion anchor whose line was edited → shifted with a real end column", () => {
     const result = reanchor(
-      anchor({ sha: "old", range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "alpha beta gamma" }),
+      anchor({ sha: "old", range: { sl: 2, sc: 1, el: 2, ec: 17 }, quote: "alpha beta gamma" }),
       "h\nalpha beta GAMMA\nt",
       "head",
       "h\nalpha beta gamma\nt",
     );
-    expect(result).toEqual({ status: "shifted", range: { sl: 2, sc: 1, el: 2, ec: 1 } });
+    expect(result.status).toBe("shifted");
+    expect(result).toMatchObject({ range: { sl: 2, sc: 1, el: 2 } });
+    // The generic column mapping applies to line-based anchors too: the span
+    // must still cover the edited line, not collapse to zero width (#276).
+    expect(result.status === "shifted" && result.range.ec).toBeGreaterThan(1);
   });
 
   test("a multi-line anchor with an unmapped endpoint stays outdated", () => {

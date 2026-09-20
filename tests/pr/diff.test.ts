@@ -85,12 +85,12 @@ describe("diff — buildIsInDiff", () => {
     const isInDiff = buildIsInDiff([{ path: "README.md", status: "modified", patch: PATCH }]);
     expect(
       isInDiff(
-        comment({ anchor: { sha: "h", range: { sl: 2, sc: 1, el: 3, ec: 1 }, quote: "x" } }),
+        comment({ anchor: { sha: "h", range: { sl: 2, sc: 1, el: 3, ec: 2 }, quote: "x" } }),
       ),
     ).toBe(true);
     expect(
       isInDiff(
-        comment({ anchor: { sha: "h", range: { sl: 5, sc: 1, el: 6, ec: 1 }, quote: "x" } }),
+        comment({ anchor: { sha: "h", range: { sl: 5, sc: 1, el: 6, ec: 2 }, quote: "x" } }),
       ),
     ).toBe(false);
   });

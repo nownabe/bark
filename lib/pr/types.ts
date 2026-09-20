@@ -19,12 +19,27 @@ export type Range = {
   ec: number;
 };
 
-/** Immutable creation-time anchor for a Comment. */
+/** Immutable creation-time anchor for a Comment.
+ *
+ *  `quote` is the source text covered by `range` in `FileContent(sha, path)`
+ *  (ADR 0002 §3). A line-based anchor — a suggestion hunk — is the case
+ *  `sc = 1`, `ec = length(last quoted line) + 1`, not a second convention. */
 export type Anchor = {
   sha: string;
   range: Range;
   quote: string;
 };
+
+/** Anchors written before ADR 0002 §3 defined `quote` stored line-based ranges
+ *  as `sc = ec = 1`; bring them to the single rule so no consumer needs a
+ *  second convention (issue #276). Applied at every ingress: the metadata
+ *  parser and LocalState hydration. */
+export function normalizeAnchor(a: Anchor): Anchor {
+  if (a.quote === "" || a.range.sc !== 1 || a.range.ec !== 1) return a;
+  const lastLine = a.quote.slice(a.quote.lastIndexOf("\n") + 1);
+  if (lastLine === "") return a;
+  return { ...a, range: { ...a.range, ec: lastLine.length + 1 } };
+}
 
 /** A GitHub user identity. Used for `Comment.author`, `PullRequest.author`,
  *  and `PRState.viewer`. */

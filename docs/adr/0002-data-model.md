@@ -75,8 +75,8 @@ type Comment = {
   anchor: {
     // immutable, set at creation
     sha: string;
-    range: { sl: number; sc: number; el: number; ec: number };
-    quote: string;
+    range: { sl: number; sc: number; el: number; ec: number }; // 1-based, ec exclusive
+    quote: string; // the source text at `range` in the file at `sha` (see below)
   };
 };
 
@@ -167,6 +167,8 @@ A synced `Comment` records `remoteKind`, the endpoint its `remoteId` belongs to 
 `User` is a single value-object type used wherever a GitHub identity appears — `Comment.author`, `PullRequest.author`, and `PRState.viewer`. There is no GitHub-side user table to normalise against; the inlined form stays small and avoids reference indirection.
 
 `owner`/`repo` name the base repository — the one the PR is opened against, which every read (comments, threads, file contents by sha) goes through. `headRepo` names the repository that owns `headRef`: the same repository for a branch PR, the fork for a fork PR, `null` when the fork was deleted. Commits target `headRepo` ([ADR 0003 §5](0003-operations-and-execution.md)); the author role is withheld when it is `null`.
+
+`anchor.quote` is the exact source text covered by `anchor.range` in `FileContent(anchor.sha, path)`: for a single-line range the characters `[sc, ec)` of that line; for a multi-line range the tail of the first line from `sc`, the whole middle lines, and the head of the last line up to `ec`, joined with `\n`. A line-based anchor (a suggestion hunk) is not a second convention but the case `sc = 1`, `ec = length(last line) + 1`. An empty `quote` has `sc = ec`. Anchors written by earlier releases with `sc = ec = 1` and a non-empty `quote` are normalised to this rule when read from GitHub or from persisted `LocalState`; no other code path may interpret `range` differently.
 
 ### 4. Derived data (`AppState`)
 

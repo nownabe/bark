@@ -31,7 +31,7 @@ const pendingSuggestions: PendingSuggestion[] = [
     cid: "live:7",
     path: "docs/a.md",
     inDiff: true,
-    range: { sl: 7, sc: 1, el: 7, ec: 1 },
+    range: { sl: 7, sc: 1, el: 7, ec: 4 },
     quote: "teh",
     replacement: "the",
     body: "(suggested edit)",

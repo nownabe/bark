@@ -77,7 +77,7 @@ const liveSuggestion: PendingSuggestion = {
   cid: "live:3:3",
   path: "a.md",
   inDiff: true,
-  range: { sl: 3, sc: 1, el: 3, ec: 1 },
+  range: { sl: 3, sc: 1, el: 3, ec: 4 },
   quote: "old",
   replacement: "new",
   body: "",
@@ -121,7 +121,7 @@ describe("buildSuggestionMarks", () => {
       meta: {
         cid: "c1",
         path: "a.md",
-        range: { sl: 2, sc: 1, el: 2, ec: 1 }, // line-based: collapses to zero width
+        range: { sl: 2, sc: 1, el: 2, ec: 9 }, // line-based: sc = 1, ec = len + 1
         quote: "line two",
         sha: "HEAD",
         thread: "t1",
@@ -186,7 +186,7 @@ describe("buildSuggestionMarks", () => {
       meta: {
         cid: "e2",
         path: "a.md",
-        range: { sl: 2, sc: 1, el: 2, ec: 1 },
+        range: { sl: 2, sc: 1, el: 2, ec: 9 },
         quote: "line two",
         sha: "HEAD",
         thread: "t1",
@@ -220,7 +220,7 @@ describe("buildSuggestionMarks", () => {
       dismissed: {},
       displayPositionFor: () => ({
         status: "shifted" as const,
-        range: { sl: 2, sc: 1, el: 2, ec: 1 },
+        range: { sl: 2, sc: 1, el: 2, ec: 9 },
       }),
     });
     expect(marks).toHaveLength(0);
@@ -235,7 +235,7 @@ describe("buildSuggestionMarks", () => {
       meta: {
         cid: `e${id}`,
         path: "a.md",
-        range: { sl: 2, sc: 1, el: 2, ec: 1 },
+        range: { sl: 2, sc: 1, el: 2, ec: 9 },
         quote: "line two",
         sha: "HEAD",
         thread: "t1",
@@ -448,7 +448,7 @@ describe("buildReviewEntries / filter", () => {
       threads: multi,
       pendingSuggestions: [
         liveSuggestion, // a.md
-        { ...liveSuggestion, cid: "live:9:9", path: "b.md", range: { sl: 9, sc: 1, el: 9, ec: 1 } },
+        { ...liveSuggestion, cid: "live:9:9", path: "b.md", range: { sl: 9, sc: 1, el: 9, ec: 4 } },
       ],
       currentPath: "a.md",
     });
@@ -560,7 +560,7 @@ describe("groupPendingByFile", () => {
         draft({ cid: "d2", path: "docs/a.md", range: { sl: 4, sc: 1, el: 4, ec: 5 } }),
         draft({ cid: "d3", path: "docs/a.md", range: { sl: 2, sc: 1, el: 2, ec: 5 } }),
       ],
-      [{ ...liveSuggestion, cid: "s1", path: "docs/b.md", range: { sl: 1, sc: 1, el: 1, ec: 1 } }],
+      [{ ...liveSuggestion, cid: "s1", path: "docs/b.md", range: { sl: 1, sc: 1, el: 1, ec: 4 } }],
     );
     const groups = groupPendingByFile(items);
     expect(groups.map((g) => g.path)).toEqual(["docs/a.md", "docs/b.md"]);
@@ -621,7 +621,7 @@ describe("buildAllPendingSuggestions", () => {
     expect(a.quote).toBe("a2");
     expect(a.body).toBe("fix a2");
     expect(a.inDiff).toBe(true); // a.md routed in-diff
-    expect(a.range).toEqual({ sl: 2, sc: 1, el: 2, ec: 1 });
+    expect(a.range).toEqual({ sl: 2, sc: 1, el: 2, ec: 3 });
 
     const b = out[1];
     expect(b.cid).toBe("live:4:4");
@@ -724,7 +724,10 @@ describe("buildPendingSuggestions", () => {
     expect(out[0].inDiff).toBe(true);
     expect(out[1].inDiff).toBe(false);
     expect(out[0].replacement).toBe("new3");
-    expect(out[1].range).toEqual({ sl: 7, sc: 1, el: 8, ec: 1 });
+    // A line-based anchor is the single `quote`-at-`range` rule with `sc = 1`
+    // and `ec` past the last quoted line's end (issue #276).
+    expect(out[1].range).toEqual({ sl: 7, sc: 1, el: 8, ec: 5 });
+    expect(out[0].range).toEqual({ sl: 3, sc: 1, el: 3, ec: 5 });
   });
 });
 
