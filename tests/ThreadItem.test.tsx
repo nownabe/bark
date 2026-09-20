@@ -181,6 +181,69 @@ describe("ThreadItem — author suggestion actions", () => {
   });
 });
 
+describe("ThreadItem — reject (issue #287)", () => {
+  const suggestionRoot = rootComment({
+    body: "swap it\n\n```suggestion\nLINE TWO\n```",
+    meta: {
+      cid: "c1",
+      path: "a.md",
+      range: { sl: 2, sc: 1, el: 2, ec: 5 },
+      quote: "line two",
+      sha: "HEAD",
+      thread: "t1",
+      kind: "suggestion",
+    },
+  });
+
+  const rejectButton = (container: HTMLElement) =>
+    [...container.querySelectorAll(".comment__actions button")].find(
+      (b) => b.textContent === "Reject",
+    ) as HTMLButtonElement | undefined;
+
+  test("author actions are hidden on a resolved thread", () => {
+    // A rejected suggestion IS a resolved thread now; re-offering Accept /
+    // Reject there would invite a second, contradictory decision.
+    const { container } = render(
+      <ThreadItem
+        {...props({
+          role: "author",
+          canAccept: true,
+          thread: thread({ rootComment: suggestionRoot, resolved: true }),
+        })}
+      />,
+    );
+    expect(container.querySelector(".comment__actions")).toBeNull();
+  });
+
+  test("Reject is disabled when the thread cannot be resolved", () => {
+    const { container } = render(
+      <ThreadItem
+        {...props({
+          role: "author",
+          canAccept: true,
+          canResolve: false,
+          thread: thread({ rootComment: suggestionRoot }),
+        })}
+      />,
+    );
+    expect(rejectButton(container)?.disabled).toBe(true);
+  });
+
+  test("Reject is enabled when the thread can be resolved", () => {
+    const { container } = render(
+      <ThreadItem
+        {...props({
+          role: "author",
+          canAccept: true,
+          canResolve: true,
+          thread: thread({ rootComment: suggestionRoot }),
+        })}
+      />,
+    );
+    expect(rejectButton(container)?.disabled).toBe(false);
+  });
+});
+
 describe("ThreadItem — reply composer", () => {
   test("renders the reply textarea only when replyOpen", () => {
     const closed = render(<ThreadItem {...props({ replyOpen: false })} />);

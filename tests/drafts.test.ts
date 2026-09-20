@@ -26,6 +26,7 @@ const {
   saveDismissedSuggestions,
   clearAcceptedDecisions,
 } = await import("../lib/drafts");
+type SuggestionDecision = import("../lib/drafts").SuggestionDecision;
 
 const ref = { owner: "o", repo: "r", number: 1 };
 
@@ -63,21 +64,28 @@ describe("suggestion-edit persistence", () => {
   });
 });
 
+describe("listDismissedSuggestions (issue #287)", () => {
+  test("drops legacy 'rejected' entries", async () => {
+    // An earlier build stored rejections here; rejection is now a resolved
+    // thread on GitHub, so a stale local entry must not hide a suggestion
+    // forever. The cast writes a value the type no longer admits.
+    await saveDismissedSuggestions(ref, { "1": "accepted", "2": "rejected" } as unknown as Record<
+      string,
+      SuggestionDecision
+    >);
+    expect(await listDismissedSuggestions(ref)).toEqual({ "1": "accepted" });
+  });
+});
+
 describe("clearAcceptedDecisions", () => {
-  test("removes only 'accepted' entries whose id is in the given list", async () => {
+  test("removes only the entries whose id is in the given list", async () => {
     await saveDismissedSuggestions(ref, {
       "1": "accepted",
       "2": "accepted",
-      "3": "rejected",
+      "3": "accepted",
     });
     await clearAcceptedDecisions(ref, [1, 2]);
-    expect(await listDismissedSuggestions(ref)).toEqual({ "3": "rejected" });
-  });
-
-  test("leaves 'rejected' entries alone even when their id is in the list", async () => {
-    await saveDismissedSuggestions(ref, { "1": "rejected" });
-    await clearAcceptedDecisions(ref, [1]);
-    expect(await listDismissedSuggestions(ref)).toEqual({ "1": "rejected" });
+    expect(await listDismissedSuggestions(ref)).toEqual({ "3": "accepted" });
   });
 
   test("only removes the requested ids — other 'accepted' entries stay", async () => {

@@ -1085,10 +1085,6 @@ function AppBody() {
     await setDecision(c.id, "accepted");
   };
 
-  const rejectSuggestion = async (c: ExistingComment) => {
-    await setDecision(c.id, "rejected");
-  };
-
   const removeDraft = async (cidToRemove: string) => {
     if (!prRepository) return;
     await prRepository.discardComment(cidToRemove);
@@ -1419,8 +1415,7 @@ function AppBody() {
   // edits (the reviewer's live suggestions AND the author's edits/accepts), and
   // (author only) the pending accepted-suggestion decisions. The open editor
   // is reset to its base so no stale change lingers, and any debounced edit
-  // write is cancelled so it can't resurrect what we just cleared. Rejected
-  // suggestion decisions stay — they keep the suggestion hidden, not pending.
+  // write is cancelled so it can't resurrect what we just cleared.
   const discardAllPending = async () => {
     setShowDiscardConfirm(false);
     setSource(baseSource);
@@ -1693,7 +1688,7 @@ function AppBody() {
         onOpen={() => openThread(t)}
         onToggleResolve={() => void setThreadResolved(t, !t.resolved)}
         onAccept={() => root && void acceptSuggestion(root)}
-        onReject={() => root && void rejectSuggestion(root)}
+        onReject={() => void setThreadResolved(t, true)}
         onAddReply={() => addReply(t)}
         onCancelReply={cancelReply}
         onReplyTextChange={setReplyText}
