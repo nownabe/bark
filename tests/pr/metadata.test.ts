@@ -82,6 +82,30 @@ describe("metadata — extraction edge cases", () => {
     expect(out.body).toBe("body");
   });
 
+  test("a legacy line-based v2 anchor is normalised at parse (issue #276)", () => {
+    const body = embedMetadata(
+      "body",
+      meta({
+        anchor: { sha: "old", range: { sl: 3, sc: 1, el: 3, ec: 1 }, quote: "alpha beta" },
+      }),
+    );
+    expect(extractMetadata(body).meta?.anchor.range.ec).toBe(11);
+  });
+
+  test("a legacy line-based v1 anchor is normalised at parse (issue #276)", () => {
+    const v1 = {
+      cid: "c-1",
+      thread: "t-1",
+      path: "x.md",
+      sha: "old",
+      quote: "alpha beta",
+      range: { sl: 3, sc: 1, el: 3, ec: 1 },
+    };
+    const encoded = btoa(JSON.stringify(v1));
+    const out = extractMetadata(`body\n\n<!-- bark:v1 ${encoded} -->`);
+    expect(out.meta?.anchor.range.ec).toBe(11);
+  });
+
   test("a v1 resolve marker keeps its event as legacyResolveEvent (issue #186)", () => {
     const v1 = {
       cid: "e-1",

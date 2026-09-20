@@ -187,6 +187,27 @@ describe("repository — persistence", () => {
     expect(r.getLocalState().fileEdits[0]?.state).toBe("draft");
   });
 
+  test("hydrate normalises legacy line-based anchors (issue #276)", async () => {
+    const storage = new InMemoryStorageAdapter();
+    await storage.save({
+      ...emptyState(),
+      comments: [
+        comment({
+          anchor: { sha: "old", range: { sl: 3, sc: 1, el: 3, ec: 1 }, quote: "alpha beta" },
+        }),
+      ],
+    });
+    const r = new PullRequestRepository({
+      storage,
+      transport: happyTransport().transport,
+      isInDiff: () => true,
+    });
+
+    await r.hydrate();
+
+    expect(r.getLocalState().comments[0]?.anchor.range.ec).toBe(11);
+  });
+
   test("hydrate on an empty store keeps state empty", async () => {
     const r = makeRepo(happyTransport().transport);
     await r.hydrate();

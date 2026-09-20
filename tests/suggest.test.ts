@@ -260,11 +260,10 @@ describe("applyAcceptedSuggestion", () => {
     return {
       cid: "c1",
       path: "a.md",
-      // Line-based anchor: this is how suggestions are stored — sc=1, ec=1.
-      // The fact that this collapses to zero width when sha matches head was
-      // the bug — applyAcceptedSuggestion must size the replaced span from
-      // meta.quote, not from r.endOffset directly.
-      range: { sl: 2, sc: 1, el: 2, ec: 1 },
+      // Line-based anchor: how suggestions are stored — sc = 1, ec = last
+      // quoted line's length + 1 (ADR 0002 §3). applyAcceptedSuggestion sizes
+      // the replaced span from meta.quote, not from r.endOffset directly.
+      range: { sl: 2, sc: 1, el: 2, ec: 9 },
       quote: "line two",
       sha: "HEAD",
       thread: "t1",
@@ -281,11 +280,8 @@ describe("applyAcceptedSuggestion", () => {
   });
 
   test("single-line accept REPLACES the quoted text (regression: was concatenating)", () => {
-    // Bug repro: source has "line two" on its own line. The stored anchor is
-    // line-based (sc=1, ec=1) and the displayPosition collapses to zero
-    // width for a single-line replacement. Before the fix, slice(0,from) +
-    // repl + slice(end) inserted the replacement next to the original
-    // instead of overwriting it.
+    // Bug repro: before the fix, slice(0, from) + repl + slice(end) inserted
+    // the replacement next to the original instead of overwriting it.
     const source = "line one\nline two\nline three\n";
     const lineStarts = buildLineIndex(source);
     const meta = suggestionMeta();
@@ -307,7 +303,7 @@ describe("applyAcceptedSuggestion", () => {
     const source = "h1\nx\ny\nz\nh2\n";
     const lineStarts = buildLineIndex(source);
     const meta = suggestionMeta({
-      range: { sl: 2, sc: 1, el: 4, ec: 1 },
+      range: { sl: 2, sc: 1, el: 4, ec: 2 },
       quote: "x\ny\nz",
     });
     const out = applyAcceptedSuggestion({
@@ -333,7 +329,7 @@ describe("applyAcceptedSuggestion", () => {
       lineStarts,
       meta: suggestionMeta({ sha: "OLD" }),
       replacement: "LINE TWO",
-      displayPosition: { status: "mapped", range: { sl: 3, sc: 1, el: 3, ec: 1 } },
+      displayPosition: { status: "mapped", range: { sl: 3, sc: 1, el: 3, ec: 9 } },
       anchorSource: source,
     });
     expect(out).toBe("INSERTED\nline one\nLINE TWO\nline three\n");
@@ -367,7 +363,7 @@ describe("applyAcceptedSuggestion", () => {
       const lineStarts = buildLineIndex(source);
       const meta = suggestionMeta({
         sha: "OLD",
-        range: { sl: 2, sc: 1, el: 4, ec: 1 },
+        range: { sl: 2, sc: 1, el: 4, ec: 2 },
         quote: "x\ny\nz",
       });
       const out = applyAcceptedSuggestion({
@@ -376,7 +372,7 @@ describe("applyAcceptedSuggestion", () => {
         lineStarts,
         meta,
         replacement: "X\nY",
-        displayPosition: { status: "shifted", range: { sl: 2, sc: 1, el: 4, ec: 1 } },
+        displayPosition: { status: "shifted", range: { sl: 2, sc: 1, el: 4, ec: 2 } },
         anchorSource: source,
       });
       expect(out).toBeNull();
@@ -391,16 +387,14 @@ describe("applyAcceptedSuggestion", () => {
         lineStarts,
         meta: suggestionMeta({ sha: "OLD" }), // quote: "line two"
         replacement: "LINE TWO",
-        displayPosition: { status: "mapped", range: { sl: 2, sc: 1, el: 2, ec: 1 } },
+        displayPosition: { status: "mapped", range: { sl: 2, sc: 1, el: 2, ec: 9 } },
         anchorSource: source,
       });
       expect(out).toBeNull();
     });
 
     test("applies a shifted position when the target text is byte-identical", () => {
-      // States persisted before the reanchor fix may still carry "shifted"
-      // for intact targets (line-based anchors were misclassified). The
-      // quote check is the gate, not the status label.
+      // A "shifted" label is not a veto: the quote check is the gate.
       const source = "line one\nline two\nline three\n";
       const lineStarts = buildLineIndex(source);
       const meta = suggestionMeta({ sha: "OLD" });
@@ -420,7 +414,7 @@ describe("applyAcceptedSuggestion", () => {
   test("empty replacement = line deletion", () => {
     const source = "a\nb\nc\n";
     const lineStarts = buildLineIndex(source);
-    const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "b" });
+    const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 2 }, quote: "b" });
     const out = applyAcceptedSuggestion({
       source,
       baseSource: source,
@@ -444,7 +438,7 @@ describe("applyAcceptedSuggestion", () => {
     test("deleting a middle line removes its trailing newline", () => {
       const source = "a\nb\nc\n";
       const lineStarts = buildLineIndex(source);
-      const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "b" });
+      const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 2 }, quote: "b" });
       const out = applyAcceptedSuggestion({
         source,
         baseSource: source,
@@ -460,7 +454,7 @@ describe("applyAcceptedSuggestion", () => {
     test("deleting the last line (file has a trailing newline) leaves no blank line", () => {
       const source = "a\nb\nc\n";
       const lineStarts = buildLineIndex(source);
-      const meta = suggestionMeta({ range: { sl: 3, sc: 1, el: 3, ec: 1 }, quote: "c" });
+      const meta = suggestionMeta({ range: { sl: 3, sc: 1, el: 3, ec: 2 }, quote: "c" });
       const out = applyAcceptedSuggestion({
         source,
         baseSource: source,
@@ -476,7 +470,7 @@ describe("applyAcceptedSuggestion", () => {
     test("deleting the last line (no trailing newline) absorbs the preceding newline", () => {
       const source = "a\nb\nc";
       const lineStarts = buildLineIndex(source);
-      const meta = suggestionMeta({ range: { sl: 3, sc: 1, el: 3, ec: 1 }, quote: "c" });
+      const meta = suggestionMeta({ range: { sl: 3, sc: 1, el: 3, ec: 2 }, quote: "c" });
       const out = applyAcceptedSuggestion({
         source,
         baseSource: source,
@@ -492,7 +486,7 @@ describe("applyAcceptedSuggestion", () => {
     test("multi-line deletion removes the whole block plus its trailing newline", () => {
       const source = "a\nb\nc\nd\n";
       const lineStarts = buildLineIndex(source);
-      const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 3, ec: 1 }, quote: "b\nc" });
+      const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 3, ec: 2 }, quote: "b\nc" });
       const out = applyAcceptedSuggestion({
         source,
         baseSource: source,
@@ -508,7 +502,7 @@ describe("applyAcceptedSuggestion", () => {
     test("non-empty replacement is unaffected (no newline absorbed)", () => {
       const source = "a\nb\nc\n";
       const lineStarts = buildLineIndex(source);
-      const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "b" });
+      const meta = suggestionMeta({ range: { sl: 2, sc: 1, el: 2, ec: 2 }, quote: "b" });
       const out = applyAcceptedSuggestion({
         source,
         baseSource: source,
@@ -537,7 +531,7 @@ describe("applyAcceptedSuggestion", () => {
     test("applies at the re-mapped line after an earlier accept shifted lines down", () => {
       const source = "intro\nAAA\nBBB\nsame\nsame\nold2\nsame\n";
       const lineStarts = buildLineIndex(source);
-      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 1 }, quote: "old2" });
+      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 5 }, quote: "old2" });
       const out = applyAcceptedSuggestion({
         source,
         baseSource,
@@ -559,7 +553,7 @@ describe("applyAcceptedSuggestion", () => {
       const base = "h\nx\ny\nz\ndup\ndup\ndup\nend\n";
       const source = "h\nX\ndup\ndup\ndup\nend\n";
       const lineStarts = buildLineIndex(source);
-      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 1 }, quote: "dup" });
+      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 4 }, quote: "dup" });
       const out = applyAcceptedSuggestion({
         source,
         baseSource: base,
@@ -576,7 +570,7 @@ describe("applyAcceptedSuggestion", () => {
     test("refuses when a local edit changed the target line itself", () => {
       const source = "intro\nold1\nsame\nsame\nold2-EDITED\nsame\n";
       const lineStarts = buildLineIndex(source);
-      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 1 }, quote: "old2" });
+      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 5 }, quote: "old2" });
       const out = applyAcceptedSuggestion({
         source,
         baseSource,
@@ -595,7 +589,7 @@ describe("applyAcceptedSuggestion", () => {
       const base = "a\nb\nc\nx\ny\nz\nd\n";
       const source = "a\nb\nc\nX\nd\n";
       const lineStarts = buildLineIndex(source);
-      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 1 }, quote: "y" });
+      const meta = suggestionMeta({ range: { sl: 5, sc: 1, el: 5, ec: 2 }, quote: "y" });
       const out = applyAcceptedSuggestion({
         source,
         baseSource: base,
@@ -613,7 +607,7 @@ describe("applyAcceptedSuggestion", () => {
       // Earlier accept turned "old" into three lines (+2).
       const source = "top\nn1\nn2\nn3\nx\ny\nz\nbottom\n";
       const lineStarts = buildLineIndex(source);
-      const meta = suggestionMeta({ range: { sl: 3, sc: 1, el: 5, ec: 1 }, quote: "x\ny\nz" });
+      const meta = suggestionMeta({ range: { sl: 3, sc: 1, el: 5, ec: 2 }, quote: "x\ny\nz" });
       const out = applyAcceptedSuggestion({
         source,
         baseSource: base,
@@ -637,7 +631,7 @@ describe("applyAcceptedSuggestion", () => {
     const anchorSource = `h\n${PARAGRAPH}\nt\n`;
     const paragraphMeta = suggestionMeta({
       sha: "OLD",
-      range: { sl: 2, sc: 1, el: 2, ec: 1 },
+      range: { sl: 2, sc: 1, el: 2, ec: PARAGRAPH.length + 1 },
       quote: PARAGRAPH,
     });
     const accept = (source: string, replacement: string, anchor: string | null = anchorSource) =>
@@ -668,7 +662,7 @@ describe("applyAcceptedSuggestion", () => {
       const quote = "aaaa bbbb cccc dddd eeee ffff";
       const meta = suggestionMeta({
         sha: "OLD",
-        range: { sl: 2, sc: 1, el: 2, ec: 1 },
+        range: { sl: 2, sc: 1, el: 2, ec: quote.length + 1 },
         quote,
       });
       const base = `h\n${quote}\nt\n`;

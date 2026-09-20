@@ -99,7 +99,14 @@ export function buildPendingSuggestions(
       cid,
       path: opts.path,
       inDiff: opts.isInDiff(h.sl, h.el),
-      range: { sl: h.sl, sc: 1, el: h.el, ec: 1 },
+      // A line-based anchor is the single `quote`-at-`range` rule with
+      // `sc = 1` and `ec` past the last quoted line (ADR 0002 §3, issue #276).
+      range: {
+        sl: h.sl,
+        sc: 1,
+        el: h.el,
+        ec: h.quote.slice(h.quote.lastIndexOf("\n") + 1).length + 1,
+      },
       quote: h.quote,
       replacement: h.replacement,
       body: opts.commentFor(cid),
@@ -634,11 +641,9 @@ export interface SuggestionRender {
 /**
  * Build the spans for submitted suggestions to render over the editor body.
  *
- * Suggestions store a *line-based* anchor (column 1 → column 1), so when the
- * comment's sha matches the head, the stored start/end offsets collapse to zero
- * width for a single-line replacement and the suggestion would silently vanish.
- * Size the span by the quoted old text instead (it covers exactly the replaced
- * lines), which is also correct after re-anchoring to a moved position.
+ * The span is sized by the quoted old text rather than by the anchor's end
+ * column: the quote is the source text at the range (ADR 0002 §3), so the two
+ * agree, and the quote stays right after re-anchoring moved the position.
  */
 export function buildSuggestionMarks(args: {
   comments: ExistingComment[];
@@ -666,10 +671,6 @@ export function buildSuggestionMarks(args: {
     const meta = c.meta as CommentMetadata;
     const dp = displayPositionFor(meta.cid);
     if (!dp || dp.status === "outdated") continue;
-    // Suggestions store a line-based anchor (sc=1, ec=1), so the
-    // displayPosition collapses to zero width on the start line. Size the
-    // highlight by the quoted old text — covers exactly the replaced lines
-    // and stays correct after a re-anchor shift.
     const from = lineColToOffset(dp.range.sl, dp.range.sc, lineStarts);
     const to = from + (meta.quote?.length ?? 0);
     if (from < 0 || to > docLen || from >= to) continue;

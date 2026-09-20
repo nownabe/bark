@@ -66,7 +66,7 @@ flowchart TD
 Notes:
 
 - **No whole-file `quote` search.** If the line-map cannot resolve both endpoints of a multi-line anchor, the result is `outdated`. For a single-line anchor the search is confined to the current-source lines between the nearest line-mapped neighbours (the region the old line's content must have gone to), capped at 50 candidates around the expected position. A candidate is chosen only when it is the _unique_ line containing the quote, or the _unique_ best line by Levenshtein similarity to the old line with ratio ≥ 0.5; ties and duplicates yield `outdated`. Never guess.
-- **Columns.** When both endpoints line-map, `sc`/`ec` carry through unchanged. When a line was located by the region search, `sc`/`ec` are mapped through a character diff of the old line against the located line (`diff_xIndex`); whole-line anchors (`sc = ec = 1`) keep that convention.
+- **Columns.** When both endpoints line-map, `sc`/`ec` carry through unchanged. When a line was located by the region search, `sc`/`ec` are mapped through a character diff of the old line against the located line (`diff_xIndex`). There is one verification rule for every anchor: the text extracted at the mapped range must equal `anchor.quote` ([ADR 0002 §3](0002-data-model.md) defines `quote` so that line-based anchors satisfy it too).
 - **`shifted`** means the line was located (through the line map or the region search) but the quote no longer verifies at the mapped columns — the comment is probably still about the right area, but the user should look.
 - **Line-map** is the standard LCS-based line-correspondence map. It is computed once per `(anchor.sha, path, headSha)` triple and reused across all comments on that file with the same `anchor.sha`.
 
@@ -87,6 +87,7 @@ Notes:
 - **Single-line anchor whose line was modified** → region search (§3). A line deleted with nothing in its place (empty region), a region with no qualifying candidate, or a similarity tie → `outdated`.
 - **Whole span deleted** → `outdated`.
 - **Empty `quote`** → `outdated` (defensive; should not occur given creation invariants).
+- **Legacy line-based anchor** (`sc = ec = 1` with a non-empty `quote`, written before the `quote` definition in ADR 0002 §3) → normalised to `ec = length(last line) + 1` at ingress (metadata parse, LocalState hydration); the algorithm never sees the legacy shape.
 - **`anchor.sha` no longer in the PR's branch history** (e.g. force-push removed it) → `GET contents` returns 404 → `outdated`.
 
 ### 6. Computation location

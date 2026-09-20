@@ -15,7 +15,7 @@
 // of v2 — but v1 `event` is kept as `legacyResolveEvent` so the fetcher
 // can recognise and drop legacy resolve-marker comments (issue #186).
 
-import type { Anchor } from "./types";
+import { type Anchor, normalizeAnchor } from "./types";
 
 const MARKER = "bark:v2";
 const FENCE_RE_V2 = /\n*<!--\s+bark:v2\s+([A-Za-z0-9+/=]+)\s+-->\s*$/;
@@ -92,7 +92,8 @@ function parseV2(decoded: string): WireMetadata | null {
   // invalid payload — a stray field must not demote a real Bark comment to
   // foreign (issue #270).
   const { resolved, ...rest } = value;
-  return resolved === true ? { ...rest, resolved: true } : rest;
+  const meta = { ...rest, anchor: normalizeAnchor(rest.anchor) };
+  return resolved === true ? { ...meta, resolved: true } : meta;
 }
 
 /** v1 payload shape (lib/metadata.ts in the legacy App):
@@ -126,11 +127,11 @@ function parseV1(decoded: string): WireMetadata | null {
     cid: m.cid,
     threadId: m.thread,
     path: m.path,
-    anchor: {
+    anchor: normalizeAnchor({
       sha: m.sha,
       range: { sl: r.sl, sc: r.sc, el: r.el, ec: r.ec },
       quote: m.quote,
-    },
+    }),
     ...(legacyResolveEvent ? { legacyResolveEvent } : {}),
   };
 }
