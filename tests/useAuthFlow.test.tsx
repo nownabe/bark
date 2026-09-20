@@ -19,15 +19,13 @@ function makeDeps(overrides: Partial<AuthFlowDeps> = {}): AuthFlowDeps {
     persistToken: mock(async (_t: string) => {}),
     persistAuthMethod: mock(async (_m: AuthMethod) => {}),
     clearStoredToken: mock(async () => {}),
-    requestDeviceAuthorization: mock(
-      async (): Promise<DeviceAuthorization> => ({
-        deviceCode: "dc",
-        userCode: "ABCD-1234",
-        verificationUri: "https://github.com/login/device",
-        expiresIn: 900,
-        interval: 5,
-      }),
-    ),
+    requestDeviceAuthorization: mock(async (): Promise<DeviceAuthorization> => ({
+      deviceCode: "dc",
+      userCode: "ABCD-1234",
+      verificationUri: "https://github.com/login/device",
+      expiresIn: 900,
+      interval: 5,
+    })),
     pollForToken: mock(async () => ({ kind: "pending" }) as const),
     ...overrides,
   };
