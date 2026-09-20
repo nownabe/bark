@@ -124,6 +124,9 @@ function PendingMessage({
       ) : (
         <div className="comment__body">{draft.body || "(no body)"}</div>
       )}
+      {draft.lastError ? (
+        <div className="comment__body notice--error">{draft.lastError}</div>
+      ) : null}
     </div>
   );
 }

@@ -26,6 +26,9 @@ export interface PendingDraft {
   suggestion?: string;
   /** Blob permalink for out-of-diff comments. */
   permalink?: string;
+  /** Why the last submit of this draft failed (Comment.lastError.message).
+   *  Absent until a submit parks it back as a draft. */
+  lastError?: string;
 }
 
 /**
