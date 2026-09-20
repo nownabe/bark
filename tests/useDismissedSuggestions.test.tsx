@@ -37,14 +37,14 @@ describe("useDismissedSuggestions — restore", () => {
   test("with a ref: listDismissedSuggestions is called and the result lands in state", async () => {
     const stored: Record<string, SuggestionDecision> = {
       "1": "accepted",
-      "2": "rejected",
+      "2": "accepted",
     };
     const deps = makeDeps({ listDismissedSuggestions: mock(async () => stored) });
     const { result } = renderHook(() => useDismissedSuggestions(PR, deps));
     await waitFor(() => {
       expect(result.current.dismissed["1"]).toBe("accepted");
     });
-    expect(result.current.dismissed["2"]).toBe("rejected");
+    expect(result.current.dismissed["2"]).toBe("accepted");
   });
 });
 
@@ -70,9 +70,9 @@ describe("useDismissedSuggestions — setDecision", () => {
     const { result } = renderHook(() => useDismissedSuggestions(null, deps));
 
     await act(async () => {
-      await result.current.setDecision(7, "rejected");
+      await result.current.setDecision(7, "accepted");
     });
-    expect(result.current.dismissed["7"]).toBe("rejected");
+    expect(result.current.dismissed["7"]).toBe("accepted");
     expect(saveDismissedSuggestions).not.toHaveBeenCalled();
   });
 });

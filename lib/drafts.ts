@@ -76,8 +76,10 @@ export async function saveSuggestionEdits(
   await browser.storage.local.set({ [suggestionEditsKey(ref)]: edits });
 }
 
-/** author's accept/reject decision on submitted suggestions, keyed by GitHub comment id. */
-export type SuggestionDecision = "accepted" | "rejected";
+/** The author's pending "accepted, awaiting commit" decisions on submitted
+ *  suggestions, keyed by GitHub comment id. Rejection is not stored here:
+ *  it is expressed as a resolved thread on GitHub (ADR 0002 §7). */
+export type SuggestionDecision = "accepted";
 
 function dismissedKey(ref: PrRef): string {
   return `${storageKeys.pr(ref.owner, ref.repo, ref.number)}:dismissed-suggestions`;
@@ -88,7 +90,13 @@ export async function listDismissedSuggestions(
 ): Promise<Record<string, SuggestionDecision>> {
   const key = dismissedKey(ref);
   const result = await browser.storage.local.get(key);
-  return (result[key] as Record<string, SuggestionDecision> | undefined) ?? {};
+  const stored = (result[key] as Record<string, string> | undefined) ?? {};
+  // An earlier build persisted "rejected" here. Dropping those entries lets
+  // the suggestion reappear once, instead of staying hidden forever in this
+  // one browser while GitHub knows nothing about the rejection.
+  return Object.fromEntries(
+    Object.entries(stored).filter(([, decision]) => decision === "accepted"),
+  ) as Record<string, SuggestionDecision>;
 }
 
 export async function saveDismissedSuggestions(
@@ -99,18 +107,14 @@ export async function saveDismissedSuggestions(
 }
 
 /**
- * Clear the author's "accepted" decisions for the given comment ids — used
- * after a Submit successfully commits + resolves those threads, so the queue
- * empties. "rejected" entries are left intact (they keep the suggestion
- * hidden in future sessions) even when their id appears in the list.
+ * Clear the author's decisions for the given comment ids — used after a Submit
+ * successfully commits + resolves those threads, so the queue empties.
  */
 export async function clearAcceptedDecisions(ref: PrRef, commentIds: number[]): Promise<void> {
   const current = await listDismissedSuggestions(ref);
   const drop = new Set(commentIds.map((id) => String(id)));
-  const next: Record<string, SuggestionDecision> = {};
-  for (const [id, decision] of Object.entries(current)) {
-    if (decision === "accepted" && drop.has(id)) continue;
-    next[id] = decision;
-  }
-  await saveDismissedSuggestions(ref, next);
+  await saveDismissedSuggestions(
+    ref,
+    Object.fromEntries(Object.entries(current).filter(([id]) => !drop.has(id))),
+  );
 }

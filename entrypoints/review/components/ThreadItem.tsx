@@ -154,7 +154,10 @@ export function ThreadItem(props: ThreadItemProps) {
     onRemoveDraft,
   } = props;
   const root = t.rootComment;
-  const showAuthorActions = root?.meta?.kind === "suggestion" && role === "author";
+  // A rejected suggestion is a resolved thread (ADR 0002 §7), so offering
+  // Accept/Reject there would invite a second, contradictory decision. Reopen
+  // brings them back.
+  const showAuthorActions = root?.meta?.kind === "suggestion" && role === "author" && !t.resolved;
 
   const resolveAction = canResolve ? (
     <button
@@ -203,7 +206,7 @@ export function ThreadItem(props: ThreadItemProps) {
         <div className="comment__actions" onClick={(e) => e.stopPropagation()}>
           {decision ? (
             <span className="notice--muted" style={{ fontSize: 11 }}>
-              {decision === "accepted" ? "accepted — Submit to apply" : "rejected"}
+              accepted — Submit to apply
             </span>
           ) : (
             <>
@@ -220,7 +223,13 @@ export function ThreadItem(props: ThreadItemProps) {
               >
                 Accept
               </button>
-              <button type="button" className="btn btn--sm" onClick={onReject}>
+              <button
+                type="button"
+                className="btn btn--sm"
+                disabled={!canResolve}
+                title={canResolve ? undefined : "This thread can't be resolved from Bark yet."}
+                onClick={onReject}
+              >
                 Reject
               </button>
             </>
