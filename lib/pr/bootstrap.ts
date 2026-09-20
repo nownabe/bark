@@ -71,17 +71,23 @@ export async function bootstrapPullRequest(
   // first round and reused by every subsequent refresh (ADR 0005 §2).
   let knownViewer: User | undefined;
 
-  async function refresh(): Promise<void> {
-    const fileContentTargets = anchorTargets(repository.getLocalState());
-    const [remoteState, changedFiles] = await Promise.all([
-      fetchRemoteState(client, opts.prRef, { fileContentTargets, viewer: knownViewer }),
-      fetchChangedFiles(client, opts.prRef),
-    ]);
-    knownViewer = remoteState.viewer ?? undefined;
-    isInDiffImpl = buildIsInDiff(changedFiles);
-    // Attach the listing so AppState can derive the changed-.md selector
-    // from the Repository (RemoteState.changedFiles is remote-only).
-    await repository.setRemoteState({ ...remoteState, changedFiles });
+  // The fetch runs inside the Repository's lock, so it cannot read a head
+  // that an Executor write then replaces, and concurrent triggers coalesce
+  // (issue #281, ADR 0005 §3). isInDiffImpl and knownViewer are therefore
+  // updated under the lock too.
+  function refresh(): Promise<void> {
+    return repository.refresh(async () => {
+      const fileContentTargets = anchorTargets(repository.getLocalState());
+      const [remoteState, changedFiles] = await Promise.all([
+        fetchRemoteState(client, opts.prRef, { fileContentTargets, viewer: knownViewer }),
+        fetchChangedFiles(client, opts.prRef),
+      ]);
+      knownViewer = remoteState.viewer ?? undefined;
+      isInDiffImpl = buildIsInDiff(changedFiles);
+      // Attach the listing so AppState can derive the changed-.md selector
+      // from the Repository (RemoteState.changedFiles is remote-only).
+      return { ...remoteState, changedFiles };
+    });
   }
 
   await refresh();

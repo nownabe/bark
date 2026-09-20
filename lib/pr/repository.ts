@@ -40,9 +40,22 @@ export type RepositoryOptions = {
   onPersistError?: (error: unknown) => void;
 };
 
+/** Owns the two state stores and the pipeline that moves entities between
+ *  them.
+ *
+ *  Refresh and execution never interleave: `refresh`, `setRemoteState`,
+ *  `submitDrafts` and `setThreadResolved` all run under one promise-chain
+ *  lock. Because the caller's fetch runs *inside* the lock, a snapshot can
+ *  never be older than the last applied write, so no sequence check is
+ *  needed (issue #281). Refresh triggers coalesce per ADR 0005 §3: while one
+ *  refresh is running, at most one more waits, and further triggers share
+ *  that queued one. */
 export class PullRequestRepository {
   private localState: LocalState = emptyState();
   private remoteState: RemoteState = emptyState();
+  private lock: Promise<void> = Promise.resolve();
+  private pending = 0;
+  private queuedRefresh: Promise<void> | null = null;
   private readonly listeners = new Set<() => void>();
   private readonly storage: StorageAdapter;
   private readonly transport: Transport;
@@ -169,36 +182,76 @@ export class PullRequestRepository {
 
   /** Flip every draft Comment/Thread/FileEdit to syncing and run the
    *  reconcile → plan → execute → apply cycle. */
-  async submitDrafts(): Promise<void> {
-    this.localState = flipDraftsToSyncing(this.localState);
-    this.notify();
-    await this.persist();
-    await this.runSyncCycles();
+  submitDrafts(): Promise<void> {
+    return this.exclusive(async () => {
+      this.localState = flipDraftsToSyncing(this.localState);
+      this.notify();
+      await this.persist();
+      await this.runSyncCycles();
+    });
   }
 
   /** Toggle a Thread's resolved field. For a synced Thread this also flips
    *  it to syncing and runs the pipeline (immediate-action UX). */
-  async setThreadResolved(id: LocalId, resolved: boolean): Promise<void> {
-    this.localState = setThreadResolvedToSyncing(this.localState, id, resolved);
-    this.notify();
-    await this.persist();
-    await this.runSyncCycles();
+  setThreadResolved(id: LocalId, resolved: boolean): Promise<void> {
+    return this.exclusive(async () => {
+      this.localState = setThreadResolvedToSyncing(this.localState, id, resolved);
+      this.notify();
+      await this.persist();
+      await this.runSyncCycles();
+    });
   }
 
   // ---- Refresh -----------------------------------------------------------
 
-  /** Replace RemoteState with a freshly-fetched snapshot and merge it into
-   *  LocalState per the conflict policy.
+  /** Fetch a GitHub snapshot and apply it, both under the lock, so the fetch
+   *  cannot read a head that a write then replaces. The caller supplies the
+   *  fetch (the Repository knows nothing about the network).
    *
-   *  Network-fetching itself is the caller's responsibility (Phase 5 wiring). */
-  async setRemoteState(remote: RemoteState): Promise<void> {
-    this.remoteState = remote;
-    this.localState = mergeRemoteIntoLocal(this.localState, remote);
-    this.notify();
-    await this.persist();
+   *  Returns the running refresh's promise while one is queued, so concurrent
+   *  triggers coalesce into a single extra fetch (ADR 0005 §3). */
+  refresh(fetchRemote: () => Promise<RemoteState>): Promise<void> {
+    if (this.queuedRefresh) return this.queuedRefresh;
+    const busy = this.pending > 0;
+    const refreshing = this.exclusive(async () => {
+      if (this.queuedRefresh === refreshing) this.queuedRefresh = null;
+      this.applyRemote(await fetchRemote());
+      await this.persist();
+    });
+    if (busy) this.queuedRefresh = refreshing;
+    return refreshing;
+  }
+
+  /** Replace RemoteState with an already-fetched snapshot and merge it into
+   *  LocalState per the conflict policy. Prefer `refresh`, which also holds
+   *  the lock across the fetch. */
+  setRemoteState(remote: RemoteState): Promise<void> {
+    return this.exclusive(async () => {
+      this.applyRemote(remote);
+      await this.persist();
+    });
   }
 
   // ---- Internals ---------------------------------------------------------
+
+  /** Run `fn` after every previously-queued operation has settled. The lock
+   *  chain itself never rejects, so one failed operation does not strand the
+   *  ones behind it; `fn`'s own rejection is returned to its caller. */
+  private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    this.pending++;
+    const result = this.lock.then(fn);
+    const release = () => {
+      this.pending--;
+    };
+    this.lock = result.then(release, release);
+    return result;
+  }
+
+  private applyRemote(remote: RemoteState): void {
+    this.remoteState = remote;
+    this.localState = mergeRemoteIntoLocal(this.localState, remote);
+    this.notify();
+  }
 
   private notify(): void {
     for (const listener of this.listeners) {
