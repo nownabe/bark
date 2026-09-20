@@ -69,6 +69,7 @@ function pr(overrides: Partial<PullRequest> = {}): PullRequest {
     body: "b",
     headSha: "h",
     headRef: "topic",
+    headRepo: { owner: "o", repo: "r" },
     baseRef: "main",
     state: "open",
     draft: false,
@@ -575,6 +576,7 @@ describe("state-machine — applyStepResults: Commit", () => {
           kind: "commit",
           baseSha: "h0",
           headRef: "topic",
+          headRepo: { owner: "o", repo: "r" },
           fileEdits: [f1, f2],
         },
         outcome: { ok: true, newHeadSha: "h1" },
@@ -589,7 +591,13 @@ describe("state-machine — applyStepResults: Commit", () => {
     const t = thread({ state: "synced", remoteThreadId: "PRT", resolved: false });
     const out = applyStepResults(localState({ fileEdits: [f], threads: [t] }), [
       {
-        step: { kind: "commit", baseSha: "h0", headRef: "topic", fileEdits: [f] },
+        step: {
+          kind: "commit",
+          baseSha: "h0",
+          headRef: "topic",
+          headRepo: { owner: "o", repo: "r" },
+          fileEdits: [f],
+        },
         outcome: { ok: true, newHeadSha: "h1" },
       },
     ]);
@@ -603,7 +611,13 @@ describe("state-machine — applyStepResults: Commit", () => {
     const err = { message: "non-fast-forward" };
     const out = applyStepResults(localState({ fileEdits: [f], threads: [t] }), [
       {
-        step: { kind: "commit", baseSha: "h0", headRef: "topic", fileEdits: [f] },
+        step: {
+          kind: "commit",
+          baseSha: "h0",
+          headRef: "topic",
+          headRepo: { owner: "o", repo: "r" },
+          fileEdits: [f],
+        },
         outcome: { ok: false, error: err },
       },
     ]);
@@ -620,6 +634,7 @@ describe("state-machine — applyStepResults: Commit", () => {
           kind: "commit",
           baseSha: "h0",
           headRef: "topic",
+          headRepo: { owner: "o", repo: "r" },
           fileEdits: [f],
         },
         outcome: { ok: false, error: err },
@@ -645,7 +660,13 @@ describe("state-machine — applyStepResults: Commit", () => {
 
 describe("state-machine — applyStepResultsToRemote", () => {
   const commitResult = (outcome: CommitOutcome): StepResult => ({
-    step: { kind: "commit", baseSha: "h", headRef: "topic", fileEdits: [fileEdit()] },
+    step: {
+      kind: "commit",
+      baseSha: "h",
+      headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
+      fileEdits: [fileEdit()],
+    },
     outcome,
   });
 

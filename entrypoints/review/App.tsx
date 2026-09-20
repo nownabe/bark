@@ -46,7 +46,6 @@ import {
   buildSuggestionMarks,
   buildThreads,
   canReplyToThread,
-  deriveRole,
   filterReviewEntries,
   replyAnchor,
   revealSubmittedFacets,
@@ -699,9 +698,12 @@ function AppBody() {
     if (files.length === 0) return;
     setSelectedPath((prev) => prev ?? files[0]?.path ?? null);
   }, [files]);
+  // AppState already derives the role — including the fork rules #273 added,
+  // which a login comparison here cannot see. Mirroring it into state (rather
+  // than reading it directly) keeps the dev RoleFab override working.
   useEffect(() => {
-    if (viewerLogin && pull) setRole(deriveRole(viewerLogin, pull.author));
-  }, [viewerLogin, pull]);
+    if (repositoryAppState?.role) setRole(repositoryAppState.role);
+  }, [repositoryAppState?.role]);
 
   // L6d-1: while we are author, mirror suggestionEdits into Repository's
   // LocalState as FileEdits so a future repository.submitDrafts() (L6d-3)
@@ -1344,7 +1346,12 @@ function AppBody() {
       //    already: the commit's apply step wrote it into RemoteState.)
       if (newHeadSha !== headSha) {
         if (selectedPath) {
-          const newText = (await fetchFileContent(client, ref, newHeadSha, selectedPath)).source;
+          // Read the new commit from where it was written: the base repository
+          // only learns a fork's commit once refs/pull/{n}/head updates (#273).
+          const headRepo = pullRequest?.headRepo;
+          const readRef = headRepo ? { ...headRepo, number: ref.number } : ref;
+          const newText = (await fetchFileContent(client, readRef, newHeadSha, selectedPath))
+            .source;
           setSource(newText);
           setBaseSource(newText);
           setSuggestionComments({});

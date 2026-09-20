@@ -68,6 +68,8 @@ export type CommitStep = {
   baseSha: string;
   /** Ref to update (e.g. `refs/heads/topic`). */
   headRef: string;
+  /** Repository that owns `headRef`; the fork for fork PRs. */
+  headRepo: { owner: string; repo: string };
   fileEdits: FileEdit[];
 };
 

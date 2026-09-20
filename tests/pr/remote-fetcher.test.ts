@@ -51,7 +51,7 @@ describe("remote-fetcher — fetchPullRequest", () => {
         state: "open",
         draft: false,
         merged: false,
-        head: { sha: "headsha", ref: "topic" },
+        head: { sha: "headsha", ref: "topic", repo: { name: "r", owner: { login: "o" } } },
         base: { ref: "main" },
         user: { login: "alice", avatar_url: "https://avatar/a" },
       }),
@@ -65,12 +65,41 @@ describe("remote-fetcher — fetchPullRequest", () => {
       body: "Description",
       headSha: "headsha",
       headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
       baseRef: "main",
       state: "open",
       draft: false,
       merged: false,
       author: { login: "alice", avatarUrl: "https://avatar/a" },
     });
+  });
+});
+
+describe("remote-fetcher — fork PRs (issue #273)", () => {
+  const pullJson = (repo: unknown) => ({
+    number: 7,
+    title: "T",
+    body: "B",
+    state: "open",
+    draft: false,
+    merged: false,
+    head: { sha: "h", ref: "topic", repo },
+    base: { ref: "main" },
+    user: { login: "alice", avatar_url: "" },
+  });
+
+  test("a fork PR maps head.repo to headRepo", async () => {
+    const { fetch } = makeFetch(async () =>
+      jsonResponse(pullJson({ name: "r-fork", owner: { login: "forker" } })),
+    );
+    const out = await fetchPullRequest({ token: "t", fetch }, PR);
+    expect(out.headRepo).toEqual({ owner: "forker", repo: "r-fork" });
+  });
+
+  test("a deleted fork yields headRepo null", async () => {
+    const { fetch } = makeFetch(async () => jsonResponse(pullJson(null)));
+    const out = await fetchPullRequest({ token: "t", fetch }, PR);
+    expect(out.headRepo).toBeNull();
   });
 });
 

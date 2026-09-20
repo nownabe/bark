@@ -21,8 +21,8 @@ GitHub login matches the PR author's login. This matches the design doc's model
 and uses the Suggestion flow.
 
 Out of scope (YAGNI): push-permission based detection (collaborators with write
-access, forks with `maintainer_can_modify`), persisting the viewer identity, and
-showing the viewer's avatar.
+access, maintainers pushing to someone else's fork via `maintainer_can_modify`),
+persisting the viewer identity, and showing the viewer's avatar.
 
 ## Components
 

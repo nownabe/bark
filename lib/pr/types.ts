@@ -128,6 +128,8 @@ export type PullRequest = {
   body: string;
   headSha: string;
   headRef: string;
+  /** Repository that owns `headRef`; null when the fork was deleted. */
+  headRepo: { owner: string; repo: string } | null;
   baseRef: string;
   state: "open" | "closed";
   draft: boolean;
