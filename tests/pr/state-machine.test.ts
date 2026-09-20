@@ -428,6 +428,65 @@ describe("state-machine — applyStepResults: PostReply / PostIssueComment", () 
   });
 });
 
+describe("state-machine — remoteKind (issue #285)", () => {
+  test("a successful post-issue-comment records remoteKind 'issue'", () => {
+    const c = comment({ id: "x", state: "syncing" });
+    const out = applyStepResults(localState({ comments: [c] }), [
+      {
+        step: { kind: "post-issue-comment", comment: c },
+        outcome: { ok: true, mapping: { cid: "x", remoteId: 5 } },
+      },
+    ]);
+    expect(out.comments[0]).toMatchObject({ state: "synced", remoteId: 5, remoteKind: "issue" });
+  });
+
+  test("a successful post-reply records remoteKind 'review'", () => {
+    const parent = comment({ id: "p", state: "synced", remoteId: 1, remoteKind: "review" });
+    const r = comment({ id: "r", state: "syncing", parentLocalId: "p" });
+    const out = applyStepResults(localState({ comments: [parent, r] }), [
+      {
+        step: { kind: "post-reply", comment: r, parent },
+        outcome: { ok: true, mapping: { cid: "r", remoteId: 42 } },
+      },
+    ]);
+    expect(out.comments.find((c) => c.id === "r")).toMatchObject({
+      state: "synced",
+      remoteId: 42,
+      remoteKind: "review",
+    });
+  });
+
+  test("a successful review batch records remoteKind 'review'", () => {
+    const c = comment({ id: "c1", state: "syncing" });
+    const out = applyStepResults(localState({ comments: [c] }), [
+      {
+        step: { kind: "post-review-batch", commitId: "h", comments: [c] },
+        outcome: { ok: true, mappings: [{ cid: "c1", remoteId: 11 }] },
+      },
+    ]);
+    expect(out.comments[0]).toMatchObject({ state: "synced", remoteId: 11, remoteKind: "review" });
+  });
+
+  test("applyStepResultsToRemote mirrors remoteKind", () => {
+    const c = comment({ id: "c1", state: "syncing" });
+    const issue = applyStepResultsToRemote(remoteState({ pullRequest: pr() }), [
+      {
+        step: { kind: "post-issue-comment", comment: c },
+        outcome: { ok: true, mapping: { cid: "c1", remoteId: 22 } },
+      },
+    ]);
+    expect(issue.comments[0]?.remoteKind).toBe("issue");
+
+    const batch = applyStepResultsToRemote(remoteState({ pullRequest: pr() }), [
+      {
+        step: { kind: "post-review-batch", commitId: "h", comments: [c] },
+        outcome: { ok: true, mappings: [{ cid: "c1", remoteId: 11 }] },
+      },
+    ]);
+    expect(batch.comments[0]?.remoteKind).toBe("review");
+  });
+});
+
 describe("state-machine — applyStepResults: Resolve / Unresolve", () => {
   test("ResolveReviewThread success marks the Thread synced", () => {
     const t = thread({ state: "syncing", resolved: true, remoteThreadId: "PRT" });

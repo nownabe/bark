@@ -48,6 +48,7 @@ import {
   canReplyToThread,
   deriveRole,
   filterReviewEntries,
+  replyAnchor,
   revealSubmittedFacets,
   reviewEntryCounts,
   threadRangeAt,
@@ -966,40 +967,12 @@ function AppBody() {
     };
   }, [selection, refreshBubble]);
 
-  // Thread reply: inherit the thread's anchor (from its first submitted comment,
-  // else its first pending draft) and add a draft with the same thread id.
-  // A foreign review root has no metadata; anchor to its GitHub-native
-  // path/line instead (empty quote — the reply's position comes from the
-  // thread root, not from re-anchoring) and key the draft by the thread's
-  // sidebar id, which equals the data layer's Thread id (issue #183).
+  // Thread reply: inherit the thread's anchor (see replyAnchor) and add a
+  // draft with the same thread id — which equals the data layer's Thread id
+  // (issue #183).
   const addReply = async (thread: ReviewThread) => {
     if (!ref || !replyText.trim()) return;
-    const root = thread.rootComment;
-    const a = root?.meta
-      ? {
-          path: root.meta.path,
-          range: root.meta.range,
-          quote: root.meta.quote,
-          thread: root.meta.thread,
-          sha: root.meta.sha,
-        }
-      : thread.rootDraft
-        ? {
-            path: thread.rootDraft.path,
-            range: thread.rootDraft.range,
-            quote: thread.rootDraft.quote,
-            thread: thread.rootDraft.thread,
-            sha: thread.rootDraft.sha,
-          }
-        : root && root.source === "review" && root.path && root.line !== undefined
-          ? {
-              path: root.path,
-              range: { sl: root.line, sc: 1, el: root.line, ec: 1 },
-              quote: "",
-              thread: thread.id,
-              sha: headSha ?? "",
-            }
-          : null;
+    const a = replyAnchor(thread, headSha);
     if (!a) return;
     const ranges = parseRightRanges(files.find((f) => f.path === a.path)?.patch);
     const inDiff = isRangeInDiff(ranges, a.range.sl, a.range.el);
@@ -1009,7 +982,7 @@ function AppBody() {
       inDiff,
       range: a.range,
       quote: a.quote,
-      sha: headSha ?? a.sha,
+      sha: a.sha,
       thread: a.thread,
       body: replyText.trim(),
       kind: "comment",

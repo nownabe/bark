@@ -221,6 +221,7 @@ function toCommentFromReview(
       id: meta.cid,
       state: "synced",
       remoteId: rc.id,
+      remoteKind: "review",
       // Prefer GitHub's own thread grouping over the fence value so a
       // forged threadId cannot re-home the comment (issue #190); the two
       // agree for every legitimately posted comment.
@@ -253,6 +254,7 @@ function toCommentFromReview(
     id: `foreign-review-${rc.id}`,
     state: "synced",
     remoteId: rc.id,
+    remoteKind: "review",
     threadId: threadLocalId ?? `foreign-thread-review-${rc.id}`,
     parentLocalId,
     // `body` (not rc.body): identical for true foreign comments, and strips
@@ -296,6 +298,7 @@ function toCommentFromIssue(ic: RawIssueComment, owners: FenceOwners): Comment |
       id: meta.cid,
       state: "synced",
       remoteId: ic.id,
+      remoteKind: "issue",
       // meta.threadId is kept as-is: issue comments have no GitHub thread
       // structure to validate against, and sharing another thread's id is
       // exactly how legitimate out-of-diff replies work (issue #184).
@@ -310,6 +313,7 @@ function toCommentFromIssue(ic: RawIssueComment, owners: FenceOwners): Comment |
     id: `foreign-issue-${ic.id}`,
     state: "synced",
     remoteId: ic.id,
+    remoteKind: "issue",
     threadId: `foreign-thread-issue-${ic.id}`,
     body,
     author,

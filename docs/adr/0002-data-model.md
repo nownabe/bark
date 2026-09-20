@@ -64,6 +64,7 @@ type Comment = {
   lastError?: ErrorInfo;
 
   remoteId?: number; // GitHub REST comment id
+  remoteKind?: "review" | "issue"; // which GitHub object remoteId names; set together with it
   threadId: LocalId; // parent Thread.id (always set)
   parentLocalId?: LocalId; // reply target within the same thread
 
@@ -156,6 +157,8 @@ Field-by-field, which side conventionally populates each:
 A `Thread` has exactly one remote identity: `remoteThreadId` for a GitHub review thread, or `remoteIssueCommentId` for an out-of-diff thread whose comments are issue comments (which have no GraphQL thread). Both are absent while the thread is a local draft.
 
 A `Thread` is created together with its root `Comment`: upserting a top-level draft Comment inserts a `draft` Thread with the same id (`Comment.threadId`), which then follows the Comment's transitions. Replies never create Threads. A Thread with no remaining Comments and no remote identity is removed with its last Comment.
+
+A synced `Comment` records `remoteKind`, the endpoint its `remoteId` belongs to (a pull-request review comment or a flat issue comment). It is set when the comment is fetched or when its post succeeds, and it is what routes replies ([ADR 0003 §3](0003-operations-and-execution.md)): GitHub issue comments have no reply endpoint, and the two REST ids are indistinguishable integers.
 
 `User` is a single value-object type used wherever a GitHub identity appears — `Comment.author`, `PullRequest.author`, and `PRState.viewer`. There is no GitHub-side user table to normalise against; the inlined form stays small and avoids reference indirection.
 
