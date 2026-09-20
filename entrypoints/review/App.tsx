@@ -137,7 +137,13 @@ function AppBody() {
   const owner = params.get("owner");
   const repo = params.get("repo");
   const prNum = params.get("pr");
-  const ref: PrRef | null = owner && repo && prNum ? { owner, repo, number: Number(prNum) } : null;
+  // The query string is untrusted: a NaN, fractional or non-positive `pr`
+  // would flow into API paths and storage keys, so it never becomes a PrRef
+  // and is reported instead of loaded (issue #295).
+  const prNumber = Number(prNum);
+  const prNumberValid = Number.isInteger(prNumber) && prNumber > 0;
+  const ref: PrRef | null =
+    owner && repo && prNum && prNumberValid ? { owner, repo, number: prNumber } : null;
 
   const auth = useAuthFlow(productionAuthDeps);
   const {
@@ -537,7 +543,7 @@ function AppBody() {
         accepted: (id) => dismissed[id] === "accepted",
         resolvedKeys: resolvedThreadKeys,
       }),
-    [comments, drafts, curPath, dismissed],
+    [comments, drafts, curPath, dismissed, resolvedThreadKeys],
   );
   const entries = useMemo(
     () => buildReviewEntries({ threads, pendingSuggestions, currentPath: curPath }),
@@ -1544,6 +1550,10 @@ function AppBody() {
     if (sHit) emphasizeSuggestion(sHit.cid, false); // text already clicked; just emphasize the item
     else setEmphasizedThreadId(null); // clicked away from any comment → drop emphasis
   };
+
+  if (prNum && !prNumberValid) {
+    return <p className="notice notice--error">Invalid PR number in the review URL.</p>;
+  }
 
   if (!tokenLoaded) return <p className="notice notice--muted">Loading…</p>;
 
