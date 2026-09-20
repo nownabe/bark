@@ -71,6 +71,7 @@ describe("bootstrap — full happy path", () => {
     const storage = fakeStorage();
     const fetch = makeFetch(async (req) => {
       if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: true } });
       if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
@@ -132,6 +133,7 @@ describe("bootstrap — full happy path", () => {
 
     const fetch = makeFetch(async (req) => {
       if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: true } });
       if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
@@ -192,6 +194,7 @@ describe("bootstrap — full happy path", () => {
         return jsonResponse({ content: btoa(""), encoding: "base64" });
       }
       if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: true } });
       if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
@@ -225,6 +228,7 @@ describe("bootstrap — full happy path", () => {
     const fetch = makeFetch(async (req) => {
       calls.push(`${phase}:${req.url.replace("https://api.github.com", "")}`);
       if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: true } });
       if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([
@@ -425,6 +429,7 @@ describe("bootstrap — head-sha content for re-anchoring (issue #267)", () => {
         return jsonResponse({ content: btoa(SOURCE), encoding: "base64" });
       }
       if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: true } });
       if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([

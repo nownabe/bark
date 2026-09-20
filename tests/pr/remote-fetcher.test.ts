@@ -511,6 +511,7 @@ describe("remote-fetcher — fence identity binding (issue #190)", () => {
           base: { ref: "main" },
           user: { login: "alice", avatar_url: "" },
         });
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: false } });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
       if (req.url.includes("/pulls/7/comments")) return jsonResponse(opts.reviewComments ?? []);
       if (req.url.includes("/issues/7/comments")) return jsonResponse(opts.issueComments ?? []);
@@ -610,10 +611,17 @@ describe("remote-fetcher — fence identity binding (issue #190)", () => {
         state: "synced",
         remoteThreadId: "PRT_evil",
         resolved: false,
+        viewerCanResolve: true,
       },
       // The legit out-of-diff thread keeps its id and gets its own Thread
       // rooted in the owning issue comment (issue #270).
-      { id: "t-issue", state: "synced", remoteIssueCommentId: 50, resolved: false },
+      {
+        id: "t-issue",
+        state: "synced",
+        remoteIssueCommentId: 50,
+        resolved: false,
+        viewerCanResolve: true,
+      },
     ]);
     expect(out.comments.find((c) => c.remoteId === 200)?.threadId).toBe("foreign-thread-PRT_evil");
     expect(out.comments.find((c) => c.remoteId === 50)?.threadId).toBe("t-issue");
@@ -903,6 +911,7 @@ describe("remote-fetcher — fetchRemoteState", () => {
           user: { login: "alice", avatar_url: "" },
         });
       }
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: false } });
       if (req.url.endsWith("/user")) {
         viewerCalled = true;
         return jsonResponse({ login: "alice", avatar_url: "" });
@@ -939,6 +948,7 @@ describe("remote-fetcher — fetchRemoteState", () => {
           base: { ref: "main" },
           user: { login: "alice", avatar_url: "" },
         });
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: false } });
       if (req.url.endsWith("/user")) {
         viewerCalled = true;
         return jsonResponse({ login: "alice", avatar_url: "" });
@@ -981,6 +991,7 @@ describe("remote-fetcher — fetchRemoteState", () => {
           base: { ref: "main" },
           user: { login: "alice", avatar_url: "" },
         });
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: false } });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([
@@ -1033,7 +1044,13 @@ describe("remote-fetcher — fetchRemoteState", () => {
     expect(reply?.threadId).toBe("local-t1");
     expect(reply?.parentLocalId).toBe("c-root");
     expect(out.threads).toEqual([
-      { id: "local-t1", state: "synced", remoteThreadId: "PRT_mixed", resolved: false },
+      {
+        id: "local-t1",
+        state: "synced",
+        remoteThreadId: "PRT_mixed",
+        resolved: false,
+        viewerCanResolve: true,
+      },
     ]);
   });
 
@@ -1053,6 +1070,7 @@ describe("remote-fetcher — fetchRemoteState", () => {
           base: { ref: "main" },
           user: { login: "alice", avatar_url: "" },
         });
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: false } });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
@@ -1105,6 +1123,7 @@ describe("remote-fetcher — fetchRemoteState", () => {
           base: { ref: "main" },
           user: { login: "alice", avatar_url: "" },
         });
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: false } });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([
@@ -1158,6 +1177,7 @@ describe("remote-fetcher — fetchRemoteState", () => {
           base: { ref: "main" },
           user: { login: "alice", avatar_url: "" },
         });
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: false } });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
       if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
       if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
@@ -1208,6 +1228,7 @@ describe("remote-fetcher — fetchRemoteState", () => {
           base: { ref: "main" },
           user: { login: "alice", avatar_url: "" },
         });
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: false } });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([
@@ -1261,6 +1282,7 @@ describe("remote-fetcher — fetchRemoteState", () => {
           base: { ref: "main" },
           user: { login: "alice", avatar_url: "" },
         });
+      if (req.url.endsWith("/repos/o/r")) return jsonResponse({ permissions: { push: false } });
       if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
       if (req.url.includes("/pulls/7/comments"))
         return jsonResponse([
@@ -1300,58 +1322,68 @@ describe("remote-fetcher — fetchRemoteState", () => {
   });
 });
 
-describe("remote-fetcher — out-of-diff Threads (issue #270)", () => {
-  const ANCHOR = { sha: "h", range: { sl: 1, sc: 1, el: 1, ec: 2 }, quote: "x" };
+const ANCHOR = { sha: "h", range: { sl: 1, sc: 1, el: 1, ec: 2 }, quote: "x" };
 
-  const outOfDiffBody = (cid: string, threadId: string, resolved?: boolean) =>
-    embedMetadata(cid, {
-      cid,
-      threadId,
-      path: "f.md",
-      anchor: ANCHOR,
-      ...(resolved === undefined ? {} : { resolved }),
-    });
-
-  const issueComment = (id: number, createdAt: string, body: string) => ({
-    id,
-    created_at: createdAt,
-    body,
-    user: { login: "alice", avatar_url: "" },
+const outOfDiffBody = (cid: string, threadId: string, resolved?: boolean) =>
+  embedMetadata(cid, {
+    cid,
+    threadId,
+    path: "f.md",
+    anchor: ANCHOR,
+    ...(resolved === undefined ? {} : { resolved }),
   });
 
-  function stateFetch(opts: {
-    review?: unknown[];
-    issue?: unknown[];
-    reviewThreads?: unknown[];
-  }): typeof fetch {
-    return makeFetch(async (req) => {
-      if (req.url.endsWith("/pulls/7"))
-        return jsonResponse({
-          number: 7,
-          title: "T",
-          body: "B",
-          state: "open",
-          draft: false,
-          merged: false,
-          head: { sha: "h", ref: "topic" },
-          base: { ref: "main" },
-          user: { login: "alice", avatar_url: "" },
-        });
-      if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
-      if (req.url.includes("/pulls/7/comments")) return jsonResponse(opts.review ?? []);
-      if (req.url.includes("/issues/7/comments")) return jsonResponse(opts.issue ?? []);
-      if (req.url.endsWith("/graphql"))
-        return jsonResponse({
-          data: {
-            repository: { pullRequest: { reviewThreads: { nodes: opts.reviewThreads ?? [] } } },
-          },
-        });
-      if (req.url.includes("/contents/"))
-        return jsonResponse({ content: btoa("x"), encoding: "base64" });
-      throw new Error(`unexpected: ${req.url}`);
-    }).fetch;
-  }
+const issueComment = (id: number, createdAt: string, body: string, author = "alice") => ({
+  id,
+  created_at: createdAt,
+  body,
+  user: { login: author, avatar_url: "" },
+});
 
+function stateFetch(opts: {
+  review?: unknown[];
+  issue?: unknown[];
+  reviewThreads?: unknown[];
+  /** Authenticated user; defaults to the PR author alice. */
+  viewer?: string;
+  /** `permissions.push` on GET /repos/o/r; omitted → the probe 403s. */
+  push?: boolean;
+  prAuthor?: string;
+}): typeof fetch {
+  return makeFetch(async (req) => {
+    if (req.url.endsWith("/pulls/7"))
+      return jsonResponse({
+        number: 7,
+        title: "T",
+        body: "B",
+        state: "open",
+        draft: false,
+        merged: false,
+        head: { sha: "h", ref: "topic" },
+        base: { ref: "main" },
+        user: { login: opts.prAuthor ?? "alice", avatar_url: "" },
+      });
+    if (req.url.endsWith("/repos/o/r"))
+      return opts.push === undefined
+        ? jsonResponse({ message: "Forbidden" }, 403)
+        : jsonResponse({ permissions: { push: opts.push } });
+    if (req.url.endsWith("/user"))
+      return jsonResponse({ login: opts.viewer ?? "alice", avatar_url: "" });
+    if (req.url.includes("/pulls/7/comments")) return jsonResponse(opts.review ?? []);
+    if (req.url.includes("/issues/7/comments")) return jsonResponse(opts.issue ?? []);
+    if (req.url.endsWith("/graphql"))
+      return jsonResponse({
+        data: {
+          repository: { pullRequest: { reviewThreads: { nodes: opts.reviewThreads ?? [] } } },
+        },
+      });
+    if (req.url.includes("/contents/"))
+      return jsonResponse({ content: btoa("x"), encoding: "base64" });
+    throw new Error(`unexpected: ${req.url}`);
+  }).fetch;
+}
+
+describe("remote-fetcher — out-of-diff Threads (issue #270)", () => {
   test("fetchRemoteState synthesises a Thread for a Bark out-of-diff thread from its root fence", async () => {
     const fetch = stateFetch({
       issue: [
@@ -1362,8 +1394,20 @@ describe("remote-fetcher — out-of-diff Threads (issue #270)", () => {
     });
     const state = await fetchRemoteState({ token: "t", fetch }, PR);
     expect(state.threads).toEqual([
-      { id: "t-out", state: "synced", remoteIssueCommentId: 501, resolved: true },
-      { id: "t-open", state: "synced", remoteIssueCommentId: 503, resolved: false },
+      {
+        id: "t-out",
+        state: "synced",
+        remoteIssueCommentId: 501,
+        resolved: true,
+        viewerCanResolve: true,
+      },
+      {
+        id: "t-open",
+        state: "synced",
+        remoteIssueCommentId: 503,
+        resolved: false,
+        viewerCanResolve: true,
+      },
     ]);
     expect(state.comments.map((c) => c.threadId)).toEqual(["t-out", "t-out", "t-open"]);
   });
@@ -1377,7 +1421,13 @@ describe("remote-fetcher — out-of-diff Threads (issue #270)", () => {
     });
     const state = await fetchRemoteState({ token: "t", fetch }, PR);
     expect(state.threads).toEqual([
-      { id: "t-out", state: "synced", remoteIssueCommentId: 501, resolved: false },
+      {
+        id: "t-out",
+        state: "synced",
+        remoteIssueCommentId: 501,
+        resolved: false,
+        viewerCanResolve: true,
+      },
     ]);
   });
 
@@ -1405,7 +1455,13 @@ describe("remote-fetcher — out-of-diff Threads (issue #270)", () => {
     });
     const state = await fetchRemoteState({ token: "t", fetch }, PR);
     expect(state.threads).toEqual([
-      { id: "t-in", state: "synced", remoteThreadId: "PRT_1", resolved: false },
+      {
+        id: "t-in",
+        state: "synced",
+        remoteThreadId: "PRT_1",
+        resolved: false,
+        viewerCanResolve: true,
+      },
     ]);
   });
 
@@ -1438,7 +1494,93 @@ describe("remote-fetcher — out-of-diff Threads (issue #270)", () => {
     });
     const state = await fetchRemoteState({ token: "t", fetch }, PR);
     expect(state.threads).toEqual([
-      { id: "foreign-thread-PRT_1", state: "synced", remoteThreadId: "PRT_1", resolved: false },
+      {
+        id: "foreign-thread-PRT_1",
+        state: "synced",
+        remoteThreadId: "PRT_1",
+        resolved: false,
+        viewerCanResolve: true,
+      },
     ]);
+  });
+});
+
+describe("remote-fetcher — viewerCanResolve (issue #274)", () => {
+  const reviewThreads = [
+    {
+      id: "PRT_1",
+      isResolved: false,
+      comments: { nodes: [{ databaseId: 100, body: "native comment" }] },
+    },
+  ];
+
+  const canResolveReviewThread = async (opts: Parameters<typeof stateFetch>[0]) => {
+    const state = await fetchRemoteState({ token: "t", fetch: stateFetch(opts) }, PR);
+    return state.threads[0]?.viewerCanResolve;
+  };
+
+  test("a read-only reviewer cannot resolve a review thread", async () => {
+    expect(
+      await canResolveReviewThread({
+        reviewThreads,
+        viewer: "bob",
+        prAuthor: "alice",
+        push: false,
+      }),
+    ).toBe(false);
+  });
+
+  test("write access can resolve a review thread", async () => {
+    expect(
+      await canResolveReviewThread({ reviewThreads, viewer: "bob", prAuthor: "alice", push: true }),
+    ).toBe(true);
+  });
+
+  test("the PR author can resolve a review thread without write access", async () => {
+    expect(
+      await canResolveReviewThread({
+        reviewThreads,
+        viewer: "Alice",
+        prAuthor: "alice",
+        push: false,
+      }),
+    ).toBe(true);
+  });
+
+  test("an out-of-diff thread is resolvable by its root comment's author", async () => {
+    const byBob = await fetchRemoteState(
+      {
+        token: "t",
+        fetch: stateFetch({
+          viewer: "bob",
+          prAuthor: "alice",
+          push: false,
+          issue: [issueComment(501, "2026-01-01T00:00:00Z", outOfDiffBody("c1", "t-out"), "bob")],
+        }),
+      },
+      PR,
+    );
+    expect(byBob.threads[0]?.viewerCanResolve).toBe(true);
+
+    const byAlice = await fetchRemoteState(
+      {
+        token: "t",
+        fetch: stateFetch({
+          viewer: "bob",
+          prAuthor: "alice",
+          push: false,
+          issue: [issueComment(502, "2026-01-01T00:00:00Z", outOfDiffBody("c2", "t-out"), "alice")],
+        }),
+      },
+      PR,
+    );
+    expect(byAlice.threads[0]?.viewerCanResolve).toBe(false);
+  });
+
+  test("a failed permission probe defaults to no write access and does not fail the refresh", async () => {
+    // `push` omitted → GET /repos/o/r answers 403.
+    expect(await canResolveReviewThread({ reviewThreads, viewer: "bob", prAuthor: "alice" })).toBe(
+      false,
+    );
   });
 });
