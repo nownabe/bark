@@ -19,7 +19,16 @@ import type {
   PostReviewBatchOutcome,
   ResolveOutcome,
 } from "./transport";
-import type { Comment, ErrorInfo, LocalId, LocalState, RemoteState, Thread } from "./types";
+import {
+  type Comment,
+  type ErrorInfo,
+  findRemoteThread,
+  hasRemoteIdentity,
+  type LocalId,
+  type LocalState,
+  type RemoteState,
+  type Thread,
+} from "./types";
 
 /** Flip all draft Comments, Threads, and FileEdits to syncing.
  *  Called on user-initiated submission. */
@@ -57,11 +66,11 @@ export function revertOrphanedSyncing(local: LocalState): LocalState {
 }
 
 /** Set a Thread's `resolved` field. If the Thread is currently `synced` —
- *  or `draft` with a remoteThreadId, i.e. it exists on GitHub but a prior
+ *  or `draft` with a remote identity, i.e. it exists on GitHub but a prior
  *  sync failed — also transition it to `syncing` so the change is pushed;
  *  without the draft case a failed resolve could never be retried (issue
- *  #188). A true draft (no remoteThreadId yet) just updates the field:
- *  it syncs with the next submit. */
+ *  #188). A true draft (not on GitHub yet) just updates the field: it syncs
+ *  with the next submit. */
 export function setThreadResolvedToSyncing(
   local: LocalState,
   id: LocalId,
@@ -71,7 +80,7 @@ export function setThreadResolvedToSyncing(
     ...local,
     threads: local.threads.map((t) => {
       if (t.id !== id) return t;
-      if (t.state === "synced" || (t.state === "draft" && t.remoteThreadId !== undefined)) {
+      if (t.state === "synced" || (t.state === "draft" && hasRemoteIdentity(t))) {
         return { ...t, state: "syncing", resolved, lastError: undefined };
       }
       return { ...t, resolved };
@@ -84,15 +93,14 @@ export function setThreadResolvedToSyncing(
  *  operation, and no step result will ever advance it — without this it
  *  stays `syncing` forever (persisted, and protected from refresh by the
  *  merge policy; issue #188). Flip it straight back to `synced`. Threads
- *  without a remoteThreadId are left alone: they may still receive one from
+ *  with no remote identity are left alone: they may still receive one from
  *  a review-batch mapping in the same submit. */
 export function completeNoopThreadSyncs(local: LocalState, remote: RemoteState): LocalState {
   let changed = false;
   const threads = local.threads.map((t) => {
-    if (t.state !== "syncing" || t.remoteThreadId === undefined) return t;
-    const remoteThread = remote.threads.find((r) => r.remoteThreadId === t.remoteThreadId);
-    // Mirror the reconciler's comparison exactly (absent remote → false).
-    const remoteResolved = remoteThread?.resolved ?? false;
+    if (t.state !== "syncing" || !hasRemoteIdentity(t)) return t;
+    // Mirror the reconciler's lookup and comparison exactly (absent remote → false).
+    const remoteResolved = findRemoteThread(remote.threads, t)?.resolved ?? false;
     if (t.resolved !== remoteResolved) return t;
     changed = true;
     return { ...t, state: "synced" as const, lastError: undefined };
@@ -131,7 +139,8 @@ function applyStepResult(local: LocalState, result: StepResult): LocalState {
         : applyCommentFailure(local, result.step.comment.id, o.error);
     }
     case "resolve-review-thread":
-    case "unresolve-review-thread": {
+    case "unresolve-review-thread":
+    case "set-issue-thread-resolved": {
       const o = result.outcome as ResolveOutcome;
       return o.ok
         ? applyThreadSyncSuccess(local, result.step.threadId)
@@ -209,7 +218,7 @@ function applyUnpostedCommentsFailure(
       commentIds.has(c.id) ? { ...c, state: "draft", lastError: error } : c,
     ),
     threads: local.threads.map((t) =>
-      threadIds.has(t.id) && t.state === "syncing" && t.remoteThreadId === undefined
+      threadIds.has(t.id) && t.state === "syncing" && !hasRemoteIdentity(t)
         ? { ...t, state: "draft", lastError: error }
         : t,
     ),
@@ -315,11 +324,15 @@ function applyStepResultToRemote(remote: RemoteState, result: StepResult): Remot
       return { ...remote, comments: upsertRemoteComment(remote.comments, synced) };
     }
     case "resolve-review-thread":
-    case "unresolve-review-thread": {
+    case "unresolve-review-thread":
+    case "set-issue-thread-resolved": {
       const o = result.outcome as ResolveOutcome;
       if (!o.ok) return remote;
       const threadId = result.step.threadId;
-      const resolved = result.step.kind === "resolve-review-thread";
+      const resolved =
+        result.step.kind === "set-issue-thread-resolved"
+          ? result.step.resolved
+          : result.step.kind === "resolve-review-thread";
       return {
         ...remote,
         threads: remote.threads.map((t) => (t.id === threadId ? { ...t, resolved } : t)),
@@ -388,7 +401,7 @@ export function mergeRemoteIntoLocal(local: LocalState, remote: RemoteState): Lo
     local.threads,
     remote.threads,
     (t) => t.state === "draft" || t.state === "syncing",
-    (t) => t.remoteThreadId === undefined,
+    (t) => !hasRemoteIdentity(t),
   );
   return {
     ...local,

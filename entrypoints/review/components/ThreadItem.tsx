@@ -23,7 +23,8 @@ export type ThreadItemProps = {
   /** Anchor-status badge for the root comment (null when not applicable). */
   rootStatus: AnchorStatus | null;
   role: Role;
-  /** The thread has a GitHub-native review thread and may be resolved/reopened. */
+  /** The thread has a remote identity on GitHub (review thread or Bark
+   *  out-of-diff root) and may be resolved/reopened. */
   canResolve: boolean;
   /** The author may safely apply the root suggestion (reanchored, quote matches). */
   canAccept: boolean;

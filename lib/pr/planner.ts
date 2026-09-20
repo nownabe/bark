@@ -15,6 +15,7 @@ import type {
   PostReviewBatchStep,
   RejectCommentStep,
   ResolveReviewThreadStep,
+  SetIssueThreadResolvedStep,
   UnresolveReviewThreadStep,
 } from "./steps";
 import type { Comment, ErrorInfo, FileContent, FileEdit } from "./types";
@@ -39,6 +40,7 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
   const replies: PostReplyStep[] = [];
   const resolves: ResolveReviewThreadStep[] = [];
   const unresolves: UnresolveReviewThreadStep[] = [];
+  const issueResolves: SetIssueThreadResolvedStep[] = [];
   const fileEdits: FileEdit[] = [];
 
   for (const op of ops) {
@@ -70,18 +72,31 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
         }
         break;
       case "update-thread-resolved":
-        if (op.desiredResolved) {
-          resolves.push({
-            kind: "resolve-review-thread",
+        // Routed on the thread's remote identity: a review thread resolves
+        // via GraphQL, an out-of-diff thread by rewriting its root issue
+        // comment's metadata (issue #270).
+        if (op.remoteIssueCommentId !== undefined) {
+          issueResolves.push({
+            kind: "set-issue-thread-resolved",
             threadId: op.threadId,
-            remoteThreadId: op.remoteThreadId,
+            issueCommentId: op.remoteIssueCommentId,
+            resolved: op.desiredResolved,
           });
-        } else {
-          unresolves.push({
-            kind: "unresolve-review-thread",
-            threadId: op.threadId,
-            remoteThreadId: op.remoteThreadId,
-          });
+        } else if (op.remoteThreadId !== undefined) {
+          const remoteThreadId = op.remoteThreadId;
+          if (op.desiredResolved) {
+            resolves.push({
+              kind: "resolve-review-thread",
+              threadId: op.threadId,
+              remoteThreadId,
+            });
+          } else {
+            unresolves.push({
+              kind: "unresolve-review-thread",
+              threadId: op.threadId,
+              remoteThreadId,
+            });
+          }
         }
         break;
       case "commit-file-edit":
@@ -114,6 +129,7 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
   steps.push(...replies);
   steps.push(...resolves);
   steps.push(...unresolves);
+  steps.push(...issueResolves);
 
   if (fileEdits.length > 0) {
     const commit: CommitStep = {

@@ -154,3 +154,23 @@ describe("metadata — extraction edge cases", () => {
     expect(out.body).toBe("body\n\n<!-- bark:v2 oldfake -->\nmore body");
   });
 });
+
+describe("metadata — resolved flag (issue #270)", () => {
+  test("the v2 envelope round-trips `resolved` and coerces non-booleans", () => {
+    const withTrue = embedMetadata("Body", meta({ resolved: true }));
+    expect(extractMetadata(withTrue).meta?.resolved).toBe(true);
+    expect(extractMetadata(withTrue).body).toBe("Body");
+
+    // A stray non-boolean must not demote a real Bark comment to foreign;
+    // it simply reads as "not resolved".
+    const withYes = `Body\n\n<!-- bark:v2 ${btoa(JSON.stringify({ ...meta(), resolved: "yes" }))} -->`;
+    const parsedYes = extractMetadata(withYes);
+    expect(parsedYes.meta).not.toBeNull();
+    expect(parsedYes.meta?.resolved).toBeUndefined();
+    expect(parsedYes.body).toBe("Body");
+
+    const withoutKey = embedMetadata("Body", meta());
+    expect(extractMetadata(withoutKey).meta?.resolved).toBeUndefined();
+    expect(extractMetadata(withoutKey).body).toBe("Body");
+  });
+});

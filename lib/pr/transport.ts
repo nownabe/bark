@@ -12,6 +12,7 @@ import type {
   PostReplyStep,
   PostReviewBatchStep,
   ResolveReviewThreadStep,
+  SetIssueThreadResolvedStep,
   UnresolveReviewThreadStep,
 } from "./steps";
 
@@ -56,5 +57,6 @@ export interface Transport {
   postIssueComment(step: PostIssueCommentStep): Promise<PostIssueCommentOutcome>;
   resolveReviewThread(step: ResolveReviewThreadStep): Promise<ResolveOutcome>;
   unresolveReviewThread(step: UnresolveReviewThreadStep): Promise<ResolveOutcome>;
+  setIssueThreadResolved(step: SetIssueThreadResolvedStep): Promise<ResolveOutcome>;
   commit(step: CommitStep): Promise<CommitOutcome>;
 }

@@ -3,7 +3,7 @@
 // See docs/adr/0003-operations-and-execution.md §2 for the emit rules.
 
 import type { ReconcileOperation } from "./operations";
-import type { LocalState, RemoteState, Thread } from "./types";
+import { findRemoteThread, hasRemoteIdentity, type LocalState, type RemoteState } from "./types";
 
 export function reconcile(local: LocalState, remote: RemoteState): ReconcileOperation[] {
   const ops: ReconcileOperation[] = [];
@@ -29,16 +29,16 @@ export function reconcile(local: LocalState, remote: RemoteState): ReconcileOper
   // Threads
   for (const t of local.threads) {
     if (t.state !== "syncing") continue;
-    if (t.remoteThreadId === undefined) continue; // thread not yet created on GitHub
+    if (!hasRemoteIdentity(t)) continue; // thread not yet created on GitHub
 
-    const remoteThread = findRemoteThreadByRemoteId(remote.threads, t.remoteThreadId);
-    const remoteResolved = remoteThread?.resolved ?? false;
+    const remoteResolved = findRemoteThread(remote.threads, t)?.resolved ?? false;
 
     if (t.resolved !== remoteResolved) {
       ops.push({
         kind: "update-thread-resolved",
         threadId: t.id,
         remoteThreadId: t.remoteThreadId,
+        remoteIssueCommentId: t.remoteIssueCommentId,
         desiredResolved: t.resolved,
       });
     }
@@ -51,8 +51,4 @@ export function reconcile(local: LocalState, remote: RemoteState): ReconcileOper
   }
 
   return ops;
-}
-
-function findRemoteThreadByRemoteId(threads: Thread[], remoteThreadId: string): Thread | undefined {
-  return threads.find((t) => t.remoteThreadId === remoteThreadId);
 }

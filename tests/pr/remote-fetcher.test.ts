@@ -560,6 +560,9 @@ describe("remote-fetcher — fence identity binding (issue #190)", () => {
         remoteThreadId: "PRT_evil",
         resolved: false,
       },
+      // The legit out-of-diff thread keeps its id and gets its own Thread
+      // rooted in the owning issue comment (issue #270).
+      { id: "t-issue", state: "synced", remoteIssueCommentId: 50, resolved: false },
     ]);
     expect(out.comments.find((c) => c.remoteId === 200)?.threadId).toBe("foreign-thread-PRT_evil");
     expect(out.comments.find((c) => c.remoteId === 50)?.threadId).toBe("t-issue");
@@ -1198,6 +1201,149 @@ describe("remote-fetcher — fetchRemoteState", () => {
     expect(out.fileContents.map((f) => `${f.sha}:${f.path}`)).toEqual([
       "good-sha:good.md",
       "head:good.md",
+    ]);
+  });
+});
+
+describe("remote-fetcher — out-of-diff Threads (issue #270)", () => {
+  const ANCHOR = { sha: "h", range: { sl: 1, sc: 1, el: 1, ec: 2 }, quote: "x" };
+
+  const outOfDiffBody = (cid: string, threadId: string, resolved?: boolean) =>
+    embedMetadata(cid, {
+      cid,
+      threadId,
+      path: "f.md",
+      anchor: ANCHOR,
+      ...(resolved === undefined ? {} : { resolved }),
+    });
+
+  const issueComment = (id: number, createdAt: string, body: string) => ({
+    id,
+    created_at: createdAt,
+    body,
+    user: { login: "alice", avatar_url: "" },
+  });
+
+  function stateFetch(opts: {
+    review?: unknown[];
+    issue?: unknown[];
+    reviewThreads?: unknown[];
+  }): typeof fetch {
+    return makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7"))
+        return jsonResponse({
+          number: 7,
+          title: "T",
+          body: "B",
+          state: "open",
+          draft: false,
+          merged: false,
+          head: { sha: "h", ref: "topic" },
+          base: { ref: "main" },
+          user: { login: "alice", avatar_url: "" },
+        });
+      if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/comments")) return jsonResponse(opts.review ?? []);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse(opts.issue ?? []);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: {
+            repository: { pullRequest: { reviewThreads: { nodes: opts.reviewThreads ?? [] } } },
+          },
+        });
+      if (req.url.includes("/contents/"))
+        return jsonResponse({ content: btoa("x"), encoding: "base64" });
+      throw new Error(`unexpected: ${req.url}`);
+    }).fetch;
+  }
+
+  test("fetchRemoteState synthesises a Thread for a Bark out-of-diff thread from its root fence", async () => {
+    const fetch = stateFetch({
+      issue: [
+        issueComment(501, "2026-01-01T00:00:00Z", outOfDiffBody("c-root", "t-out", true)),
+        issueComment(502, "2026-01-02T00:00:00Z", outOfDiffBody("c-reply", "t-out")),
+        issueComment(503, "2026-01-03T00:00:00Z", outOfDiffBody("c-open", "t-open")),
+      ],
+    });
+    const state = await fetchRemoteState({ token: "t", fetch }, PR);
+    expect(state.threads).toEqual([
+      { id: "t-out", state: "synced", remoteIssueCommentId: 501, resolved: true },
+      { id: "t-open", state: "synced", remoteIssueCommentId: 503, resolved: false },
+    ]);
+    expect(state.comments.map((c) => c.threadId)).toEqual(["t-out", "t-out", "t-open"]);
+  });
+
+  test("resolved is read only from the thread's root; a later comment reusing the threadId cannot resolve it (issue #190)", async () => {
+    const fetch = stateFetch({
+      issue: [
+        issueComment(501, "2026-01-01T00:00:00Z", outOfDiffBody("c-root", "t-out")),
+        issueComment(504, "2026-01-04T00:00:00Z", outOfDiffBody("c-forged", "t-out", true)),
+      ],
+    });
+    const state = await fetchRemoteState({ token: "t", fetch }, PR);
+    expect(state.threads).toEqual([
+      { id: "t-out", state: "synced", remoteIssueCommentId: 501, resolved: false },
+    ]);
+  });
+
+  test("an out-of-diff reply to a review thread does not create a second Thread (#184 flow)", async () => {
+    const rootBody = outOfDiffBody("c-in", "t-in");
+    const fetch = stateFetch({
+      review: [
+        {
+          id: 100,
+          created_at: "2026-01-01T00:00:00Z",
+          body: rootBody,
+          path: "f.md",
+          line: 1,
+          user: { login: "alice", avatar_url: "" },
+        },
+      ],
+      issue: [issueComment(505, "2026-01-02T00:00:00Z", outOfDiffBody("c-out", "t-in", true))],
+      reviewThreads: [
+        {
+          id: "PRT_1",
+          isResolved: false,
+          comments: { nodes: [{ databaseId: 100, body: rootBody }] },
+        },
+      ],
+    });
+    const state = await fetchRemoteState({ token: "t", fetch }, PR);
+    expect(state.threads).toEqual([
+      { id: "t-in", state: "synced", remoteThreadId: "PRT_1", resolved: false },
+    ]);
+  });
+
+  test("an issue fence claiming a review thread's synthesised id does not duplicate the Thread (issue #190)", async () => {
+    const fetch = stateFetch({
+      review: [
+        {
+          id: 100,
+          created_at: "2026-01-01T00:00:00Z",
+          body: "native comment",
+          path: "f.md",
+          line: 1,
+          user: { login: "carol", avatar_url: "" },
+        },
+      ],
+      issue: [
+        issueComment(
+          506,
+          "2026-01-02T00:00:00Z",
+          outOfDiffBody("c-forged", "foreign-thread-PRT_1", true),
+        ),
+      ],
+      reviewThreads: [
+        {
+          id: "PRT_1",
+          isResolved: false,
+          comments: { nodes: [{ databaseId: 100, body: "native comment" }] },
+        },
+      ],
+    });
+    const state = await fetchRemoteState({ token: "t", fetch }, PR);
+    expect(state.threads).toEqual([
+      { id: "foreign-thread-PRT_1", state: "synced", remoteThreadId: "PRT_1", resolved: false },
     ]);
   });
 });

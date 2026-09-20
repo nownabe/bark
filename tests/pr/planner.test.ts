@@ -207,6 +207,26 @@ describe("planner — UpdateThreadResolved", () => {
       },
     ]);
   });
+
+  test("an op carrying remoteIssueCommentId → SetIssueThreadResolved (issue #270)", () => {
+    const op = (desiredResolved: boolean): ReconcileOperation => ({
+      kind: "update-thread-resolved",
+      threadId: "t-out",
+      remoteIssueCommentId: 501,
+      desiredResolved,
+    });
+    expect(planExecution([op(true)], context())).toEqual([
+      { kind: "set-issue-thread-resolved", threadId: "t-out", issueCommentId: 501, resolved: true },
+    ]);
+    expect(planExecution([op(false)], context())).toEqual([
+      {
+        kind: "set-issue-thread-resolved",
+        threadId: "t-out",
+        issueCommentId: 501,
+        resolved: false,
+      },
+    ]);
+  });
 });
 
 describe("planner — CommitFileEdit", () => {

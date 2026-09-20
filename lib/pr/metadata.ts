@@ -28,6 +28,10 @@ export type WireMetadata = {
    *  round-trip their path even though GitHub does not store it natively. */
   path: string;
   anchor: Anchor;
+  /** Out-of-diff threads only: resolved state of the thread whose root this
+   *  comment is (issue #270). Ignored on review comments (GraphQL isResolved
+   *  wins) and on any comment that is not the earliest bearer of `threadId`. */
+  resolved?: boolean;
   /** Read-only, v1 only. Legacy Bark resolved a thread by posting a hidden
    *  marker comment ("Resolved via Bark." / "Reopened via Bark.") carrying
    *  `event` in its v1 fence. v2 represents resolved state on the Thread
@@ -83,7 +87,12 @@ function readFence(
 
 function parseV2(decoded: string): WireMetadata | null {
   const value: unknown = JSON.parse(decoded);
-  return isValidWireMetadata(value) ? value : null;
+  if (!isValidWireMetadata(value)) return null;
+  // A non-boolean `resolved` reads as "not resolved" rather than as an
+  // invalid payload — a stray field must not demote a real Bark comment to
+  // foreign (issue #270).
+  const { resolved, ...rest } = value;
+  return resolved === true ? { ...rest, resolved: true } : rest;
 }
 
 /** v1 payload shape (lib/metadata.ts in the legacy App):

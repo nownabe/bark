@@ -49,6 +49,17 @@ export type UnresolveReviewThreadStep = {
   remoteThreadId: string;
 };
 
+/** Set an out-of-diff thread's resolved state by rewriting the hidden
+ *  metadata of its root issue comment. Issue comments have no GraphQL
+ *  review thread, so this is where their resolved state lives (issue #270). */
+export type SetIssueThreadResolvedStep = {
+  kind: "set-issue-thread-resolved";
+  threadId: LocalId;
+  /** REST id of the thread's root issue comment. */
+  issueCommentId: number;
+  resolved: boolean;
+};
+
 /** Commit all pending file edits in one atomic Git Data API sequence
  *  (blob → tree → commit → updateRef). */
 export type CommitStep = {
@@ -67,4 +78,5 @@ export type ExecutionStep =
   | PostIssueCommentStep
   | ResolveReviewThreadStep
   | UnresolveReviewThreadStep
+  | SetIssueThreadResolvedStep
   | CommitStep;

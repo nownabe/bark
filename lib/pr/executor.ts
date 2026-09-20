@@ -32,6 +32,10 @@ export type StepResult =
     }
   | { step: Extract<ExecutionStep, { kind: "resolve-review-thread" }>; outcome: ResolveOutcome }
   | { step: Extract<ExecutionStep, { kind: "unresolve-review-thread" }>; outcome: ResolveOutcome }
+  | {
+      step: Extract<ExecutionStep, { kind: "set-issue-thread-resolved" }>;
+      outcome: ResolveOutcome;
+    }
   | { step: Extract<ExecutionStep, { kind: "commit" }>; outcome: CommitOutcome };
 
 /** Run all steps sequentially against the transport and collect their outcomes.
@@ -60,6 +64,8 @@ async function runStep(step: ExecutionStep, transport: Transport): Promise<StepR
       return { step, outcome: await transport.resolveReviewThread(step) };
     case "unresolve-review-thread":
       return { step, outcome: await transport.unresolveReviewThread(step) };
+    case "set-issue-thread-resolved":
+      return { step, outcome: await transport.setIssueThreadResolved(step) };
     case "commit":
       return { step, outcome: await transport.commit(step) };
   }

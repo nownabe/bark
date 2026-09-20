@@ -7,6 +7,7 @@ import type {
   PostReplyStep,
   PostReviewBatchStep,
   ResolveReviewThreadStep,
+  SetIssueThreadResolvedStep,
   UnresolveReviewThreadStep,
 } from "../../lib/pr/steps";
 import type {
@@ -57,6 +58,7 @@ type FakeOptions = {
   postIssueComment?: PostIssueCommentOutcome;
   resolveReviewThread?: ResolveOutcome;
   unresolveReviewThread?: ResolveOutcome;
+  setIssueThreadResolved?: ResolveOutcome;
   commit?: CommitOutcome;
 };
 
@@ -95,6 +97,10 @@ function fakeTransport(opts: FakeOptions = {}): {
     async unresolveReviewThread(step) {
       calls.push({ kind: "unresolve-review-thread", step });
       return opts.unresolveReviewThread ?? { ok: true };
+    },
+    async setIssueThreadResolved(step) {
+      calls.push({ kind: "set-issue-thread-resolved", step });
+      return opts.setIssueThreadResolved ?? { ok: true };
     },
     async commit(step) {
       calls.push({ kind: "commit", step });
@@ -178,6 +184,19 @@ describe("executor — dispatch", () => {
     const { transport, calls } = fakeTransport();
     await execute([resolve, unresolve], transport);
     expect(calls.map((c) => c.kind)).toEqual(["resolve-review-thread", "unresolve-review-thread"]);
+  });
+
+  test("a SetIssueThreadResolved step is dispatched to transport.setIssueThreadResolved (issue #270)", async () => {
+    const step: SetIssueThreadResolvedStep = {
+      kind: "set-issue-thread-resolved",
+      threadId: "t-out",
+      issueCommentId: 501,
+      resolved: true,
+    };
+    const { transport, calls } = fakeTransport();
+    const results = await execute([step], transport);
+    expect(calls).toEqual([{ kind: "set-issue-thread-resolved", step }]);
+    expect(results[0]).toEqual({ step, outcome: { ok: true } });
   });
 
   test("a Commit step is dispatched to transport.commit", async () => {
@@ -268,6 +287,9 @@ describe("executor — error pass-through", () => {
         throw new Error("unused");
       },
       async unresolveReviewThread() {
+        throw new Error("unused");
+      },
+      async setIssueThreadResolved() {
         throw new Error("unused");
       },
       async commit() {
