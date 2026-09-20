@@ -16,6 +16,7 @@ import {
   applyStepResults,
   applyStepResultsToRemote,
   completeNoopThreadSyncs,
+  deferredSyncError,
   flipDraftsToSyncing,
   mergeRemoteIntoLocal,
   revertOrphanedSyncing,
@@ -130,10 +131,20 @@ export class PullRequestRepository {
     await this.persist();
   }
 
-  /** Remove a Comment. A Thread left with no Comments and no remote identity
-   *  is a draft thread with nothing in it, so it goes too (issue #272). */
+  /** Remove a Comment and everything that hangs off it: its replies, and
+   *  their replies (a reply has no home once its parent is gone, issue
+   *  #271). A Thread left with no Comments and no remote identity is a draft
+   *  thread with nothing in it, so it goes too (issue #272). */
   async discardComment(id: LocalId): Promise<void> {
-    const comments = this.localState.comments.filter((c) => c.id !== id);
+    const discarded = new Set([id]);
+    // Iterating a Set visits entries added during the loop, so this walks the
+    // whole reply tree without a separate worklist.
+    for (const parentId of discarded) {
+      for (const c of this.localState.comments) {
+        if (c.parentLocalId === parentId) discarded.add(c.id);
+      }
+    }
+    const comments = this.localState.comments.filter((c) => !discarded.has(c.id));
     this.localState = {
       ...this.localState,
       comments,
@@ -242,6 +253,15 @@ export class PullRequestRepository {
       // confirmed GitHub writes in the RemoteState mirror.
       this.localState = applyStepResults(this.localState, results);
       this.remoteState = applyStepResultsToRemote(this.remoteState, results);
+      this.notify();
+      await this.persist();
+    }
+    // Nothing still `syncing` here was ever carried by a step — every step
+    // result lands its items. It is a reply the Reconciler kept deferring
+    // because its parent never synced (issue #271).
+    const swept = revertOrphanedSyncing(this.localState, deferredSyncError(this.localState));
+    if (swept !== this.localState) {
+      this.localState = swept;
       this.notify();
       await this.persist();
     }

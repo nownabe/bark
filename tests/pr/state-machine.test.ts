@@ -164,6 +164,21 @@ describe("state-machine — revertOrphanedSyncing", () => {
     expect(out.threads[1]?.lastError).toBeDefined();
   });
 
+  test("uses the per-entity error when one is supplied (issue #271)", () => {
+    const out = revertOrphanedSyncing(
+      localState({
+        comments: [comment({ id: "a", state: "syncing" }), comment({ id: "b", state: "syncing" })],
+      }),
+      (e) => ({ message: e.id }),
+    );
+    expect(out.comments.map((c) => c.lastError?.message)).toEqual(["a", "b"]);
+  });
+
+  test("keeps the unconfirmed-post message when no error factory is supplied", () => {
+    const out = revertOrphanedSyncing(localState({ comments: [comment({ state: "syncing" })] }));
+    expect(out.comments[0]?.lastError?.message).toContain("could not be confirmed");
+  });
+
   test("syncing Comments and FileEdits always revert to draft", () => {
     const out = revertOrphanedSyncing(
       localState({

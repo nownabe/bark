@@ -302,6 +302,18 @@ describe("repository — mutations", () => {
     await r.discardComment("c1");
     expect(r.getLocalState().threads).toEqual([]);
   });
+
+  test("discardComment cascades to replies and replies of replies (issue #271)", async () => {
+    const r = makeRepo(happyTransport().transport);
+    await r.upsertComment(comment({ id: "c1" }));
+    await r.upsertComment(comment({ id: "c2", parentLocalId: "c1" }));
+    await r.upsertComment(comment({ id: "c3", parentLocalId: "c2" }));
+
+    await r.discardComment("c1");
+
+    expect(r.getLocalState().comments).toEqual([]);
+    expect(r.getLocalState().threads).toEqual([]);
+  });
 });
 
 describe("repository — submitDrafts pipeline", () => {
@@ -634,6 +646,52 @@ describe("repository — setThreadResolved", () => {
     await r2.setRemoteState({ ...emptyState(), pullRequest: pr(), threads: [outThread(true)] });
     const app = deriveAppState(r2.getLocalState(), r2.getRemoteState());
     expect(app.threadGroups.find((g) => g.thread.id === "t-out")?.thread.resolved).toBe(true);
+  });
+});
+
+describe("repository — deferred replies (issue #271)", () => {
+  test("a reply whose parent fails to post ends the submit as draft + lastError", async () => {
+    const failingTransport: Transport = {
+      ...happyTransport().transport,
+      async postReviewBatch(): Promise<PostReviewBatchOutcome> {
+        return { ok: false, error: { message: "boom" } };
+      },
+    };
+    const r = makeRepo(failingTransport);
+    await r.setRemoteState({ ...emptyState(), pullRequest: pr() });
+    await r.upsertComment(comment({ id: "c1" }));
+    await r.upsertComment(comment({ id: "c2", parentLocalId: "c1" }));
+
+    await r.submitDrafts();
+
+    const byId = new Map(r.getLocalState().comments.map((c) => [c.id, c]));
+    expect(byId.get("c1")).toMatchObject({ state: "draft", lastError: { message: "boom" } });
+    expect(byId.get("c2")?.state).toBe("draft");
+    expect(byId.get("c2")?.lastError?.message).toContain("was not posted");
+  });
+
+  test("a reply whose parent no longer exists ends the submit as draft with a 'no longer exists' error", async () => {
+    const r = makeRepo(happyTransport().transport);
+    await r.setRemoteState({ ...emptyState(), pullRequest: pr() });
+    await r.upsertComment(comment({ id: "c2", parentLocalId: "gone" }));
+
+    await r.submitDrafts();
+
+    expect(r.getLocalState().comments[0]?.state).toBe("draft");
+    expect(r.getLocalState().comments[0]?.lastError?.message).toContain("no longer exists");
+  });
+
+  test("a reply chain still syncs across two cycles", async () => {
+    const { transport, calls } = happyTransport({ remoteThreadIdForBatch: "PRT_p" });
+    const r = makeRepo(transport);
+    await r.setRemoteState({ ...emptyState(), pullRequest: pr() });
+    await r.upsertComment(comment({ id: "c1" }));
+    await r.upsertComment(comment({ id: "c2", parentLocalId: "c1" }));
+
+    await r.submitDrafts();
+
+    expect(calls).toEqual(["post-review-batch", "post-reply"]);
+    expect(r.getLocalState().comments.every((c) => c.state === "synced")).toBe(true);
   });
 });
 
