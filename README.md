@@ -96,13 +96,14 @@ End-to-end tests use Playwright: `bun run test:e2e` (run
 
 ## Project layout
 
-| Path            | What lives there                                                                                |
-| --------------- | ----------------------------------------------------------------------------------------------- |
-| `entrypoints/`  | Extension surfaces: `background.ts`, `content.ts`, and the `review/` SPA (the React review UI)  |
-| `lib/`          | Surface-agnostic logic: GitHub API, auth, drafts/comments/storage, anchoring/re-anchoring, diff |
-| `tests/`        | Tests, mirroring the modules under `lib/` and `entrypoints/`                                    |
-| `docs/`         | Design doc, ADRs, design principles, release and Chrome Web Store material                      |
-| `wxt.config.ts` | WXT/manifest configuration (permissions, env prefix, icons)                                     |
+| Path            | What lives there                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| `entrypoints/`  | Extension surfaces: `background.ts`, `content.ts`, and the `review/` SPA (the React review UI)   |
+| `lib/pr/`       | The PR data layer the ADRs describe: GitHub client, Repository/Reconciler/Executor, re-anchoring |
+| `lib/`          | The rest of the surface-agnostic logic: auth, token/draft storage, anchoring, Suggestions, diff  |
+| `tests/`        | Tests, mirroring the modules under `lib/` and `entrypoints/`                                     |
+| `docs/`         | Design doc, ADRs, design principles, release and Chrome Web Store material                       |
+| `wxt.config.ts` | WXT/manifest configuration (permissions, env prefix, icons)                                      |
 
 ## Contributing
 

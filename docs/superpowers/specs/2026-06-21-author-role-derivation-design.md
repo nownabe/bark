@@ -1,5 +1,13 @@
 # Author role derivation (issue #83)
 
+> **Superseded (2026-09).** The role is now derived inside the data layer:
+> `computeRole` in `lib/pr/appstate.ts` reads `RemoteState.viewer` against
+> `PullRequest.author`, and additionally withholds `author` when
+> `PullRequest.headRepo` is `null` (a deleted fork cannot be committed to,
+> issue #273). The `deriveRole` helper and the `GitHubClient` lookup described
+> below are gone. See [ADR 0002 §4](../../adr/0002-data-model.md) for the
+> derivation rule; the reasoning here is kept as history.
+
 ## Problem
 
 The author edit/commit flow is unreachable in normal builds. `App.tsx` defaults

@@ -142,8 +142,14 @@ heavy drop shadows.
   (`--red*` for errors, `--amber*` for warnings); auto-dismiss after a few
   seconds with a close affordance.
 - **Floating controls** (`.debug-fab` bottom-left, `.role-fab` bottom-right):
-  pill/circle, translucent, lift on hover. Dev-only controls (e.g. the
-  role switch behind `BARK_DEV_ROLE_SWITCH`) live here, out of the main chrome.
+  pill/circle, translucent, lift on hover. This corner is where anything that is
+  not part of the product surface goes, out of the main chrome. Two live there
+  today, and they are gated differently on purpose: `.role-fab` is build-gated
+  (`BARK_DEV_ROLE_SWITCH`) because it changes what the app does, while
+  `.debug-fab` is always rendered — a click opens a popover of internal state
+  whose only action is a manual refresh (ADR 0005 §5). Keep that split: a
+  floating control that only _reveals_ state may ship; one that changes
+  behaviour is build-gated.
 
 ## 4. Working rules
 

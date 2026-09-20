@@ -1,5 +1,11 @@
 # Author Role Derivation Implementation Plan
 
+> **Superseded (2026-09).** `deriveRole` and the `GitHubClient.getAuthenticatedUser`
+> wiring this plan builds are gone; the role is derived by `computeRole` in
+> `lib/pr/appstate.ts` from `RemoteState.viewer`, `PullRequest.author` and
+> `PullRequest.headRepo` ([ADR 0002 §4](../../adr/0002-data-model.md)). Kept as
+> history — do not execute it.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** In normal builds, automatically put the PR's author into author mode (so the `Commit` button is reachable) by comparing the authenticated user's GitHub login to the PR author's login.

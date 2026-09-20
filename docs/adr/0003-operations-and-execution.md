@@ -3,6 +3,7 @@
 - Date: 2026-06-25
 - Status: Accepted
 - Builds on: [ADR 0001](0001-pr-data-layer-architecture.md), [ADR 0002](0002-data-model.md)
+- Amended: 2026-09 (#294) — §7, legacy `bark:v1` metadata is read, not discarded.
 
 ## Context
 
@@ -107,7 +108,9 @@ For Threads with no native body to embed in, identity is resolved at fetch time 
 
 For out-of-diff threads the join is by ownership instead: the earliest issue comment bearing a `threadId` is the thread's root, its REST id becomes `Thread.remoteIssueCommentId`, and `Thread.resolved` is read from that comment's `resolved` metadata. A later comment carrying the same `threadId` (a reply, or a forged fence) never contributes resolved state.
 
-**Legacy metadata is discarded.** Bark is pre-release, so no production data needs migration. Any hidden metadata in a comment body that does not match the current envelope (wrong version marker, wrong schema, unparseable) is silently dropped during extraction and the comment is treated as `meta: null` — i.e. as a foreign comment Bark did not author. The Executor never attempts to translate, repair, or re-emit legacy payloads.
+**Legacy metadata is read, never rewritten.** The envelope Bark writes is `bark:v2`. The extractor additionally accepts the `bark:v1` fence and its original `docreview:v1` alias read-only and maps them to the v2 shape (field renames, anchor normalisation, v1 `event` kept as `legacyResolveEvent` so legacy resolve-marker comments are recognised and dropped rather than rendered). Only a payload that is unparseable, fails validation, or carries an unknown version marker is discarded, and the comment is then treated as `meta: null` — a foreign comment Bark did not author.
+
+This is not a migration and there is no migration path: v1 payloads live in comment bodies on github.com, which a client release cannot rewrite, so every release has to keep reading them. Local legacy data is a different matter: the legacy `chrome.storage.local` keys _are_ dropped rather than migrated ([ADR 0002](0002-data-model.md)). The Executor never repairs or re-emits a v1 payload; a comment posted from v2 onwards always carries a v2 fence. See `lib/pr/metadata.ts` (`extractMetadata`, `parseV1`).
 
 ## Consequences
 
