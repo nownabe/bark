@@ -3,6 +3,8 @@
 - Date: 2026-06-24
 - Status: Accepted
 - Companion: [ADR 0001 — PR data flow](0001-pr-data-layer-architecture.md) scopes the _how_ (Repository, Reconciler, Executor, state machine, conflict policy). This ADR scopes the _what_ (entity shapes, fields, layering, identity).
+- Amended: 2026-07-22 — §3, `RemoteState.changedFiles` (in place, see the note there).
+- Amended: 2026-09 (#294) — §6, the reviewer's editor buffer is persisted and materialises at submit; legacy metadata is read, not dropped.
 
 ## Context
 
@@ -205,21 +207,21 @@ The hidden metadata envelope (its layout, base64 encoding, version field) is the
 
 ### 6. Reviewer-mode editor buffer
 
-The reviewer's editor buffer (the in-progress edited source of a Markdown file) is **not** modeled as a `LocalState` entity. It lives in component-local React state in the editor component.
+The reviewer's editor buffer (the in-progress edited source of a Markdown file) is **not** a `LocalState` entity. It has no remote identity, no sync lifecycle, and nothing about it round-trips through GitHub until the reviewer submits; a `Comment` is the unit that does.
 
-- The component holds the live editor source.
-- At appropriate moments (debounce, blur, explicit save, submit), the component diffs the buffer against the base source and **materialises** the resulting hunks as `Comment`s with `state: 'draft'` and a ` ```suggestion ` body — adding, updating, or removing them in `LocalState` to match the current set of hunks. A materialised hunk's `id` is derived from `(path, baseSha, range, replacement)`, so re-materialising the same hunk after a failed post updates the same `Comment` instead of creating a second one.
-- On page reload, the component reconstructs its editor buffer by applying the persisted draft suggestion bodies to the base source.
+**It is nevertheless persisted, on its own key.** `SuggestionEdit` — `{ source, base, baseSha?, comments }` per path — is stored under `pr:{owner}/{repo}#{n}:suggestion-edits` in `chrome.storage.local`, written on a 400 ms debounce with read-modify-write per path so a file edited elsewhere is never clobbered (`lib/drafts.ts`, `entrypoints/review/hooks/useSuggestionEdits.ts`). Losing a half-typed replacement on reload would be a real data loss, and the entity rules exist to keep `LocalState` disciplined, not to forbid persistence outside it.
 
-Trade-off: any partial replacement the reviewer has typed but not yet "saved" to a Comment is lost on reload. Mitigation is the component's responsibility (frequent auto-save, blur-triggered save, etc.).
+**Materialisation happens once, at Submit.** Until then the edit stays "live": the editor shows it as tracked changes and the sidebar lists it as a pending suggestion under a display-only id (`live:{sl}:{el}`), with no `Comment` in `LocalState`. On Submit, the accumulated edits across every path are diffed against their base source and the resulting hunks become `Comment`s with `state: 'draft'` and a ` ```suggestion ` body, which then follow the normal draft → syncing → synced path. A successful submit discards the persisted edits.
 
-This keeps `LocalState` focused on entities that round-trip through GitHub and leaves the live-editing UX entirely to the editor component.
+A materialised hunk's `id` is **derived, not minted**: `suggestion:{sl}-{el}:{digest(path, baseSha, replacement)}`. A hunk identical in `(path, baseSha, range, replacement)` to a Comment already in `LocalState` therefore _is_ that Comment — retried when it is a parked draft, and skipped when it is already `synced` — so a retry after a partial failure cannot post the same suggestion twice (issue #308). This satisfies §2's "generated at creation": a deterministic generator is still a generator.
+
+Consequences of materialising at submit rather than continuously: a suggestion has no `Comment` identity, and no per-hunk error state, until it is submitted; and the two persistence paths (`SuggestionEdit`, `LocalState`) can briefly describe the same hunk after a failed submit, which the derived id makes a duplicate-by-identity rather than a duplicate-on-GitHub. Folding `SuggestionEdit` into the Repository is planned but not done.
 
 ### 7. What is removed from the legacy model
 
 - **`kind` field on Comment** — derived from `body`.
 - **`suggestion` (replacement) field on Comment** — derived from `body`.
-- **Reviewer-side `SourceDraft`** — replaced by component-local buffer + draft `Comment`s.
+- **Reviewer-side `SourceDraft`** — replaced by the per-path `SuggestionEdit` buffer plus the draft `Comment`s it materialises at submit (§6).
 - **`RejectedSuggestions`** — rejection is now expressed as "Thread is resolved without a corresponding commit", in diff and out of diff alike. GitHub is the source of truth (GraphQL `isResolved`, or the root comment's `resolved` metadata); Bark does not maintain a parallel local-only rejection set.
 - **`PendingDraft` / `CommentMetadata` / `ExistingComment`** — three legacy representations of a single concept, collapsed into one `Comment` with a `state` field.
 - **`event: 'resolve'` marker comments** — superseded by direct GraphQL `isResolved` reads for review threads and, for out-of-diff (issue-comment) threads, by a `resolved` flag in the root comment's own hidden metadata that the Executor rewrites in place. Neither path posts a comment.
@@ -237,15 +239,15 @@ This keeps `LocalState` focused on entities that round-trip through GitHub and l
 
 ### Negative / costs
 
-- **Reviewer auto-save responsibility moves to the component.** Partial typed replacements can be lost across reload unless the component saves aggressively. This is a UX-quality concern to be designed into the editor component.
+- **The reviewer's edits are a second persistence path.** `SuggestionEdit` has its own `chrome.storage.local` key and its own debounced write path, separate from the Repository's whole-state write. Retention ([ADR 0001 §2](0001-pr-data-layer-architecture.md)) has to name that key explicitly to stay in step, and anything that changes storage behaviour has two places to look instead of one.
 - **Identity propagation through GraphQL joins requires Executor effort.** Stitching `remoteThreadId` to local `Thread.id` via the contained `Comment`s is an extra step every fetch. It is encapsulated, but it does exist.
 - **A reply chain involving multiple drafts requires ordered execution.** The Executor must post the parent first, learn its `remoteId`, then post the child with `in_reply_to`. This sequencing belongs to the Operation specification (deferred).
 
 ### Deferred
 
-- The Component-side reviewer-editor auto-save policy.
+- Folding `SuggestionEdit` into the Repository, so the reviewer's edits share one persistence path with the rest of `LocalState` (§6).
 
-The `Operation` catalog is specified in [ADR 0003](0003-operations-and-execution.md). The re-anchoring algorithm is specified in [ADR 0004](0004-reanchoring.md). The refresh policy and Snackbar error surface are specified in [ADR 0005](0005-refresh-policy.md). No data-migration plan is required (pre-release): legacy `chrome.storage.local` keys (`drafts`, `suggestion-edits`, `dismissed-suggestions`) and legacy hidden-metadata payloads in test data are dropped rather than migrated.
+The `Operation` catalog is specified in [ADR 0003](0003-operations-and-execution.md). The re-anchoring algorithm is specified in [ADR 0004](0004-reanchoring.md). The refresh policy and Snackbar error surface are specified in [ADR 0005](0005-refresh-policy.md). No data-migration plan is required for local storage (pre-release): the legacy `chrome.storage.local` keys (`drafts`, `suggestion-edits`, `dismissed-suggestions`) are dropped rather than migrated. Hidden metadata already posted to github.com cannot be dropped the same way — it is read as `bark:v1` and mapped to the current envelope on extraction ([ADR 0003 §7](0003-operations-and-execution.md)).
 
 ## References
 

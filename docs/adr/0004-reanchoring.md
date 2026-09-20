@@ -8,6 +8,8 @@
 - Amended: 2026-09 (#280) — the line map is a memoised line-level Myers diff.
 - Amended: 2026-09 (#311) — per-endpoint region search for multi-line anchors; span-local merge for accepts.
 - Amended: 2026-09 (#283) — §8, the head ↔ edited-document coordinate bridge.
+- Amended: 2026-09 (#267) — §1/§2/§6, head-sha `FileContent` is prefetched for every anchored path.
+- Amended: 2026-09 (#294) — §5, force-pushed shas stay fetchable; §4, `shifted` vs R9's `addressed`.
 
 ## Context
 
@@ -82,6 +84,8 @@ Notes:
 
 `current` and `mapped` are presentationally identical; the distinction is for debugging / telemetry only.
 
+**`shifted` is a raw signal, not a verdict.** It states one mechanical fact: the anchored line was located but the text there is no longer `anchor.quote`. Whether that edit _answers_ the comment is a separate, higher-level judgement — R9's `addressed` (issue #3, design doc §7.9), which is derived from this signal plus the review rounds (which review reviewed which commit, and which commit changed the region afterwards). That derivation is specified with R9 and is not part of this ADR; nothing in the data model stores it. So the same event legitimately reads as a warning here ("the text moved under this comment — look before you post") and as a completion hint there ("the author touched what this comment pointed at").
+
 ### 5. Edge cases
 
 - **An endpoint's source line was modified or removed** → region search for that endpoint (§3), single- and multi-line anchors alike. An empty region (the line was deleted with nothing in its place), no qualifying candidate, a similarity tie, or a located end at or before the located start → `outdated`. No clipping to a partial range — an explicit failure beats a silent half-truth.
@@ -89,7 +93,7 @@ Notes:
 - **Empty `quote`** → `outdated` (defensive; should not occur given creation invariants).
 - **More than 65,535 distinct lines across the two revisions** (the one-code-unit line encoding's ceiling) → no lines are kept and every anchor on the file is `outdated`; an explicit, visible failure rather than a wrong map.
 - **Legacy line-based anchor** (`sc = ec = 1` with a non-empty `quote`, written before the `quote` definition in ADR 0002 §3) → normalised to `ec = length(last line) + 1` at ingress (metadata parse, LocalState hydration); the algorithm never sees the legacy shape.
-- **`anchor.sha` no longer in the PR's branch history** (e.g. force-push removed it) → `GET contents` returns 404 → `outdated`.
+- **`anchor.sha` no longer in the PR's branch history** (e.g. a force-push rewrote the branch) → usually _not_ a failure. `GET /repos/.../contents/{path}?ref={sha}` addresses a commit object, not a ref, and a commit dropped from a branch normally stays fetchable (GitHub also retains PR head commits under `refs/pull/{n}/head`), so the fetch succeeds and re-anchoring proceeds through the line map like any other sha advance. Only a fetch that actually 404s — the commit was garbage-collected, or the path/repository is gone — leaves `FileContent` missing and yields `outdated`.
 
 ### 6. Computation location
 

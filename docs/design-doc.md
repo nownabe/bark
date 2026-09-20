@@ -20,6 +20,14 @@ operations, or re-anchoring. Code comments do not reference this doc's section
 numbers (only the ADRs are referenced from code); rationale that code needs lives
 in the code as self-contained comments.
 
+**[`superpowers/`](superpowers/) is history, not authority.** The specs and plans
+there are dated work records for a single change, kept for their rationale; they
+are never updated as the code moves on. Read them for "why was this built this
+way", never for "how does Bark work now" — for that, the ADRs win, then this doc.
+A superpowers document that has since been overruled carries a **Superseded**
+banner at the top pointing at what replaced it, but the absence of a banner is
+not a promise that the document is still current.
+
 ---
 
 ## 1. Overview
@@ -173,8 +181,32 @@ limits. Each posted comment body ends with structured metadata embedded as an
 invisible HTML comment:
 
 ```text
-<!-- bark:v1 {"cid":"...","path":"docs/spec.md","range":{"sl":12,"sc":4,"el":12,"ec":20},"quote":"...","sha":"abc123","thread":"t1"} -->
+<!-- bark:v2 eyJjaWQiOiJjXzEiLCJ0aHJlYWRJZCI6InRfMSIsInBhdGgiOiJkb2NzL3NwZWMubWQiLCJhbmNob3IiOnsic2hhIjoiYWJjMTIzIiwicmFuZ2UiOnsic2wiOjEyLCJzYyI6NCwiZWwiOjEyLCJlYyI6MjB9LCJxdW90ZSI6InRoZSBleGFjdCBzb3VyY2UgdGV4dCJ9fQ== -->
 ```
+
+The payload is base64-encoded JSON (not raw JSON: a raw body would break on
+`-->` and on newlines in `quote`). Decoded, the example above is:
+
+```json
+{
+  "cid": "c_1",
+  "threadId": "t_1",
+  "path": "docs/spec.md",
+  "anchor": {
+    "sha": "abc123",
+    "range": { "sl": 12, "sc": 4, "el": 12, "ec": 20 },
+    "quote": "the exact source text"
+  }
+}
+```
+
+Two optional fields appear on top of that: `resolved`, written only on the root
+comment of an out-of-diff thread ([ADR 0002 §5](adr/0002-data-model.md)), and the
+pair `quoteDigest` / `quoteLength`, written when `quote` exceeds 1,000 characters
+and travels as an excerpt — the fetcher then restores the full text from the file
+at `(anchor.sha, path)` and verifies it against the digest, so the cap never
+reaches the model. A comment body is capped at 65,536 characters by GitHub, and
+the envelope counts against it.
 
 This lets Bark:
 
@@ -185,8 +217,13 @@ This lets Bark:
   Bark (the marker is an HTML comment, so it's hidden).
 
 GitHub is the "storage/sync transport"; Bark is the "experience reconstruction
-layer". The codec lives in `lib/metadata.ts`. If the marker is missing or
-corrupt, metadata is `null` and Bark degrades to a line anchor (§12-8).
+layer". The codec — the authoritative field list — lives in `lib/pr/metadata.ts`,
+and the envelope is the Executor's private concern
+([ADR 0002 §5](adr/0002-data-model.md), [ADR 0003 §7](adr/0003-operations-and-execution.md)).
+The extractor also reads the pre-`v2` `bark:v1` / `docreview:v1` fences, which
+v0.2.0 posted to github.com and no client release can rewrite. If the marker is
+missing or unparseable, metadata is `null`: Bark treats the comment as one it did
+not author (§12-8).
 
 ### 7.2 Comments
 
@@ -270,11 +307,24 @@ requests: read/write` on the target repos) and registers it in the extension;
 
 ### 7.7 Local storage
 
-- `chrome.storage.local`: token, settings, lightweight metadata.
-- IndexedDB: per-PR pending comments/Suggestions, document snapshots, position-map
-  cache.
-- Key design: drafts hang under `pr:{owner}/{repo}#{number}`.
-- See [ADR 0002 §1](adr/0002-data-model.md) for the persisted/derived split.
+**`chrome.storage.local` is the only store Bark uses.** The original plan put
+per-PR drafts in IndexedDB; that was never built, and the ADRs supersede it.
+There is no IndexedDB, no `chrome.storage.session`, and no snapshot or
+position-map cache on disk.
+
+- Token and auth method, globally keyed.
+- Per PR, under the `pr:{owner}/{repo}#{number}` prefix: `:state` (the
+  Repository's `LocalState`, written whole), `:suggestion-edits` (the reviewer's
+  in-progress per-file edits, [ADR 0002 §6](adr/0002-data-model.md)), and
+  `:dismissed-suggestions`.
+- Nothing else is persisted. `RemoteState` is in-memory and refetched every
+  session, and `AppState` is derived on demand
+  ([ADR 0001 §2](adr/0001-pr-data-layer-architecture.md),
+  [ADR 0002 §1](adr/0002-data-model.md)).
+- Storage is bounded by eviction rather than by `unlimitedStorage`: on every
+  bootstrap the mirror of every other PR that carries no unsubmitted work is
+  dropped, and a merged PR's keys go entirely
+  ([ADR 0001 §2](adr/0001-pr-data-layer-architecture.md) Retention).
 
 ### 7.8 Re-anchoring (R7)
 
@@ -302,10 +352,20 @@ metadata**, not persisted.
 
 **Automatic status**:
 
-- If a comment's anchor region changed in a commit after its `createdAtSha` →
-  `addressed` (record `addressedBySha`).
-- If the thread is resolved on GitHub → `resolved` (GraphQL review-thread state).
-- If the region disappeared and re-anchoring failed → `outdated`.
+- If the thread is resolved on GitHub → `resolved` (GraphQL review-thread state
+  for in-diff threads, the root comment's `resolved` metadata for out-of-diff
+  ones — [ADR 0002 §5](adr/0002-data-model.md)).
+- Re-anchoring supplies the raw per-comment signals, and
+  [ADR 0004 §4](adr/0004-reanchoring.md) owns their names and meanings:
+  `shifted` (the anchored line was located but the text there changed) and
+  `outdated` (the anchor could not be located at all).
+- `addressed` is R9's own derivation, not a re-anchoring status: a comment counts
+  as addressed when its anchor region is `shifted` by a commit that lands after
+  the round the comment belongs to. It is computed for the timeline from the
+  round data above and is not stored: [ADR 0002 §3](adr/0002-data-model.md)'s
+  `Comment` has no `addressedBySha` field, and the unreferenced one left in
+  `lib/github.ts` is dead legacy, not the model. ADR 0004 presents the same
+  `shifted` signal as a warning before submit — same fact, two readings.
 
 **History view (UI)**:
 
@@ -373,10 +433,13 @@ baseline commit to head.
 - `permissions`: `storage` (the content script is statically declared in the
   manifest, so `scripting` is **not** needed — Chrome Web Store rejects it as
   declared-but-unused).
-- Background is a service worker; split long work and persist state to IndexedDB
-  since it can be terminated.
-- Rate limit: 5,000 req/h authenticated. Use conditional requests (ETag) and batch
-  sends to conserve.
+- Background is a service worker and can be terminated at any time, so it holds
+  no durable state: it does the device-flow token exchange and routes tab
+  activation, and everything that must survive is in `chrome.storage.local`
+  (§7.7).
+- Rate limit: 5,000 req/h authenticated. Every GET carries `If-None-Match` from
+  an in-memory ETag cache — a 304 replays the cached body and costs no rate
+  limit — and writes are batched (one review POST per submission).
 
 ## 11. Milestones
 
@@ -388,9 +451,11 @@ baseline commit to head.
 - **M4**: change visualization (R10), review↔revision history view (R9).
 - **M5**: Device Flow auth, cross-file navigation (R8).
 
-> M0–M3 and Device Flow auth are implemented; R9/R10 (history and change
-> visualization) remain the main open product work. See `CHANGELOG.md` for the
-> shipped feature history.
+> M0–M3 and M5 are implemented — Device Flow auth, and cross-file navigation
+> (R8) via the changed-`.md` file selector derived from `RemoteState`
+> ([ADR 0002 §3](adr/0002-data-model.md), 2026-07-22 amendment). M4 — R9
+> (history) and R10 (change visualization) — remains the main open product work.
+> See `CHANGELOG.md` for the shipped feature history.
 
 ## 12. Risks / Open Questions
 
@@ -398,7 +463,12 @@ baseline commit to head.
    (quote + permalink) + embedded metadata for full reconstruction** (D4).
 2. **Token storage security**: acceptability of extension-local storage;
    session-only storage or a WebAuthn gate if needed.
-3. **Re-anchoring robustness**: how far it follows after force-push / rebase.
+3. ~~Re-anchoring robustness after force-push / rebase~~ → **closed: a
+   force-pushed sha normally stays fetchable, so re-anchoring runs as usual**.
+   The contents API addresses a commit object rather than a ref, and a rewritten
+   branch does not make its old commits unreachable, so the line map still has
+   both ends; only a genuine 404 falls back to `outdated`
+   ([ADR 0004 §5](adr/0004-reanchoring.md)).
 4. **Edit-mode diff noise**: at what granularity to "write back only the touched
    range".
 5. **Async conflicts across reviewers**: UX of display skew from different fetch
@@ -407,8 +477,11 @@ baseline commit to head.
 7. ~~Default baseline for change visualization~~ → **decided: default is "my last
    viewed sha"; no change display on first view; no diff vs. PR base by
    default** (D8).
-8. **Metadata tamper/loss tolerance**: fallback when the embedded metadata is
-   hand-edited or deleted (degrade to a line anchor).
+8. ~~Metadata tamper/loss tolerance~~ → **decided: no repair, no guessing**. A
+   comment whose fence is missing, hand-edited or unparseable extracts as
+   `meta: null` and is treated as a foreign comment — one Bark did not author.
+   It gets no Bark anchor and joins no Bark thread; identity is never guessed
+   back from the body ([ADR 0003 §7](adr/0003-operations-and-execution.md)).
 
 ## 13. Alternatives considered
 

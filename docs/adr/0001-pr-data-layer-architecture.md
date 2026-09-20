@@ -4,6 +4,8 @@
 - Status: Accepted
 - Supersedes: the ad-hoc data flow currently implemented across `lib/drafts.ts`, `lib/comments.ts`, `lib/storage.ts`, `lib/authorSubmit.ts`, and `entrypoints/review/App.tsx`
 - Companion: [ADR 0002 — Data model](0002-data-model.md) defines the entity shapes that flow through this pipeline. This ADR scopes the _how_ (movement, lifecycle, components); ADR 0002 scopes the _what_ (entities, fields, identity).
+- Amended: 2026-09 (#289) — §2, Retention and persist-failure policy for `chrome.storage.local`.
+- Amended: 2026-09 (#294) — closing note, legacy hidden metadata is read, not discarded.
 
 ## Context
 
@@ -258,7 +260,7 @@ No structural decisions remain deferred for the data-flow layer. Follow-up ADRs 
 - [ADR 0004](0004-reanchoring.md) — re-anchoring algorithm and `RemoteState.FileContent` keyed by `(sha, path)`.
 - [ADR 0005](0005-refresh-policy.md) — refresh trigger policy and Snackbar error surface.
 
-No data-migration plan is required: Bark is pre-release, so no production data exists to migrate. Old hidden-metadata payloads encountered in test data are silently discarded — see [ADR 0003 §7](0003-operations-and-execution.md).
+No data-migration plan is required for local storage: Bark is pre-release, so the legacy `chrome.storage.local` keys are dropped rather than migrated. Hidden metadata is the exception — it lives in comment bodies on github.com, which no client release can rewrite, so the extractor keeps reading the legacy `bark:v1` / `docreview:v1` fences and maps them to the current shape. See [ADR 0003 §7](0003-operations-and-execution.md).
 
 ## References
 

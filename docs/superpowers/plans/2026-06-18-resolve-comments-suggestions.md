@@ -1,5 +1,12 @@
 # Resolve comments & suggestions — Implementation Plan
 
+> **Superseded (2026-09).** Resolved state is no longer an event comment, and the
+> metadata is no longer the source of truth. Review threads use GitHub's native
+> `isResolved`; out-of-diff threads carry `resolved` in the root comment's hidden
+> metadata. See ADR 0002 §5/§7, ADR 0003 §5, and the
+> [design](../specs/2026-06-18-resolve-comments-suggestions-design.md) this plan
+> implements.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let reviewers/authors resolve Bark comment & suggestion threads (accepted suggestions count as resolved automatically), with a multi-select filter to view pending / sent / resolved items.
