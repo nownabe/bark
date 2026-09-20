@@ -21,7 +21,6 @@ export function buildLineMap(oldSource: string, newSource: string): Map<number, 
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
       if (oldLines[i - 1] === newLines[j - 1]) {
-        // biome-ignore lint/style/noNonNullAssertion: bounded by loop indices
         dp[i]![j] = dp[i - 1]![j - 1]! + 1;
       } else {
         dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
