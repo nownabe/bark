@@ -15,9 +15,16 @@
 // of v2 — but v1 `event` is kept as `legacyResolveEvent` so the fetcher
 // can recognise and drop legacy resolve-marker comments (issue #186).
 
-import { type Anchor, normalizeAnchor } from "./types";
+import { type Anchor, type Comment, normalizeAnchor } from "./types";
 
 const MARKER = "bark:v2";
+
+/** GitHub rejects a comment body longer than this (REST, 422). */
+export const BODY_LIMIT = 65_536;
+/** Most `quote` characters the fence carries. Beyond it the envelope keeps an
+ *  excerpt plus `quoteDigest`/`quoteLength` and the fetcher restores the full
+ *  text from the file content at `(anchor.sha, path)` (issue #279). */
+export const QUOTE_EXCERPT_CHARS = 1000;
 const FENCE_RE_V2 = /\n*<!--\s+bark:v2\s+([A-Za-z0-9+/=]+)\s+-->\s*$/;
 const FENCE_RE_V1 = /\n*<!--\s*(?:bark|docreview):v1\s+([A-Za-z0-9+/=]+)\s*-->\s*$/;
 
@@ -32,6 +39,10 @@ export type WireMetadata = {
    *  comment is (issue #270). Ignored on review comments (GraphQL isResolved
    *  wins) and on any comment that is not the earliest bearer of `threadId`. */
   resolved?: boolean;
+  /** Set only when `anchor.quote` was capped: digest and length of the FULL
+   *  quote, so the fetcher can restore it and verify the restoration. */
+  quoteDigest?: string;
+  quoteLength?: number;
   /** Read-only, v1 only. Legacy Bark resolved a thread by posting a hidden
    *  marker comment ("Resolved via Bark." / "Reopened via Bark.") carrying
    *  `event` in its v1 fence. v2 represents resolved state on the Thread
@@ -41,12 +52,60 @@ export type WireMetadata = {
   legacyResolveEvent?: "resolve" | "unresolve";
 };
 
-/** Append the metadata fence to a comment body. */
+/** The envelope the Executor posts for a Comment. One definition, so the
+ *  Planner's size check measures exactly what the transport will send. */
+export function envelopeOf(c: Comment): WireMetadata {
+  return { cid: c.id, threadId: c.threadId, path: c.path, anchor: c.anchor };
+}
+
+/** Length of the body that would go on the wire, for GitHub's 65,536-character
+ *  limit. */
+export function wireBodyLength(body: string, meta: WireMetadata): number {
+  return embedMetadata(body, meta).length;
+}
+
+/** Append the metadata fence to a comment body. A quote longer than
+ *  {@link QUOTE_EXCERPT_CHARS} travels as an excerpt plus digest and length;
+ *  a shorter one produces the same bytes as before the cap existed. */
 export function embedMetadata(body: string, meta: WireMetadata): string {
-  const encoded = base64Encode(JSON.stringify(meta));
+  const quote = meta.anchor.quote;
+  const payload =
+    quote.length > QUOTE_EXCERPT_CHARS
+      ? {
+          ...meta,
+          anchor: { ...meta.anchor, quote: quote.slice(0, QUOTE_EXCERPT_CHARS) },
+          quoteDigest: contentDigest(quote),
+          quoteLength: quote.length,
+        }
+      : meta;
+  const encoded = base64Encode(JSON.stringify(payload));
   const trimmed = body.replace(/\s*$/, "");
   const separator = trimmed === "" ? "" : "\n\n";
   return `${trimmed}${separator}<!-- ${MARKER} ${encoded} -->`;
+}
+
+/** cyrb53: a sync, dependency-free 53-bit content hash, rendered as 14 hex
+ *  characters.
+ *
+ *  Why not SHA-256 via Web Crypto: `crypto.subtle.digest` is async, which
+ *  would make `embedMetadata` — and its four transport call sites and every
+ *  fence fixture — async for no security gain. The digest guards against
+ *  mis-restoration (wrong range, corrupt fence), not against an attacker, who
+ *  can already rewrite any fence field; identity trust is the earliest-bearer
+ *  rule (issue #190). Never use it for a security decision. */
+export function contentDigest(s: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, "0");
 }
 
 /** Split a comment body into its visible portion and the parsed metadata.
@@ -91,8 +150,14 @@ function parseV2(decoded: string): WireMetadata | null {
   // A non-boolean `resolved` reads as "not resolved" rather than as an
   // invalid payload — a stray field must not demote a real Bark comment to
   // foreign (issue #270).
-  const { resolved, ...rest } = value;
-  const meta = { ...rest, anchor: normalizeAnchor(rest.anchor) };
+  const { resolved, quoteDigest, quoteLength, ...rest } = value;
+  // Both halves of the restoration key or neither: a half-written pair would
+  // make the fetcher trust an unverified quote (issue #279).
+  const capped =
+    typeof quoteDigest === "string" && typeof quoteLength === "number"
+      ? { quoteDigest, quoteLength }
+      : {};
+  const meta = { ...rest, anchor: normalizeAnchor(rest.anchor), ...capped };
   return resolved === true ? { ...meta, resolved: true } : meta;
 }
 

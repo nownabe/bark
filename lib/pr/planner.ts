@@ -5,6 +5,7 @@
 //
 // See docs/adr/0003-operations-and-execution.md §3.
 
+import { BODY_LIMIT, envelopeOf, wireBodyLength } from "./metadata";
 import type { ReconcileOperation } from "./operations";
 import { reanchor } from "./reanchor";
 import type {
@@ -55,12 +56,18 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
         const comment = toHeadCoordinates(op.comment, ctx);
         if (comment === null) {
           rejects.push({ kind: "reject-comment", comment: op.comment, error: OUTDATED_ANCHOR });
+        } else if (isTooLarge(comment)) {
+          rejects.push({ kind: "reject-comment", comment: op.comment, error: BODY_TOO_LARGE });
         } else {
           (ctx.isInDiff(comment) ? inDiff : outOfDiff).push(comment);
         }
         break;
       }
       case "create-reply": {
+        if (isTooLarge(op.comment)) {
+          rejects.push({ kind: "reject-comment", comment: op.comment, error: BODY_TOO_LARGE });
+          break;
+        }
         // Routed on the GitHub object the parent actually became: a review
         // comment nests via the review-reply endpoint, while issue comments
         // are flat — there is no reply endpoint for them — so a reply to an
@@ -173,6 +180,17 @@ function commitRefusalReason(pr: PullRequest): string | null {
   }
   return null;
 }
+
+/** A review batch is atomic, so an oversized comment would take every other
+ *  comment in the same submit down with it (issue #279). Reject it alone. */
+function isTooLarge(c: Comment): boolean {
+  return wireBodyLength(c.body, envelopeOf(c)) > BODY_LIMIT;
+}
+
+const BODY_TOO_LARGE: ErrorInfo = {
+  message:
+    "This comment is too large for GitHub (limit 65,536 characters). Shorten the comment or split the suggestion.",
+};
 
 const OUTDATED_ANCHOR: ErrorInfo = {
   message:

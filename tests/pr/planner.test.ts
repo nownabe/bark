@@ -88,6 +88,29 @@ describe("planner — CreateComment routing", () => {
     ]);
   });
 
+  // Issue #279: GitHub caps a comment body at 65,536 characters and a review
+  // batch is atomic, so one oversized comment used to fail every other comment
+  // in the same submit.
+  test("a comment whose wire body exceeds GitHub's limit is rejected, the rest of the batch posts", () => {
+    const small = comment({ id: "small" });
+    const huge = comment({ id: "huge", body: "x".repeat(70_000) });
+    const steps = planExecution(
+      [
+        { kind: "create-comment", comment: small },
+        { kind: "create-comment", comment: huge },
+      ],
+      context(),
+    );
+    expect(steps).toHaveLength(2);
+    expect(steps[0]).toEqual({
+      kind: "post-review-batch",
+      commitId: "current-head",
+      comments: [small],
+    });
+    expect(steps[1]).toMatchObject({ kind: "reject-comment", comment: huge });
+    expect((steps[1] as { error: { message: string } }).error.message).toContain("too large");
+  });
+
   test("multiple in-diff CreateComments bundle into one PostReviewBatch", () => {
     const c1 = comment({ id: "c1", threadId: "t1" });
     const c2 = comment({ id: "c2", threadId: "t2" });

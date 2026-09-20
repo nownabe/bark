@@ -87,6 +87,7 @@ import {
   type SuggestionDecision,
 } from "../../lib/drafts";
 import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/metadata";
+import { BODY_LIMIT, envelopeOf, wireBodyLength } from "../../lib/pr/metadata";
 import { browser } from "wxt/browser";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { PullRequestRepository } from "../../lib/pr/repository";
@@ -115,6 +116,7 @@ import {
   DEV_ROLE_SWITCH,
   errMessage,
   installUrl,
+  quoteBlock,
   type ViewMode,
 } from "./uiHelpers";
 
@@ -893,7 +895,18 @@ function AppBody() {
           ? buildBlobPermalink(ref, path, headSha, anchor.startLine, anchor.endLine)
           : undefined,
     };
-    await prRepository.upsertComment(pendingDraftToComment(draft, viewerLogin ?? "you"));
+    const comment = pendingDraftToComment(draft, viewerLogin ?? "you");
+    // GitHub refuses a body over 65,536 characters, and a review batch is
+    // atomic — tell the reviewer now rather than at submit (issue #279).
+    // simplify: live suggestions are only checked by the Planner at submit;
+    // the upgrade path is a per-keystroke check on allPendingSuggestions.
+    if (wireBodyLength(composeDraftBody(draft), envelopeOf(comment)) > BODY_LIMIT) {
+      reportError(
+        "This comment is too large for GitHub (limit 65,536 characters). Shorten it or select less text.",
+      );
+      return;
+    }
+    await prRepository.upsertComment(comment);
     setCommentBody("");
     collapseSelection(); // deselect; the pending highlight stays
     setAnchor(null);
@@ -1129,10 +1142,7 @@ function AppBody() {
     const suggestion =
       d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
     if (d.inDiff) return `${d.body}${suggestion}`;
-    const quoted = d.quote
-      .split("\n")
-      .map((l) => `> ${l}`)
-      .join("\n");
+    const quoted = quoteBlock(d.quote);
     const note =
       d.kind === "suggestion"
         ? "\n\n(Out of diff: this suggestion will not show an Apply button.)"

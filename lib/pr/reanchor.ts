@@ -182,7 +182,9 @@ export function locateLine(
   return best.candidate;
 }
 
-function extractTextAtRange(source: string, range: Range): string {
+/** The source text an anchor's `range` covers — the definition of
+ *  `anchor.quote` (ADR 0002 §3). */
+export function extractTextAtRange(source: string, range: Range): string {
   const lines = source.split("\n");
   const startLine = lines[range.sl - 1] ?? "";
   if (range.sl === range.el) {

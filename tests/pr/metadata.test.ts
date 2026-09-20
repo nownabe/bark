@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { embedMetadata, extractMetadata, type WireMetadata } from "../../lib/pr/metadata";
+import {
+  BODY_LIMIT,
+  contentDigest,
+  embedMetadata,
+  envelopeOf,
+  extractMetadata,
+  QUOTE_EXCERPT_CHARS,
+  type WireMetadata,
+  wireBodyLength,
+} from "../../lib/pr/metadata";
+import type { Comment } from "../../lib/pr/types";
 
 function meta(overrides: Partial<WireMetadata> = {}): WireMetadata {
   return {
@@ -176,6 +186,57 @@ describe("metadata — extraction edge cases", () => {
     const out = extractMetadata(body);
     expect(out.meta).toEqual(m);
     expect(out.body).toBe("body\n\n<!-- bark:v2 oldfake -->\nmore body");
+  });
+});
+
+describe("metadata — bounded quote (issue #279)", () => {
+  const longQuote = "q".repeat(5000);
+  /** The fence payload as it went on the wire. */
+  const decodeFence = (body: string): Record<string, unknown> => {
+    const payload = /<!-- bark:v2 ([A-Za-z0-9+/=]+) -->$/.exec(body)?.[1] ?? "";
+    return JSON.parse(atob(payload)) as Record<string, unknown>;
+  };
+
+  test("contentDigest is stable, and different inputs differ", () => {
+    expect(contentDigest("a")).toBe(contentDigest("a"));
+    expect(contentDigest("a")).not.toBe(contentDigest(""));
+    expect(contentDigest("x".repeat(2000))).not.toBe(contentDigest(`${"x".repeat(1999)}y`));
+  });
+
+  test("a quote over the excerpt cap is truncated and described by digest + length", () => {
+    const body = embedMetadata("hi", meta({ anchor: { ...meta().anchor, quote: longQuote } }));
+    const wire = decodeFence(body);
+    expect((wire.anchor as { quote: string }).quote.length).toBe(QUOTE_EXCERPT_CHARS);
+    expect(wire.quoteLength).toBe(5000);
+    expect(wire.quoteDigest).toBe(contentDigest(longQuote));
+  });
+
+  test("a quote at or under the cap keeps the fence byte-identical to before", () => {
+    const wire = decodeFence(embedMetadata("hi", meta()));
+    expect(wire).not.toHaveProperty("quoteDigest");
+    expect(wire).not.toHaveProperty("quoteLength");
+  });
+
+  test("extractMetadata surfaces the digest and length of a capped fence", () => {
+    const body = embedMetadata("hi", meta({ anchor: { ...meta().anchor, quote: longQuote } }));
+    const parsed = extractMetadata(body).meta;
+    expect(parsed?.quoteLength).toBe(5000);
+    expect(parsed?.quoteDigest).toBe(contentDigest(longQuote));
+    expect(parsed?.anchor.quote.length).toBe(QUOTE_EXCERPT_CHARS);
+  });
+
+  test("a 100 KB selection produces a wire body under GitHub's limit", () => {
+    const hugeQuote = "z".repeat(100_000);
+    const comment: Comment = {
+      id: "c1",
+      state: "draft",
+      threadId: "t1",
+      body: "please restructure",
+      author: { login: "alice" },
+      path: "README.md",
+      anchor: { sha: "h", range: { sl: 1, sc: 1, el: 1, ec: 100_001 }, quote: hugeQuote },
+    };
+    expect(wireBodyLength(comment.body, envelopeOf(comment))).toBeLessThan(BODY_LIMIT);
   });
 });
 

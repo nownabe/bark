@@ -10,7 +10,8 @@
 import type { ChangedFile } from "./diff";
 import { type GitHubClient, ghPaginate, ghRequest } from "./github-api";
 import type { PrRef } from "./github-transport";
-import { extractMetadata } from "./metadata";
+import { contentDigest, extractMetadata } from "./metadata";
+import { extractTextAtRange } from "./reanchor";
 import { listReviewThreads, type RawReviewThread } from "./review-threads";
 import type { Comment, FileContent, PullRequest, RemoteState, Thread, User } from "./types";
 
@@ -621,9 +622,42 @@ export async function fetchRemoteState(
   return {
     pullRequest,
     viewer,
-    comments,
+    comments: restoreCappedQuotes(comments, [...reviewRaw, ...issueRaw], fileContents),
     threads,
     fileEdits: [],
     fileContents,
   };
+}
+
+/** A fence over the quote cap carries an excerpt plus the full quote's digest
+ *  and length (issue #279). `anchor.sha` is content-addressed, so the full
+ *  quote is exactly the text at `anchor.range` in `FileContent(sha, path)`,
+ *  which this round already fetched. Restore it there, and keep the excerpt
+ *  when the file is missing or the restored text fails the digest — nothing
+ *  downstream may see an unverified quote.
+ *
+ *  simplify: restoration runs per fetch rather than being cached; the upgrade
+ *  path is memoising by `(sha, path, range)` if profiling ever shows it. */
+function restoreCappedQuotes(
+  comments: Comment[],
+  raw: Array<{ body: string }>,
+  fileContents: FileContent[],
+): Comment[] {
+  const capped = new Map<string, { digest: string; length: number }>();
+  for (const r of raw) {
+    const { meta } = extractMetadata(r.body);
+    if (meta?.quoteDigest !== undefined && meta.quoteLength !== undefined) {
+      capped.set(meta.cid, { digest: meta.quoteDigest, length: meta.quoteLength });
+    }
+  }
+  if (capped.size === 0) return comments;
+  return comments.map((c) => {
+    const want = capped.get(c.id);
+    if (!want) return c;
+    const source = fileContents.find((f) => f.sha === c.anchor.sha && f.path === c.path)?.source;
+    if (source === undefined) return c;
+    const full = extractTextAtRange(source, c.anchor.range);
+    if (full.length !== want.length || contentDigest(full) !== want.digest) return c;
+    return { ...c, anchor: { ...c.anchor, quote: full } };
+  });
 }

@@ -76,6 +76,8 @@ In-diff vs out-of-diff routing for `CreateComment` is computed at planning time 
 
 **Posted coordinates are the current head's.** A review has a single `commit_id`, and Bark always posts against `RemoteState.pullRequest.headSha`, so the `line` / `start_line` it sends must be in that commit's coordinates. `Comment.anchor` is immutable (ADR 0002 §2) and may carry an older sha, so at planning time each `CreateComment` is re-anchored `anchor.sha → headSha` with the same line map ADR 0004 uses for display (`RemoteState.fileContents` therefore holds every anchored path at both shas). The in-diff routing and the posted copy (including the embedded metadata `anchor`) use the mapped range; `LocalState` keeps the original anchor. A `CreateComment` whose mapping is `outdated` becomes a `RejectComment` Step instead: it never reaches GitHub and fails locally, so the rest of the submission proceeds and the batch cannot 422 on stale lines (issue #265).
 
+A `CreateComment` or `CreateReply` whose wire body (visible body + envelope) exceeds GitHub's 65,536-character limit is planned as `RejectComment` with a size error; the batch proceeds without it (issue #279).
+
 ### 6. Failure semantics
 
 Each `ExecutionStep` returns per-item results:
@@ -97,7 +99,7 @@ The Reconciler is not responsible for retry. The user observes the error in the 
 
 For every `PostReviewBatch` / `PostReply` / `PostIssueComment`, the Executor:
 
-1. Embeds `{ cid: Comment.id, threadId: Comment.threadId, anchor }` as base64-encoded hidden metadata in the comment body (ADR 0002 §5).
+1. Embeds `{ cid: Comment.id, threadId: Comment.threadId, anchor }` as base64-encoded hidden metadata in the comment body (ADR 0002 §5). The envelope's `anchor.quote` is capped at 1,000 characters; a capped envelope also carries `quoteDigest` and `quoteLength`. After the fetcher has loaded `FileContent(anchor.sha, path)`, it restores `quote` from `anchor.range` and keeps the excerpt only when the digest or length does not match.
 2. After the API call returns, matches the freshly-created GitHub comments back to `LocalState` `Comment` entries by extracting the same metadata from the response bodies. `POST /pulls/{n}/reviews` returns only the review object, so for `PostReviewBatch` the Transport instead lists the PR's review threads via GraphQL right after the POST and matches by `cid`. GitHub's listing can lag behind the write, so while any posted `cid` is missing the Transport re-lists with a small bounded backoff (two retries, ~2 s total) before giving up.
 3. Populates `Comment.remoteId` and flips state to `synced`. For a freshly-created thread it also fills the Thread's remote identity: `remoteThreadId` from the matched review thread (`PostReviewBatch`), or `remoteIssueCommentId` = the new comment's REST id when a top-level comment was posted as an issue comment (`PostIssueComment`). A `cid` still missing after the bound is reported as unmapped and handled per §6 (`draft + lastError`, adopted on the next refresh).
 
