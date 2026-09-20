@@ -195,6 +195,12 @@ async function submitWith(transport: Transport, edited: string): Promise<HTMLEle
     expect(container.querySelector(".topbar__pr-title")).not.toBeNull();
   });
 
+  await clickSubmit(container);
+  return container;
+}
+
+/** Click "Submit review" and confirm the modal. */
+async function clickSubmit(container: HTMLElement): Promise<void> {
   const submit = Array.from(container.querySelectorAll("button")).find((b) =>
     b.textContent?.startsWith("Submit review ("),
   );
@@ -207,7 +213,6 @@ async function submitWith(transport: Transport, edited: string): Promise<HTMLEle
   await act(async () => {
     fireEvent.click(confirm as HTMLButtonElement);
   });
-  return container;
 }
 
 function storedEdits(): Record<string, unknown> {
@@ -247,6 +252,48 @@ describe("App — reviewer submit whose comments fail to post", () => {
     await waitFor(() => {
       expect(container.querySelector(".snackbar")?.textContent).toContain("2 comments");
     });
+  });
+});
+
+// Issue #308: re-materialising the hunk on the retry used to mint a fresh cid,
+// so the parked failed draft and the new one both went out — two comments for
+// one edit.
+describe("App — retrying a suggestion submit after a failed post", () => {
+  test("posts exactly one comment for the hunk across both attempts", async () => {
+    const posted: string[][] = [];
+    let attempts = 0;
+    let nextRemoteId = 100;
+    const transport: Transport = {
+      ...happyTransport(),
+      async postReviewBatch(step) {
+        posted.push(step.comments.map((c) => c.id));
+        attempts += 1;
+        if (attempts === 1) return { ok: false, error: POST_FAILURE };
+        return {
+          ok: true,
+          mappings: step.comments.map((c) => ({
+            cid: c.id,
+            remoteId: nextRemoteId++,
+            remoteThreadId: `T${c.id}`,
+          })),
+        };
+      },
+    };
+
+    const container = await submitWith(transport, EDITED_ONE);
+    await waitFor(() => {
+      expect(container.querySelector(".snackbar")?.textContent).toContain("422 Unprocessable");
+    });
+    await clickSubmit(container);
+
+    await waitFor(() => {
+      expect(posted).toHaveLength(2);
+    });
+    expect(posted[0]).toHaveLength(1);
+    expect(posted[1]).toEqual(posted[0]);
+    expect(
+      repository.getLocalState().comments.filter((c) => c.body.includes("```suggestion")),
+    ).toHaveLength(1);
   });
 });
 

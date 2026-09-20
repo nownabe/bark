@@ -208,7 +208,7 @@ The hidden metadata envelope (its layout, base64 encoding, version field) is the
 The reviewer's editor buffer (the in-progress edited source of a Markdown file) is **not** modeled as a `LocalState` entity. It lives in component-local React state in the editor component.
 
 - The component holds the live editor source.
-- At appropriate moments (debounce, blur, explicit save, submit), the component diffs the buffer against the base source and **materialises** the resulting hunks as `Comment`s with `state: 'draft'` and a ` ```suggestion ` body — adding, updating, or removing them in `LocalState` to match the current set of hunks.
+- At appropriate moments (debounce, blur, explicit save, submit), the component diffs the buffer against the base source and **materialises** the resulting hunks as `Comment`s with `state: 'draft'` and a ` ```suggestion ` body — adding, updating, or removing them in `LocalState` to match the current set of hunks. A materialised hunk's `id` is derived from `(path, baseSha, range, replacement)`, so re-materialising the same hunk after a failed post updates the same `Comment` instead of creating a second one.
 - On page reload, the component reconstructs its editor buffer by applying the persisted draft suggestion bodies to the base source.
 
 Trade-off: any partial replacement the reviewer has typed but not yet "saved" to a Comment is lost on reload. Mitigation is the component's responsibility (frequent auto-save, blur-triggered save, etc.).

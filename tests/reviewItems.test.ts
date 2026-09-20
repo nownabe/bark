@@ -20,6 +20,7 @@ import {
   replyAnchor,
   revealSubmittedFacets,
   reviewEntryCounts,
+  suggestionDraftCid,
   summarizePending,
   threadRangeAt,
   sortPos,
@@ -728,6 +729,30 @@ describe("buildPendingSuggestions", () => {
     // and `ec` past the last quoted line's end (issue #276).
     expect(out[1].range).toEqual({ sl: 7, sc: 1, el: 8, ec: 5 });
     expect(out[0].range).toEqual({ sl: 3, sc: 1, el: 3, ec: 5 });
+  });
+});
+
+// Issue #308: a hunk re-materialised after a failed post must land on the same
+// Comment, or the retry posts the edit a second time.
+describe("suggestionDraftCid", () => {
+  const hunk = {
+    path: "docs/a.md",
+    baseSha: "h",
+    range: { sl: 2, sc: 1, el: 2, ec: 3 },
+    replacement: "B2",
+  };
+
+  test("the same hunk always yields the same id", () => {
+    expect(suggestionDraftCid(hunk)).toBe(suggestionDraftCid({ ...hunk }));
+    expect(suggestionDraftCid(hunk).startsWith("suggestion:")).toBe(true);
+  });
+
+  test("a different path, baseSha, range or replacement yields a different id", () => {
+    const id = suggestionDraftCid(hunk);
+    expect(suggestionDraftCid({ ...hunk, path: "docs/b.md" })).not.toBe(id);
+    expect(suggestionDraftCid({ ...hunk, baseSha: "h2" })).not.toBe(id);
+    expect(suggestionDraftCid({ ...hunk, range: { ...hunk.range, el: 3 } })).not.toBe(id);
+    expect(suggestionDraftCid({ ...hunk, replacement: "B3" })).not.toBe(id);
   });
 });
 
