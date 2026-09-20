@@ -351,6 +351,25 @@ describe("appstate — deriveAppState: changedMarkdownFiles", () => {
     expect(out.changedMarkdownFiles[0]?.patch).toBe("@@ z");
   });
 
+  test("accepts .markdown and .mdx alongside .md, case-insensitively", () => {
+    const out = deriveAppState(
+      localState(),
+      remoteState({
+        changedFiles: [
+          { path: "notes.markdown", status: "modified", patch: "@@ a" },
+          { path: "docs/Guide.MDX", status: "added", patch: "@@ b" },
+          { path: "not-markdown.mdxx", status: "modified", patch: "@@ c" },
+          { path: "readme.md", status: "modified", patch: "@@ d" },
+        ],
+      }),
+    );
+    expect(out.changedMarkdownFiles.map((f) => f.path)).toEqual([
+      "notes.markdown",
+      "docs/Guide.MDX",
+      "readme.md",
+    ]);
+  });
+
   test("is empty when the remote snapshot has no changedFiles yet", () => {
     const out = deriveAppState(localState(), remoteState());
     expect(out.changedMarkdownFiles).toEqual([]);

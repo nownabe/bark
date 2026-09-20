@@ -55,7 +55,9 @@ mode") into the GitHub review workflow without breaking it.
 
 ### Goals
 
-- Review changed `.md` files in a PR, fully rendered.
+- Review changed Markdown files in a PR, fully rendered. A path counts as Markdown when
+  its extension is `.md`, `.markdown` or `.mdx` (case-insensitive); `.mdx` is rendered as
+  plain Markdown, so its JSX stays visible as literal text.
 - Drag-select an arbitrary text range and comment on it (range, not line).
 - Create Suggestions (range replacements) that become GitHub Suggestions.
 - Let the author edit the document in the web UI and commit to the PR branch by an
