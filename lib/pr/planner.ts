@@ -5,6 +5,7 @@
 //
 // See docs/adr/0003-operations-and-execution.md §3.
 
+import { lineMapFor } from "./linemap";
 import { BODY_LIMIT, envelopeOf, wireBodyLength } from "./metadata";
 import type { ReconcileOperation } from "./operations";
 import { reanchor } from "./reanchor";
@@ -205,11 +206,20 @@ const OUTDATED_ANCHOR: ErrorInfo = {
 function toHeadCoordinates(comment: Comment, ctx: PlannerContext): Comment | null {
   const source = (sha: string) =>
     ctx.fileContents.find((f) => f.sha === sha && f.path === comment.path)?.source;
+  const current = source(ctx.headSha) ?? "";
+  const old = source(comment.anchor.sha) ?? null;
   const position = reanchor(
     comment.anchor,
-    source(ctx.headSha) ?? "",
+    current,
     ctx.headSha,
-    source(comment.anchor.sha) ?? null,
+    old,
+    old === null || comment.anchor.sha === ctx.headSha
+      ? undefined
+      : lineMapFor(
+          { oldSha: comment.anchor.sha, newSha: ctx.headSha, path: comment.path },
+          old,
+          current,
+        ),
   );
   if (position.status === "current") return comment;
   if (position.status === "outdated") return null;

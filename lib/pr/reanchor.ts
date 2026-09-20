@@ -4,8 +4,9 @@
 // Algorithm (per ADR 0004 §3):
 //   1. If anchor.sha === currentHeadSha → status: current, range: anchor.range
 //   2. If no FileContent at (anchor.sha, anchor.path) → status: outdated
-//   3. Build LCS line map oldSource → currentSource; if both anchor endpoints
-//      map → status: mapped (quote matches) / shifted (quote differs)
+//   3. Take the line map oldSource → currentSource (memoised by the caller via
+//      `lineMapFor`; built here otherwise); if both anchor endpoints map →
+//      status: mapped (quote matches) / shifted (quote differs)
 //   4. Single-line anchor whose line did not map → bounded region search
 //      (`locateLine`) over the diff region between the nearest mapped
 //      neighbours, then columns carried through a char diff → mapped/shifted
@@ -38,6 +39,9 @@ export function reanchor(
   currentSource: string,
   currentHeadSha: string,
   oldSource: string | null,
+  /** The `oldSource` → `currentSource` line map, when the caller already has it
+   *  memoised (`lineMapFor`); built here otherwise. */
+  memoisedLineMap?: Map<number, number>,
 ): DisplayPosition {
   if (anchor.sha === currentHeadSha) {
     return { status: "current", range: anchor.range };
@@ -50,7 +54,7 @@ export function reanchor(
     return { status: "outdated" };
   }
 
-  const lineMap = buildLineMap(oldSource, currentSource);
+  const lineMap = memoisedLineMap ?? buildLineMap(oldSource, currentSource);
   const newSl = lineMap.get(anchor.range.sl);
   const newEl = lineMap.get(anchor.range.el);
   if (newSl === undefined || newEl === undefined) {
