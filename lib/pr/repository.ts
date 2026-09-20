@@ -35,6 +35,8 @@ export type RepositoryOptions = {
    *  case that needs more than one is reply chains where the parent must
    *  sync first. Default 5. */
   maxSyncCycles?: number;
+  /** Reports a failed persist; the mutation itself still succeeds. */
+  onPersistError?: (error: unknown) => void;
 };
 
 export class PullRequestRepository {
@@ -45,12 +47,14 @@ export class PullRequestRepository {
   private readonly transport: Transport;
   private readonly isInDiff: (comment: Comment) => boolean;
   private readonly maxSyncCycles: number;
+  private readonly onPersistError?: (error: unknown) => void;
 
   constructor(opts: RepositoryOptions) {
     this.storage = opts.storage;
     this.transport = opts.transport;
     this.isInDiff = opts.isInDiff;
     this.maxSyncCycles = opts.maxSyncCycles ?? 5;
+    this.onPersistError = opts.onPersistError;
   }
 
   // ---- Hydration / lifecycle ---------------------------------------------
@@ -174,8 +178,15 @@ export class PullRequestRepository {
     }
   }
 
+  // A storage write that fails (quota, transient error) must not fail the
+  // mutation: memory stays authoritative and every later mutation writes the
+  // whole state again, so the next successful write catches up (ADR 0001 §2).
   private async persist(): Promise<void> {
-    await this.storage.save(this.localState);
+    try {
+      await this.storage.save(this.localState);
+    } catch (e) {
+      this.onPersistError?.(e);
+    }
   }
 
   private plannerContext(): PlannerContext | null {

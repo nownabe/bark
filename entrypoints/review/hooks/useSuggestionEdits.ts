@@ -22,6 +22,9 @@ const SAVE_DEBOUNCE_MS = 400;
 export type SuggestionEditsDeps = {
   listSuggestionEdits: (ref: PrRef) => Promise<Record<string, SuggestionEdit>>;
   saveSuggestionEdits: (ref: PrRef, edits: Record<string, SuggestionEdit>) => Promise<void>;
+  /** Reports a failed storage write (quota, transient error). The edits stay
+   *  in memory and in the pending buffer, so the next flush retries them. */
+  onSaveError?: (error: unknown) => void;
 };
 
 export type SuggestionEditsAPI = {
@@ -88,12 +91,21 @@ export function useSuggestionEdits(
       editSaveTimer.current = null;
     }
     if (Object.keys(writes).length === 0) return;
-    const stored = await deps.listSuggestionEdits(ref);
-    for (const [p, edit] of Object.entries(writes)) {
-      if (edit) stored[p] = edit;
-      else delete stored[p];
+    try {
+      const stored = await deps.listSuggestionEdits(ref);
+      for (const [p, edit] of Object.entries(writes)) {
+        if (edit) stored[p] = edit;
+        else delete stored[p];
+      }
+      await deps.saveSuggestionEdits(ref, stored);
+    } catch (e) {
+      // Put the un-flushed writes back so the next flush retries them, but
+      // never over a newer edit to the same path (issue #289).
+      for (const [p, edit] of Object.entries(writes)) {
+        if (!(p in pendingEditWrites.current)) pendingEditWrites.current[p] = edit;
+      }
+      deps.onSaveError?.(e);
     }
-    await deps.saveSuggestionEdits(ref, stored);
   };
 
   const persistSuggestionEdit = (

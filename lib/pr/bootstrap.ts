@@ -8,7 +8,13 @@
 // The review surface keeps both as its own state and reads AppState via
 // `useAppStateFromRepository(repository)`.
 
-import { BrowserStorageAdapter, type BrowserStorageAPI, prStorageKey } from "./chrome-storage";
+import {
+  BrowserStorageAdapter,
+  type BrowserStorageAPI,
+  evictStalePrStorage,
+  prStorageKey,
+  prStorageKeys,
+} from "./chrome-storage";
 import { buildIsInDiff } from "./diff";
 import type { GitHubClient } from "./github-api";
 import { createGitHubTransport, type PrRef } from "./github-transport";
@@ -22,6 +28,8 @@ export type BootstrapOptions = {
   storage: BrowserStorageAPI;
   /** Override for tests; default is `globalThis.fetch`. */
   fetch?: typeof fetch;
+  /** Reports a failed local persist (quota, transient error) to the UI. */
+  onPersistError?: (error: unknown) => void;
 };
 
 export type BootstrappedPullRequest = {
@@ -54,6 +62,7 @@ export async function bootstrapPullRequest(
     storage: storageAdapter,
     transport,
     isInDiff: (c) => isInDiffImpl(c),
+    onPersistError: opts.onPersistError,
   });
 
   await repository.hydrate();
@@ -76,6 +85,15 @@ export async function bootstrapPullRequest(
   }
 
   await refresh();
+
+  // Fire-and-forget: keeping storage bounded must never delay or fail the load.
+  // Hydration already happened, so a merged PR still shows its stored work for
+  // this session; only the persisted copy goes (ADR 0001 §2).
+  void evictStalePrStorage(opts.storage, {
+    key,
+    merged: repository.getRemoteState().pullRequest?.merged === true,
+    keys: prStorageKeys(opts.prRef.owner, opts.prRef.repo, opts.prRef.number),
+  }).catch(opts.onPersistError);
 
   return { repository, refresh };
 }

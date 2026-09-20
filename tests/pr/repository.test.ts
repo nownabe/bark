@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { deriveAppState } from "../../lib/pr/appstate";
 import { PullRequestRepository } from "../../lib/pr/repository";
 import { InMemoryStorageAdapter } from "../../lib/pr/storage";
@@ -12,7 +12,7 @@ import type {
 } from "../../lib/pr/transport";
 import type { PostReviewBatchStep, SetIssueThreadResolvedStep } from "../../lib/pr/steps";
 import { emptyState } from "../../lib/pr/types";
-import type { Comment, FileEdit, PullRequest, Range, Thread } from "../../lib/pr/types";
+import type { Comment, FileEdit, LocalState, PullRequest, Range, Thread } from "../../lib/pr/types";
 
 const author = { login: "alice" };
 // Anchored at pr()'s head sha; drafts at an older sha are exercised by the
@@ -182,6 +182,55 @@ describe("repository — persistence", () => {
     const r = makeRepo(happyTransport().transport);
     await r.hydrate();
     expect(r.getLocalState().comments).toEqual([]);
+  });
+});
+
+describe("repository — persist failure (issue #289)", () => {
+  /** In-memory adapter whose first `save` rejects, as a full quota would. */
+  function failOnceStorage() {
+    const inner = new InMemoryStorageAdapter();
+    let failed = false;
+    return {
+      load: () => inner.load(),
+      async save(state: LocalState) {
+        if (failed) return await inner.save(state);
+        failed = true;
+        throw new Error("QUOTA_BYTES quota exceeded");
+      },
+      loadDirect: () => inner.load(),
+    };
+  }
+
+  test("a rejected save keeps the draft in memory and reports the error", async () => {
+    const storage = failOnceStorage();
+    const onPersistError = mock((_e: unknown) => {});
+    const r = new PullRequestRepository({
+      storage,
+      transport: happyTransport().transport,
+      isInDiff: () => true,
+      onPersistError,
+    });
+
+    await r.upsertComment(comment({ id: "c1" }));
+
+    expect(r.getLocalState().comments.map((c) => c.id)).toEqual(["c1"]);
+    expect(onPersistError).toHaveBeenCalledTimes(1);
+    const [reported] = onPersistError.mock.calls[0] as [unknown];
+    expect((reported as Error).message).toContain("quota exceeded");
+  });
+
+  test("the next successful save catches up on what the failed one dropped", async () => {
+    const storage = failOnceStorage();
+    const r = new PullRequestRepository({
+      storage,
+      transport: happyTransport().transport,
+      isInDiff: () => true,
+    });
+
+    await r.upsertComment(comment({ id: "c1" }));
+    await r.upsertComment(comment({ id: "c2" }));
+
+    expect((await storage.loadDirect())?.comments.map((c) => c.id)).toEqual(["c1", "c2"]);
   });
 });
 

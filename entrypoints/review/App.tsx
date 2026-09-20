@@ -207,6 +207,7 @@ function AppBody() {
           token,
           prRef: ref,
           storage: browser.storage.local,
+          onPersistError: (e) => reportError(errMessage(e)),
         });
         if (!cancelled) {
           setPrRepository(repository);
@@ -298,7 +299,10 @@ function AppBody() {
     resolvingId,
     setResolvingId,
   } = threadActions;
-  const suggestionEditsApi = useSuggestionEdits(ref, productionSuggestionEditsDeps);
+  const suggestionEditsApi = useSuggestionEdits(ref, {
+    ...productionSuggestionEditsDeps,
+    onSaveError: (e) => reportError(errMessage(e)),
+  });
   const {
     suggestionEdits,
     suggestionComments,

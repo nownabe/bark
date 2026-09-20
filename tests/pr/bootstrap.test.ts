@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { deriveAppState } from "../../lib/pr/appstate";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { BrowserStorageAPI } from "../../lib/pr/chrome-storage";
@@ -11,13 +11,14 @@ function fakeStorage(): BrowserStorageAPI {
   const store: Record<string, unknown> = {};
   return {
     async get(key) {
+      if (key === null) return { ...store };
       return key in store ? { [key]: store[key] } : {};
     },
     async set(items) {
       Object.assign(store, items);
     },
-    async remove(key) {
-      delete store[key];
+    async remove(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) delete store[key];
     },
   };
 }
@@ -267,6 +268,106 @@ describe("bootstrap — full happy path", () => {
     // §2: it changes only on re-auth) — but it stays populated.
     expect(secondPhaseCalls.some((c) => c.includes("/user"))).toBe(false);
     expect(repository.getRemoteState().viewer?.login).toBe("alice");
+  });
+});
+
+describe("bootstrap — storage eviction and persist failures (issue #289)", () => {
+  /** The happy fetch used by the cases below; no comments, no changed files. */
+  function quietFetch(prJson: unknown = PR_JSON): typeof fetch {
+    return makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7")) return jsonResponse(prJson);
+      if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
+      if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      if (req.url.includes("/pulls/7/files")) return jsonResponse([]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+  }
+
+  function state(comments: unknown[]) {
+    return {
+      comments,
+      threads: [],
+      fileEdits: [],
+      fileContents: [],
+      pullRequest: null,
+      viewer: null,
+    };
+  }
+
+  const draftComment = {
+    id: "draft-1",
+    state: "draft",
+    threadId: "t-x",
+    body: "in-progress",
+    author: { login: "alice" },
+    path: "README.md",
+    anchor: { sha: "headsha", range: { sl: 1, sc: 1, el: 1, ec: 2 }, quote: "a" },
+  };
+  const syncedComment = { ...draftComment, id: "synced-1", state: "synced", remoteId: 1 };
+
+  /** Eviction is fire-and-forget, so let its microtasks settle. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  test("evicts another PR's stale mirror and keeps another PR's drafts", async () => {
+    const storage = fakeStorage();
+    await storage.set({
+      "pr:o/r#6:state": state([syncedComment]),
+      "pr:o/r#5:state": state([draftComment]),
+    });
+
+    await bootstrapPullRequest({ token: "t", prRef: PR, storage, fetch: quietFetch() });
+    await settle();
+
+    expect(await storage.get("pr:o/r#6:state")).toEqual({});
+    expect(await storage.get("pr:o/r#5:state")).not.toEqual({});
+  });
+
+  test("removes everything stored for the current PR once it is merged", async () => {
+    const storage = fakeStorage();
+    await storage.set({
+      "pr:o/r#7:state": state([draftComment]),
+      "pr:o/r#7:suggestion-edits": { "a.md": { source: "x", base: "y", comments: {} } },
+      "pr:o/r#7:dismissed-suggestions": { "1": "accepted" },
+    });
+
+    await bootstrapPullRequest({
+      token: "t",
+      prRef: PR,
+      storage,
+      fetch: quietFetch({ ...PR_JSON, merged: true, state: "closed" }),
+    });
+    await settle();
+
+    expect(await storage.get("pr:o/r#7:state")).toEqual({});
+    expect(await storage.get("pr:o/r#7:suggestion-edits")).toEqual({});
+    expect(await storage.get("pr:o/r#7:dismissed-suggestions")).toEqual({});
+  });
+
+  test("forwards onPersistError to the Repository instead of failing the load", async () => {
+    const storage = fakeStorage();
+    const failingStorage: BrowserStorageAPI = {
+      ...storage,
+      async set(items) {
+        if ("pr:o/r#7:state" in items) throw new Error("QUOTA_BYTES quota exceeded");
+        return await storage.set(items);
+      },
+    };
+    const onPersistError = mock((_e: unknown) => {});
+
+    await bootstrapPullRequest({
+      token: "t",
+      prRef: PR,
+      storage: failingStorage,
+      fetch: quietFetch(),
+      onPersistError,
+    });
+
+    expect(onPersistError).toHaveBeenCalled();
   });
 });
 

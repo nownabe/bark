@@ -115,6 +115,38 @@ describe("useSuggestionEdits — flushPendingWrites", () => {
     expect(written["a.md"]?.source).toBe("EDITED");
   });
 
+  test("a failed flush reports through onSaveError and retries on the next flush (#289)", async () => {
+    let failed = false;
+    const saveSuggestionEdits = mock(async (_r: PrRef, _e: Record<string, SuggestionEdit>) => {
+      if (failed) return;
+      failed = true;
+      throw new Error("QUOTA_BYTES quota exceeded");
+    });
+    const onSaveError = mock((_e: unknown) => {});
+    const deps = makeDeps({ saveSuggestionEdits, onSaveError });
+    const { result } = renderHook(() => useSuggestionEdits(PR, deps));
+    await waitFor(() => expect(deps.listSuggestionEdits).toHaveBeenCalled());
+
+    act(() => {
+      result.current.persistSuggestionEdit("a.md", "EDITED", "ORIGINAL", {});
+    });
+    await act(async () => {
+      await result.current.flushPendingWrites();
+    });
+    expect(onSaveError).toHaveBeenCalledTimes(1);
+
+    // The un-flushed write went back into the buffer, so the next flush retries it.
+    await act(async () => {
+      await result.current.flushPendingWrites();
+    });
+    expect(saveSuggestionEdits).toHaveBeenCalledTimes(2);
+    const written = (saveSuggestionEdits.mock.calls[1] as unknown[])[1] as Record<
+      string,
+      SuggestionEdit
+    >;
+    expect(written["a.md"]?.source).toBe("EDITED");
+  });
+
   test("with no pending writes, saveSuggestionEdits is not called", async () => {
     const saveSuggestionEdits = mock(async () => {});
     const deps = makeDeps({ saveSuggestionEdits });

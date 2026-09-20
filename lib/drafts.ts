@@ -42,7 +42,14 @@ export interface SuggestionEdit {
   /** The reviewer's edited document text. */
   source: string;
   /** The unedited base text the edit is diffed against, so the live suggestion
-   * hunks can be recomputed for any file — not only the one open in the editor. */
+   * hunks can be recomputed for any file — not only the one open in the editor.
+   *
+   * Why not store a patch instead of a second full copy (issue #289): every
+   * render needs the base for files that are *not* open (pending-suggestion
+   * count, the meaningful-edit check), so a patch would have to be applied
+   * against a `FileContent` fetched from GitHub first — network traffic to
+   * render a local list. The duplication is bounded by the files edited in one
+   * PR and is dropped by `evictStalePrStorage` once the PR merges. */
   base: string;
   /** The head sha `base` was fetched at. Lets the commit pipeline verify the
    * file didn't change upstream since the edit (issue #187); absent on edits
