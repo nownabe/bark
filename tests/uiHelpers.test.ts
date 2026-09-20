@@ -4,9 +4,31 @@ import {
   errMessage,
   installUrl,
   PR_STATUS_LABEL,
+  quoteBlock,
   STATUS_LABEL,
 } from "../entrypoints/review/uiHelpers";
 import { GitHubApiError } from "../lib/pr/github-api";
+
+describe("quoteBlock (issue #279)", () => {
+  test("a short quote becomes one blockquote line per source line, with no trailer", () => {
+    expect(quoteBlock("a\nb\nc")).toBe("> a\n> b\n> c");
+  });
+
+  test("a long quote is cut to 12 lines and marked as an excerpt", () => {
+    const lines = quoteBlock(
+      Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n"),
+    ).split("\n");
+    expect(lines).toHaveLength(13);
+    expect(lines[11]).toBe("> line 12");
+    expect(lines[12]).toBe("> …");
+  });
+
+  test("a single line over the character cap is cut too", () => {
+    const out = quoteBlock("z".repeat(5000));
+    expect(out.length).toBeLessThan(1100);
+    expect(out.endsWith("\n> …")).toBe(true);
+  });
+});
 
 describe("errMessage", () => {
   test("401 → user-facing authentication error message", () => {

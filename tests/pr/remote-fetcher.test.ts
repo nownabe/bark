@@ -1188,6 +1188,66 @@ describe("remote-fetcher — fetchRemoteState", () => {
     expect(contentsCalls).toHaveLength(2);
   });
 
+  // Issue #279: a quote over the cap travels as an excerpt plus digest and
+  // length. It is content-addressed by (anchor.sha, path, range), so the
+  // fetcher restores it from the FileContent it already fetched.
+  describe("capped quote restoration", () => {
+    const LONG = "w".repeat(3000);
+    const barkBody = embedMetadata("hi", {
+      cid: "c1",
+      threadId: "t1",
+      path: "docs/a.md",
+      anchor: { sha: "old", range: { sl: 1, sc: 1, el: 1, ec: 3001 }, quote: LONG },
+    });
+    const fetchWithLine = (line: string) =>
+      makeFetch(async (req) => {
+        if (req.url.endsWith("/pulls/7"))
+          return jsonResponse({
+            number: 7,
+            title: "T",
+            body: "B",
+            state: "open",
+            draft: false,
+            merged: false,
+            head: { sha: "head", ref: "topic" },
+            base: { ref: "main" },
+            user: { login: "alice", avatar_url: "" },
+          });
+        if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+        if (req.url.includes("/pulls/7/comments"))
+          return jsonResponse([
+            {
+              id: 1,
+              body: barkBody,
+              path: "docs/a.md",
+              line: 1,
+              user: { login: "alice", avatar_url: "" },
+            },
+          ]);
+        if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+        if (req.url.endsWith("/graphql"))
+          return jsonResponse({
+            data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+          });
+        if (req.url.includes("/contents/"))
+          return jsonResponse({ content: btoa(line), encoding: "base64" });
+        throw new Error(`unexpected: ${req.url}`);
+      }).fetch;
+
+    test("the full quote is restored from the anchor-sha file content", async () => {
+      const out = await fetchRemoteState({ token: "t", fetch: fetchWithLine(LONG) }, PR);
+      expect(out.comments[0]?.anchor.quote).toBe(LONG);
+    });
+
+    test("a digest mismatch keeps the excerpt rather than a wrong quote", async () => {
+      const out = await fetchRemoteState(
+        { token: "t", fetch: fetchWithLine("v".repeat(3000)) },
+        PR,
+      );
+      expect(out.comments[0]?.anchor.quote.length).toBe(1000);
+    });
+  });
+
   test("the head-sha version of every anchored path is fetched too (issue #265)", async () => {
     // Re-anchoring (display and posting) maps anchor.sha → headSha, which
     // needs the head-sha source as well as the anchor-sha one; nothing

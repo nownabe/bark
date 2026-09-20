@@ -5,8 +5,23 @@
 
 import type { PullStatus } from "../../lib/github";
 import { GitHubApiError } from "../../lib/pr/github-api";
+import { QUOTE_EXCERPT_CHARS } from "../../lib/pr/metadata";
 import type { DisplayPosition } from "../../lib/pr/reanchor";
 import type { AnchorStatus } from "./adapters/displayPositionToAnchorStatus";
+
+/** Most quoted lines an out-of-diff comment shows before the `> …` trailer. */
+const QUOTE_BLOCK_LINES = 12;
+
+/** Render an anchor's quote as the Markdown blockquote an out-of-diff comment
+ *  shows above its permalink. The quote can be a whole chapter, and GitHub
+ *  caps a body at 65,536 characters, so the block is an excerpt (issue #279);
+ *  the full quote stays in LocalState and in the anchor. */
+export function quoteBlock(quote: string): string {
+  const lines = quote.slice(0, QUOTE_EXCERPT_CHARS).split("\n").slice(0, QUOTE_BLOCK_LINES);
+  const block = lines.map((l) => `> ${l}`).join("\n");
+  const complete = lines.join("\n").length === quote.length;
+  return complete ? block : `${block}\n> …`;
+}
 
 /** Preview = rendered Markdown view; Raw = source / line-numbered view. */
 export type ViewMode = "raw" | "preview";

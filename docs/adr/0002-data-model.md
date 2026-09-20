@@ -170,6 +170,8 @@ A synced `Comment` records `remoteKind`, the endpoint its `remoteId` belongs to 
 
 `anchor.quote` is the exact source text covered by `anchor.range` in `FileContent(anchor.sha, path)`: for a single-line range the characters `[sc, ec)` of that line; for a multi-line range the tail of the first line from `sc`, the whole middle lines, and the head of the last line up to `ec`, joined with `\n`. A line-based anchor (a suggestion hunk) is not a second convention but the case `sc = 1`, `ec = length(last line) + 1`. An empty `quote` has `sc = ec`. Anchors written by earlier releases with `sc = ec = 1` and a non-empty `quote` are normalised to this rule when read from GitHub or from persisted `LocalState`; no other code path may interpret `range` differently.
 
+`LocalState` always holds the full `quote`. The wire envelope ([ADR 0003 §7](0003-operations-and-execution.md)) carries at most 1,000 characters of it plus a digest and the full length; on fetch the Executor restores the full text from `FileContent(anchor.sha, path)` at `anchor.range` and verifies the digest, so the bound never reaches `AppState`.
+
 ### 4. Derived data (`AppState`)
 
 The following are computed from `LocalState` and _must not_ be stored:
@@ -197,6 +199,7 @@ The Executor embeds entity identity into the wire format so it survives the GitH
 - On `RemoteState` fetch, the Executor extracts this metadata and pre-populates `Comment.id` / `Thread.id` so the Reconciler can match remote items to local ones structurally.
 - `Thread.remoteThreadId` is resolved by joining GraphQL `reviewThreads` data with the matched `Comment` set (any comment in a remote thread that maps to a known `Thread.id` tells us the `remoteThreadId` for that `Thread`).
 - For out-of-diff threads there is no GraphQL thread to join. The thread's identity is its root issue comment — the earliest comment bearing its `threadId` (the same ownership rule that binds `cid`s) — and its `resolved` state is read from that comment's hidden metadata (`resolved` in the envelope).
+- A comment body on GitHub is limited to 65,536 characters. The envelope therefore bounds the embedded `quote` (excerpt + digest + length, restored on fetch as above), the visible quote block of an out-of-diff comment is an excerpt, and the Planner refuses a single comment whose wire body would still exceed the limit (`draft + lastError`) instead of letting it fail the whole review batch.
 
 The hidden metadata envelope (its layout, base64 encoding, version field) is the Executor's private concern. It is not visible to `LocalState`, `AppState`, the Reconciler, or React.
 

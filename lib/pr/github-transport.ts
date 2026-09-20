@@ -7,7 +7,7 @@
 // GitHub API mapping and §7 for the identity-matching contract.
 
 import { type GitHubClient, ghGraphQL, GitHubApiError, ghRequest } from "./github-api";
-import { embedMetadata, extractMetadata } from "./metadata";
+import { embedMetadata, envelopeOf, extractMetadata } from "./metadata";
 import { listReviewThreads } from "./review-threads";
 import type {
   CommitStep,
@@ -78,12 +78,7 @@ async function postReviewBatch(
 }
 
 function buildReviewCommentInput(c: Comment) {
-  const body = embedMetadata(c.body, {
-    cid: c.id,
-    threadId: c.threadId,
-    path: c.path,
-    anchor: c.anchor,
-  });
+  const body = embedMetadata(c.body, envelopeOf(c));
   const base = {
     path: c.path,
     line: c.anchor.range.el,
@@ -107,12 +102,7 @@ async function postReply(
     if (step.parent.remoteId === undefined) {
       throw new Error("postReply: parent has no remoteId");
     }
-    const body = embedMetadata(step.comment.body, {
-      cid: step.comment.id,
-      threadId: step.comment.threadId,
-      path: step.comment.path,
-      anchor: step.comment.anchor,
-    });
+    const body = embedMetadata(step.comment.body, envelopeOf(step.comment));
     const result = await ghRequest<{ id: number }>(
       client,
       "POST",
@@ -136,12 +126,7 @@ async function postIssueComment(
   step: PostIssueCommentStep,
 ): Promise<PostIssueCommentOutcome> {
   try {
-    const body = embedMetadata(step.comment.body, {
-      cid: step.comment.id,
-      threadId: step.comment.threadId,
-      path: step.comment.path,
-      anchor: step.comment.anchor,
-    });
+    const body = embedMetadata(step.comment.body, envelopeOf(step.comment));
     const result = await ghRequest<{ id: number }>(
       client,
       "POST",
@@ -225,13 +210,11 @@ async function setIssueThreadResolved(
         },
       };
     }
-    const next = embedMetadata(body, {
-      cid: meta.cid,
-      threadId: meta.threadId,
-      path: meta.path,
-      anchor: meta.anchor,
-      resolved: step.resolved,
-    });
+    // Spread the fetched envelope so fields the toggle knows nothing about —
+    // a capped quote's digest and length (issue #279) — survive the rewrite.
+    // `legacyResolveEvent` is read-only and never set on a v2 fence.
+    const { legacyResolveEvent: _dropped, ...fetched } = meta;
+    const next = embedMetadata(body, { ...fetched, resolved: step.resolved });
     await ghRequest(client, "PATCH", url, { body: next });
     return { ok: true };
   } catch (e) {

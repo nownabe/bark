@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createGitHubTransport, type PrRef } from "../../lib/pr/github-transport";
-import { embedMetadata } from "../../lib/pr/metadata";
+import { contentDigest, embedMetadata, extractMetadata } from "../../lib/pr/metadata";
 import type { Comment } from "../../lib/pr/types";
 
 const PR: PrRef = { owner: "o", repo: "r", number: 7 };
@@ -321,6 +321,29 @@ describe("github-transport — setIssueThreadResolved (issue #270)", () => {
         resolved: true,
       }),
     );
+  });
+
+  // Issue #279: a capped fence carries the quote's digest and length. The
+  // toggle re-embeds the FETCHED envelope, so dropping them would leave the
+  // fetcher unable to restore the full quote.
+  test("a capped root fence keeps its quoteDigest and quoteLength through the toggle", async () => {
+    const longQuote = "q".repeat(5000);
+    const current = embedMetadata("Root text", {
+      cid: "c1",
+      threadId: "t1",
+      path: "f.md",
+      anchor: { ...anchor, quote: longQuote },
+    });
+    const { fetch, calls } = makeFetch(async (req) =>
+      req.method === "GET" ? jsonResponse({ body: current }) : jsonResponse({ id: 501 }),
+    );
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    expect(await transport.setIssueThreadResolved(step)).toEqual({ ok: true });
+    const patched = JSON.parse(calls[1]?.body ?? "{}").body as string;
+    const meta = extractMetadata(patched).meta;
+    expect(meta?.quoteLength).toBe(5000);
+    expect(meta?.quoteDigest).toBe(contentDigest(longQuote));
+    expect(meta?.resolved).toBe(true);
   });
 
   test("a root comment without Bark metadata fails without a PATCH", async () => {
