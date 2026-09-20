@@ -38,8 +38,8 @@ export type AppState = {
    *  FileContent entries are present. */
   currentFiles: FileContent[];
 
-  /** The PR's changed `.md` files still present at head (Bark's review
-   *  scope), in GitHub API order, patches included so the UI can derive
+  /** The PR's changed Markdown files still present at head (Bark's review
+   *  scope; see `isMarkdownPath`), in GitHub API order, patches included so the UI can derive
    *  in-diff ranges. Empty until the remote snapshot carries the
    *  changed-file listing. */
   changedMarkdownFiles: ChangedFile[];
@@ -89,9 +89,18 @@ export function deriveAppState(local: LocalState, remote: RemoteState): AppState
   };
 }
 
+/** The extensions Bark treats as Markdown (docs/design-doc.md §scope). MDX is
+ *  included even though Bark renders it as plain Markdown: leaving JSX visible
+ *  beats hiding the file from review entirely. */
+const MARKDOWN_EXTENSIONS = /\.(md|markdown|mdx)$/i;
+
+export function isMarkdownPath(path: string): boolean {
+  return MARKDOWN_EXTENSIONS.test(path);
+}
+
 function buildChangedMarkdownFiles(changed: ChangedFile[] | undefined): ChangedFile[] {
   if (!changed) return [];
-  return changed.filter((f) => f.path.toLowerCase().endsWith(".md") && f.status !== "removed");
+  return changed.filter((f) => isMarkdownPath(f.path) && f.status !== "removed");
 }
 
 function buildCurrentFiles(files: FileContent[], headSha: string | null): FileContent[] {
