@@ -6,7 +6,7 @@ import { lineColToOffset } from "./anchor";
 import type { SuggestionEdit } from "./drafts";
 import type { CommentMetadata } from "./metadata";
 import { buildLineMap } from "./pr/linemap";
-import type { DisplayPosition } from "./pr/reanchor";
+import { type DisplayPosition, locateLine } from "./pr/reanchor";
 
 /** Extract the replacement text of a ```suggestion block from a comment body (null if absent).
  *
@@ -36,7 +36,7 @@ export function extractSuggestionBlock(body: string): string | null {
  * `meta.quote.length` instead — the same approach `buildSuggestionMarks`
  * already uses for rendering.
  *
- * The replaced span is applied only when it is byte-identical to
+ * The fast path applies the replaced span only when it is byte-identical to
  * `meta.quote` (ADR 0004's quote-match check): a "shifted" target — the
  * document changed under the suggestion — would otherwise be cut mid-line
  * and stage corrupted content into the commit (issue #176).
@@ -46,7 +46,13 @@ export function extractSuggestionBlock(body: string): string | null {
  * two differ — an earlier accept or manual edit changed the line count —
  * the head-space line number is translated to its edited-space position via
  * the LCS line map before applying; an unmapped line (deleted or modified
- * locally) aborts the apply (issue #177).
+ * locally) fails the fast path (issue #177).
+ *
+ * When the fast path fails, a single-line (in prose: whole-paragraph) target
+ * gets a second chance (issue #269): the line is re-located directly in
+ * `source` from the anchor-sha revision via the bounded region search, and the
+ * suggestion is applied as a line-local three-way merge. Every patch hunk must
+ * apply, and nothing outside that one line is ever touched.
  */
 export function applyAcceptedSuggestion(args: {
   source: string;
@@ -61,9 +67,57 @@ export function applyAcceptedSuggestion(args: {
    *  CommentView.displayPosition. `outdated` aborts the apply (the target
    *  text is no longer locatable). */
   displayPosition: DisplayPosition;
+  /** The file content at (`meta.sha`, `meta.path`) — the revision `meta.quote`
+   *  was taken from. `null` when it is not available, which disables the
+   *  line-local merge and leaves only the exact-quote fast path. */
+  anchorSource: string | null;
 }): string | null {
-  const { source, baseSource, lineStarts, meta, replacement, displayPosition } = args;
+  const { source, baseSource, lineStarts, meta, replacement, displayPosition, anchorSource } = args;
   if (displayPosition.status === "outdated") return null;
+  const quote = meta.quote ?? "";
+
+  const exact = applyExactQuote(
+    source,
+    baseSource,
+    lineStarts,
+    displayPosition,
+    quote,
+    replacement,
+  );
+  if (exact !== null) return exact;
+
+  // simplify: Phase 1 of #269 merges single-line targets only. Multi-line
+  // anchors need the region search run per endpoint first (tracked as the
+  // issue's deferred list).
+  const { sl, el } = meta.range;
+  if (anchorSource === null || sl !== el) return null;
+  const oldLines = anchorSource.split("\n");
+  // Only a whole-line suggestion anchor can be merged line-locally; anything
+  // else means the caller handed us a revision the quote did not come from.
+  if (oldLines[sl - 1] !== quote) return null;
+  const located = locateLine(
+    oldLines,
+    source.split("\n"),
+    buildLineMap(anchorSource, source),
+    sl,
+    quote,
+  );
+  if (located === null) return null;
+  const merged = mergeLine(quote, replacement, located.text);
+  if (merged === null) return null;
+  return replaceLine(source, located.line, merged, replacement === "");
+}
+
+/** The exact path: the target line's text must still be byte-identical to the
+ *  quote. Null means "not applicable here", not "refused". */
+function applyExactQuote(
+  source: string,
+  baseSource: string,
+  lineStarts: number[],
+  displayPosition: Exclude<DisplayPosition, { status: "outdated" }>,
+  quote: string,
+  replacement: string,
+): string | null {
   let targetLine = displayPosition.range.sl;
   if (source !== baseSource) {
     const mapped = buildLineMap(baseSource, source).get(targetLine);
@@ -71,7 +125,6 @@ export function applyAcceptedSuggestion(args: {
     targetLine = mapped;
   }
   const from = lineColToOffset(targetLine, displayPosition.range.sc, lineStarts);
-  const quote = meta.quote ?? "";
   let to = from + quote.length;
   if (source.slice(from, to) !== quote) return null;
   // Issue #191: a line-deletion suggestion (empty replacement) whose span
@@ -84,6 +137,24 @@ export function applyAcceptedSuggestion(args: {
     else if (source[from - 1] === "\n") return source.slice(0, from - 1) + source.slice(to);
   }
   return source.slice(0, from) + replacement + source.slice(to);
+}
+
+/** Apply the quote → replacement delta to a line that has drifted from the
+ *  quote. Null when any hunk fails: a partially applied suggestion would stage
+ *  text neither the reviewer nor the author wrote. */
+function mergeLine(quote: string, replacement: string, lineText: string): string | null {
+  if (lineText === quote) return replacement;
+  const dmp = new diff_match_patch();
+  const [merged, results] = dmp.patch_apply(dmp.patch_make(quote, replacement), lineText);
+  return results.every(Boolean) ? merged : null;
+}
+
+function replaceLine(source: string, line: number, text: string, deleteLine: boolean): string {
+  const lines = source.split("\n");
+  // Issue #191 parity: a deletion takes the line's newline with it.
+  if (deleteLine && text === "") lines.splice(line - 1, 1);
+  else lines[line - 1] = text;
+  return lines.join("\n");
 }
 
 /** The visible text of a comment body with the suggestion block removed. */

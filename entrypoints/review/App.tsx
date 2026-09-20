@@ -1033,16 +1033,26 @@ function AppBody() {
   // Both survive reload via the per-file edit store, so accepts compose with
   // manual edits and other accepts in a single batched commit on Submit.
   const acceptSuggestion = async (c: ExistingComment) => {
-    if (!c.meta) return;
-    const view = commentViewByCid.get(c.meta.cid);
+    const meta = c.meta;
+    if (!meta) return;
+    const view = commentViewByCid.get(meta.cid);
     if (!view) return; // not yet in commentViews (bootstrap in flight)
+    // The revision the suggestion's quote was taken from. It is what the
+    // line-local merge re-locates the target line from when the exact quote is
+    // no longer in the document (issue #269).
+    const anchorSource =
+      prRepository
+        ?.getRemoteState()
+        .fileContents.find((f) => f.sha === meta.sha && f.path === meta.path)?.source ??
+      (meta.sha === headSha ? baseSource : null);
     const newSource = applyAcceptedSuggestion({
       source,
       baseSource,
       lineStarts,
-      meta: c.meta,
+      meta,
       replacement: extractSuggestionBlock(c.body) ?? "",
       displayPosition: view.displayPosition,
+      anchorSource,
     });
     if (newSource === null) {
       // The target text moved or changed since the suggestion was written

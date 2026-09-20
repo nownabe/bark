@@ -37,12 +37,13 @@ export const STATUS_LABEL: Partial<Record<AnchorStatus, string>> = {
 };
 
 /** Whether a submitted suggestion may be accepted given its reanchored
- *  position. `shifted` means the target text no longer matches the quote and
- *  `outdated` means it can't be located at all — applying either would
- *  corrupt the document (issue #176). A missing view (bootstrap in flight)
- *  is refused the same way. */
+ *  position. `outdated` is the only refusal: the target can't be located at
+ *  all, so applying it would corrupt the document (issue #176). A `shifted`
+ *  target is offered — its line IS located, and `applyAcceptedSuggestion`
+ *  refuses on its own when the line-local merge doesn't apply cleanly
+ *  (issue #269). A missing view (bootstrap in flight) is refused. */
 export function canAcceptSuggestion(dp: DisplayPosition | null | undefined): boolean {
-  return dp?.status === "current" || dp?.status === "mapped";
+  return dp !== null && dp !== undefined && dp.status !== "outdated";
 }
 
 /** Capitalised display labels for the PR's lifecycle state. */
