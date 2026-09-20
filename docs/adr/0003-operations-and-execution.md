@@ -27,7 +27,7 @@ The Reconciler runs whenever `LocalState` changes. For each entity diff, it emit
 
 - **Comment in `syncing` without `remoteId`, `parentLocalId` absent** → `CreateComment`.
 - **Comment in `syncing` without `remoteId`, `parentLocalId` present and parent is `synced`** → `CreateReply`.
-- **Comment in `syncing` with `parentLocalId` whose parent is not yet `synced`** → no Op emitted this cycle; the parent's `CreateComment` will sync first, and the next cycle re-evaluates.
+- **Comment in `syncing` with `parentLocalId` whose parent is not yet `synced`** → no Op emitted this cycle; the parent's `CreateComment` will sync first, and the next cycle re-evaluates. If the parent never reaches `synced` within the invocation, the reply is swept back to `draft` at the end (§6).
 - **`Thread.resolved` differs from `RemoteState`, state is `syncing`, and the thread has a remote identity (`remoteThreadId` or `remoteIssueCommentId`)** → `UpdateThreadResolved` (carrying the desired boolean and that identity). A thread without either has not been created on GitHub yet and emits nothing.
 - **`FileEdit` in `syncing`** → `CommitFileEdit`.
 
@@ -87,6 +87,7 @@ The Reconciler is not responsible for retry. The user observes the error in the 
 
 - **Hydrate** reverts any persisted `syncing` entity: to `synced + lastError` when it has a remote identity (the bootstrap refresh then restores GitHub's value), otherwise to `draft + lastError`. A fresh session has no step in flight, so nothing else would ever advance it, and the UI shows neither pending nor submitted items in that state.
 - **Refresh adopts by `cid`.** `draft`/`syncing` items are normally protected from refresh, but a remote item whose id equals a local item that has no `remoteId` / `remoteThreadId` yet can only be that item's own post (the id was minted locally). The merge adopts the remote copy instead of discarding it, so an unconfirmed or interrupted post heals on the next refresh rather than being posted again.
+- **End-of-invocation sweep.** When the reconcile loop stops (no Ops, or the cycle cap), any entity still `syncing` was never carried by a step — typically a reply whose parent did not sync this invocation. It is returned to `draft + lastError` naming the cause (parent not posted / parent no longer exists); Threads with a remote identity return to `synced + lastError` ([ADR 0001 §3](0001-pr-data-layer-architecture.md)).
 
 ### 7. Identity matching at the wire
 

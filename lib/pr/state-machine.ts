@@ -27,6 +27,7 @@ import type {
 import {
   type Comment,
   type ErrorInfo,
+  type FileEdit,
   findRemoteThread,
   hasRemoteIdentity,
   type LocalId,
@@ -52,29 +53,63 @@ export function flipDraftsToSyncing(local: LocalState): LocalState {
   };
 }
 
-/** Revert every `syncing` entity that no step will ever advance. For a
- *  freshly-hydrated state: no step is in flight, so nothing would ever
- *  advance them, and the UI shows neither pending nor submitted items in
- *  that state (issue #266 path C). An item that did reach GitHub is adopted
- *  back by cid on the next refresh (see mergeBy).
+/** Revert every `syncing` entity that no step will ever advance. Two callers:
+ *  hydrate (no step is in flight in a fresh session, issue #266 path C) and
+ *  the end of a sync invocation (nothing left `syncing` there was ever
+ *  carried by a step, issue #271). `errorFor` names the cause per entity;
+ *  the default is the "posted but unconfirmed" message hydrate needs,
+ *  because a persisted `syncing` item may well have reached GitHub — it is
+ *  then adopted back by cid on the next refresh (see mergeBy).
  *
  *  A Thread that exists on GitHub goes back to `synced`, not `draft`: a
  *  draft never carries a remote identifier (ADR 0002 §2, issue #275). The
  *  next refresh overwrites it with GitHub's value. */
-export function revertOrphanedSyncing(local: LocalState): LocalState {
+export function revertOrphanedSyncing(
+  local: LocalState,
+  errorFor: (entity: Comment | Thread | FileEdit) => ErrorInfo = () => UNCONFIRMED_POST,
+): LocalState {
   const isSyncing = (x: { state: string }) => x.state === "syncing";
   if (![...local.comments, ...local.threads, ...local.fileEdits].some(isSyncing)) return local;
-  const toDraft = <T extends { state: string }>(x: T): T =>
-    isSyncing(x) ? { ...x, state: "draft", lastError: UNCONFIRMED_POST } : x;
+  const toDraft = <T extends Comment | Thread | FileEdit>(x: T): T =>
+    isSyncing(x) ? { ...x, state: "draft", lastError: errorFor(x) } : x;
   return {
     ...local,
     comments: local.comments.map(toDraft),
     threads: local.threads.map((t) =>
       isSyncing(t) && hasRemoteIdentity(t)
-        ? { ...t, state: "synced", lastError: UNCONFIRMED_POST }
+        ? { ...t, state: "synced", lastError: errorFor(t) }
         : toDraft(t),
     ),
     fileEdits: local.fileEdits.map(toDraft),
+  };
+}
+
+const PARENT_NOT_POSTED: ErrorInfo = {
+  message:
+    "Not posted: the comment it replies to was not posted. Fix that comment and submit again.",
+};
+
+const PARENT_MISSING: ErrorInfo = {
+  message: "Not posted: the comment it replies to no longer exists.",
+};
+
+/** Why an entity is still `syncing` at the end of a sync invocation. The only
+ *  way to get there is the Reconciler deferring a reply whose parent never
+ *  reached `synced` (ADR 0003 §2), so the reply's parent tells the story.
+ *
+ *  simplify: a reply chain deeper than `maxSyncCycles` would also land here
+ *  and be reported as "parent not posted" although nothing failed. Chains are
+ *  depth 2 in practice (replies target the root). Raise the cap, or count
+ *  chain depth, if deeper chains ever become possible. */
+export function deferredSyncError(
+  local: LocalState,
+): (entity: Comment | Thread | FileEdit) => ErrorInfo {
+  return (entity) => {
+    const parentId = "parentLocalId" in entity ? entity.parentLocalId : undefined;
+    if (parentId === undefined) return UNCONFIRMED_POST;
+    const parent = local.comments.find((c) => c.id === parentId);
+    if (!parent) return PARENT_MISSING;
+    return parent.state === "synced" ? UNCONFIRMED_POST : PARENT_NOT_POSTED;
   };
 }
 
