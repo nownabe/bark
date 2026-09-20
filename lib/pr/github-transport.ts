@@ -276,12 +276,16 @@ async function commit(
         };
       }
     }
+    // Reads stay on the base repository, which can address every commit of
+    // the PR by sha; only the writes go to the repository that owns headRef —
+    // the fork for a fork PR (issue #273).
+    const head = step.headRepo;
     const blobs = await Promise.all(
       step.fileEdits.map(async (fe) => {
         const result = await ghRequest<{ sha: string }>(
           client,
           "POST",
-          `/repos/${prRef.owner}/${prRef.repo}/git/blobs`,
+          `/repos/${head.owner}/${head.repo}/git/blobs`,
           { content: fe.editedSource, encoding: "utf-8" },
         );
         return { path: fe.path, sha: result.sha };
@@ -290,7 +294,7 @@ async function commit(
     const tree = await ghRequest<{ sha: string }>(
       client,
       "POST",
-      `/repos/${prRef.owner}/${prRef.repo}/git/trees`,
+      `/repos/${head.owner}/${head.repo}/git/trees`,
       {
         base_tree: step.baseSha,
         tree: blobs.map((b) => ({
@@ -306,7 +310,7 @@ async function commit(
     const newCommit = await ghRequest<{ sha: string }>(
       client,
       "POST",
-      `/repos/${prRef.owner}/${prRef.repo}/git/commits`,
+      `/repos/${head.owner}/${head.repo}/git/commits`,
       {
         message: commitMessage(step),
         tree: tree.sha,
@@ -318,13 +322,30 @@ async function commit(
     await ghRequest(
       client,
       "PATCH",
-      `/repos/${prRef.owner}/${prRef.repo}/git/refs/heads/${encodedHeadRef}`,
+      `/repos/${head.owner}/${head.repo}/git/refs/heads/${encodedHeadRef}`,
       { sha: newCommit.sha, force: false },
     );
     return { ok: true, newHeadSha: newCommit.sha };
   } catch (e) {
-    return { ok: false, error: toErrorInfo(e) };
+    return { ok: false, error: forkAwareError(e, prRef, step.headRepo) };
   }
+}
+
+/** A 403/404 while writing to a *different* repository than the PR's base is
+ *  almost always missing access to the fork — for an App token, the App not
+ *  being installed there. Say so instead of echoing GitHub's bare "Not Found". */
+function forkAwareError(
+  e: unknown,
+  prRef: PrRef,
+  head: { owner: string; repo: string },
+): ErrorInfo {
+  const info = toErrorInfo(e);
+  const isFork = head.owner !== prRef.owner || head.repo !== prRef.repo;
+  if (!isFork || (info.code !== 403 && info.code !== 404)) return info;
+  return {
+    ...info,
+    message: `Bark cannot write to ${head.owner}/${head.repo}. Install the Bark GitHub App on that repository, or sign in with a personal access token, then try again.`,
+  };
 }
 
 function commitMessage(step: CommitStep): string {

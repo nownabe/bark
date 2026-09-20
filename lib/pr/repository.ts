@@ -277,6 +277,10 @@ export class PullRequestRepository {
       isInDiff: this.isInDiff,
       headSha: pr.headSha,
       headRef: pr.headRef,
+      // A null headRepo (deleted fork) never reaches a Commit: the role gate
+      // withholds authoring for it (issue #273). The fallback only keeps the
+      // type total — a dev-role-switch commit there fails at GitHub.
+      headRepo: pr.headRepo ?? { owner: pr.owner, repo: pr.repo },
       fileContents: this.remoteState.fileContents,
       pullRequest: pr,
     };

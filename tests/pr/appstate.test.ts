@@ -50,6 +50,7 @@ function pr(overrides: Partial<PullRequest> = {}): PullRequest {
     body: "b",
     headSha: "head",
     headRef: "topic",
+    headRepo: { owner: "o", repo: "r" },
     baseRef: "main",
     state: "open",
     draft: false,
@@ -147,6 +148,33 @@ describe("appstate — deriveAppState: role", () => {
       }),
     );
     expect(out.role).toBe("reviewer");
+  });
+
+  test("the PR author of a deleted-fork PR is a reviewer (issue #273)", () => {
+    // headRepo is null when the fork was deleted: there is nowhere to commit,
+    // so the author affordances would all dead-end.
+    const out = deriveAppState(
+      localState(),
+      remoteState({
+        viewer: { login: "alice" },
+        pullRequest: pr({ headRepo: null, author: { login: "alice" } }),
+      }),
+    );
+    expect(out.role).toBe("reviewer");
+  });
+
+  test("the PR author of a live fork PR is still the author (issue #273)", () => {
+    const out = deriveAppState(
+      localState(),
+      remoteState({
+        viewer: { login: "alice" },
+        pullRequest: pr({
+          headRepo: { owner: "alice", repo: "r-fork" },
+          author: { login: "alice" },
+        }),
+      }),
+    );
+    expect(out.role).toBe("author");
   });
 });
 

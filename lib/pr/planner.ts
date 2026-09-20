@@ -28,6 +28,8 @@ export type PlannerContext = {
   headSha: string;
   /** Head ref (e.g. `refs/heads/topic` or just `topic`) for `updateRef`. */
   headRef: string;
+  /** Repository that owns `headRef` — the fork for a fork PR (issue #273). */
+  headRepo: { owner: string; repo: string };
   /** Sources at `(anchor.sha, path)` and `(headSha, path)` for the comments
    *  being planned; drives the re-anchoring of stale drafts to `headSha`. */
   fileContents: FileContent[];
@@ -149,6 +151,7 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
         kind: "commit",
         baseSha: ctx.headSha,
         headRef: ctx.headRef,
+        headRepo: ctx.headRepo,
         fileEdits,
       };
       steps.push(commit);

@@ -46,6 +46,7 @@ function pullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
     body: "",
     headSha: "current-head",
     headRef: "topic",
+    headRepo: { owner: "o", repo: "r" },
     baseRef: "main",
     state: "open",
     draft: false,
@@ -60,6 +61,7 @@ function context(overrides: Partial<PlannerContext> = {}): PlannerContext {
     isInDiff: () => true,
     headSha: "current-head",
     headRef: "topic",
+    headRepo: { owner: "o", repo: "r" },
     fileContents: [],
     pullRequest: pullRequest(),
     ...overrides,
@@ -290,9 +292,16 @@ describe("planner — CommitFileEdit", () => {
         kind: "commit",
         baseSha: "h",
         headRef: "topic",
+        headRepo: { owner: "o", repo: "r" },
         fileEdits: [fe],
       },
     ]);
+  });
+
+  test("a CommitStep carries the context's headRepo (issue #273)", () => {
+    const ops: ReconcileOperation[] = [{ kind: "commit-file-edit", fileEdit: fileEdit() }];
+    const steps = planExecution(ops, context({ headRepo: { owner: "forker", repo: "r-fork" } }));
+    expect(steps[0]).toMatchObject({ headRepo: { owner: "forker", repo: "r-fork" } });
   });
 
   test("multiple CommitFileEdits bundle into one CommitStep", () => {

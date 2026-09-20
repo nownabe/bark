@@ -23,7 +23,7 @@ type RawPull = {
   state: "open" | "closed";
   draft: boolean;
   merged: boolean;
-  head: { sha: string; ref: string };
+  head: { sha: string; ref: string; repo: { name: string; owner: { login: string } } | null };
   base: { ref: string };
   user: { login: string; avatar_url: string };
 };
@@ -42,6 +42,7 @@ export async function fetchPullRequest(client: GitHubClient, ref: PrRef): Promis
     body: raw.body ?? "",
     headSha: raw.head.sha,
     headRef: raw.head.ref,
+    headRepo: raw.head.repo ? { owner: raw.head.repo.owner.login, repo: raw.head.repo.name } : null,
     baseRef: raw.base.ref,
     state: raw.state,
     draft: raw.draft,

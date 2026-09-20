@@ -401,6 +401,7 @@ describe("github-transport — commit", () => {
       kind: "commit",
       baseSha: "h0",
       headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
       fileEdits: [
         {
           id: "f1",
@@ -439,6 +440,7 @@ describe("github-transport — commit", () => {
         kind: "commit",
         baseSha: "h1", // head advanced past the edit's base
         headRef: "topic",
+        headRepo: { owner: "o", repo: "r" },
         fileEdits: [
           { id: "f1", state: "syncing", path: "a.md", baseSha: "h0", editedSource: "edited" },
         ],
@@ -469,6 +471,7 @@ describe("github-transport — commit", () => {
       kind: "commit",
       baseSha: "h1",
       headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
       fileEdits: [
         { id: "f1", state: "syncing", path: "a.md", baseSha: "h0", editedSource: "edited" },
       ],
@@ -493,6 +496,7 @@ describe("github-transport — commit", () => {
       kind: "commit",
       baseSha: "h1",
       headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
       fileEdits: [
         { id: "f1", state: "syncing", path: "a.md", baseSha: "h0", editedSource: "edited" },
       ],
@@ -522,6 +526,7 @@ describe("github-transport — commit", () => {
       kind: "commit",
       baseSha: "h0",
       headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
       fileEdits: [
         { id: "f1", state: "syncing", path: "a.md", baseSha: "h0", editedSource: "edited" },
       ],
@@ -547,6 +552,7 @@ describe("github-transport — commit", () => {
       kind: "commit",
       baseSha: "h0",
       headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
       fileEdits: [
         { id: "f1", state: "syncing", path: "new.md", baseSha: "h0", editedSource: "edited" },
       ],
@@ -578,11 +584,85 @@ describe("github-transport — commit", () => {
       kind: "commit",
       baseSha: "h1",
       headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
       fileEdits: [
         { id: "f1", state: "syncing", path: "big.md", baseSha: "h0", editedSource: "edited" },
       ],
     });
     expect(outcome).toEqual({ ok: true, newHeadSha: "commit-sha" });
     expect(calls.some((c) => c.url.includes("/contents/"))).toBe(false);
+  });
+});
+
+describe("github-transport — commit targets the head repository (issue #273)", () => {
+  const FORK = { owner: "forker", repo: "r-fork" };
+
+  const forkStep = (headRepo: { owner: string; repo: string }) => ({
+    kind: "commit" as const,
+    baseSha: "h1",
+    headRef: "topic",
+    headRepo,
+    fileEdits: [
+      { id: "f1", state: "syncing" as const, path: "a.md", baseSha: "h0", editedSource: "edited" },
+    ],
+  });
+
+  /** The tree the conflict check reads at either sha: a.md unchanged. */
+  const unchangedTree = jsonResponse({
+    tree: [{ path: "a.md", mode: "100644", type: "blob", sha: "blob-same" }],
+  });
+
+  test("Git Data writes go to headRepo while the conflict check reads the base", async () => {
+    const { fetch, calls } = makeFetch(async (req) => {
+      if (req.url.includes("/git/trees/h0") || req.url.includes("/git/trees/h1"))
+        return unchangedTree;
+      if (req.url.endsWith("/git/blobs")) return jsonResponse({ sha: "blob-sha" });
+      if (req.url.endsWith("/git/trees")) return jsonResponse({ sha: "tree-sha" });
+      if (req.url.endsWith("/git/commits")) return jsonResponse({ sha: "commit-sha" });
+      if (req.url.includes("/git/refs/heads/")) return jsonResponse({});
+      throw new Error(`unexpected call: ${req.url}`);
+    });
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const outcome = await transport.commit(forkStep(FORK));
+    expect(outcome).toEqual({ ok: true, newHeadSha: "commit-sha" });
+    expect(calls.map((c) => c.url.replace("https://api.github.com", ""))).toEqual([
+      "/repos/o/r/git/trees/h1?recursive=1",
+      "/repos/o/r/git/trees/h0?recursive=1",
+      "/repos/forker/r-fork/git/blobs",
+      "/repos/forker/r-fork/git/trees",
+      "/repos/forker/r-fork/git/commits",
+      "/repos/forker/r-fork/git/refs/heads/topic",
+    ]);
+  });
+
+  test("a 404 from the fork explains the App-install requirement", async () => {
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.includes("/git/trees/h0") || req.url.includes("/git/trees/h1"))
+        return unchangedTree;
+      if (req.url.endsWith("/git/blobs")) return jsonResponse({ message: "Not Found" }, 404);
+      throw new Error(`unexpected call: ${req.url}`);
+    });
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const outcome = await transport.commit(forkStep(FORK));
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error.message).toContain("Install the Bark GitHub App on that repository");
+      expect(outcome.error.code).toBe(404);
+    }
+  });
+
+  test("a same-repo PR keeps the raw GitHub message", async () => {
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.includes("/git/trees/h0") || req.url.includes("/git/trees/h1"))
+        return unchangedTree;
+      if (req.url.endsWith("/git/blobs")) return jsonResponse({ message: "Not Found" }, 404);
+      throw new Error(`unexpected call: ${req.url}`);
+    });
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const outcome = await transport.commit(forkStep({ owner: "o", repo: "r" }));
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error.message).not.toContain("Install the Bark GitHub App");
+    }
   });
 });

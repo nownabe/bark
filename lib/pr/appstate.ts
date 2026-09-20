@@ -192,12 +192,17 @@ function buildThreadGroups(
 
 // ---- Role ---------------------------------------------------------------
 
+/** The viewer authors this PR when their login matches — and the branch they
+ *  would commit to still exists. A deleted fork (`headRepo === null`) leaves
+ *  nowhere to write, so the author affordances are withheld rather than
+ *  offered and failed at commit time (issue #273). */
 function computeRole(
   viewer: User | null,
   pullRequest: PullRequest | null,
 ): "author" | "reviewer" | null {
   if (!viewer || !pullRequest) return null;
-  return viewer.login.toLowerCase() === pullRequest.author.login.toLowerCase()
+  return pullRequest.headRepo !== null &&
+    viewer.login.toLowerCase() === pullRequest.author.login.toLowerCase()
     ? "author"
     : "reviewer";
 }

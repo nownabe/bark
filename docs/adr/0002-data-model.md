@@ -112,6 +112,7 @@ type PullRequest = {
   body: string;
   headSha: string;
   headRef: string;
+  headRepo: { owner: string; repo: string } | null; // repository that owns headRef; null when the fork was deleted
   baseRef: string;
   state: "open" | "closed";
   draft: boolean;
@@ -165,20 +166,22 @@ A synced `Comment` records `remoteKind`, the endpoint its `remoteId` belongs to 
 
 `User` is a single value-object type used wherever a GitHub identity appears — `Comment.author`, `PullRequest.author`, and `PRState.viewer`. There is no GitHub-side user table to normalise against; the inlined form stays small and avoids reference indirection.
 
+`owner`/`repo` name the base repository — the one the PR is opened against, which every read (comments, threads, file contents by sha) goes through. `headRepo` names the repository that owns `headRef`: the same repository for a branch PR, the fork for a fork PR, `null` when the fork was deleted. Commits target `headRepo` ([ADR 0003 §5](0003-operations-and-execution.md)); the author role is withheld when it is `null`.
+
 ### 4. Derived data (`AppState`)
 
 The following are computed from `LocalState` and _must not_ be stored:
 
-| Derived value                     | Computed from                                                        |
-| --------------------------------- | -------------------------------------------------------------------- |
-| `kind: 'comment' \| 'suggestion'` | presence of ` ```suggestion ` fence in `Comment.body`                |
-| `replacement: string`             | parsed suggestion fence content                                      |
-| thread tree for the UI            | `Comment.threadId` + `Comment.parentLocalId`                         |
-| current-source display position   | `Comment.anchor` + `FileContent` at `(headSha, path)` (re-anchoring) |
-| `inDiff` per Comment              | current PR diff + `Comment.anchor.range`                             |
-| `role: 'author' \| 'reviewer'`    | `User.login` vs `PullRequest.author.login`                           |
-| current `headSha` / `headRef`     | `PullRequest.headSha` / `PullRequest.headRef`                        |
-| "is this my draft"                | `Comment.state === 'draft'`                                          |
+| Derived value                     | Computed from                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------- |
+| `kind: 'comment' \| 'suggestion'` | presence of ` ```suggestion ` fence in `Comment.body`                           |
+| `replacement: string`             | parsed suggestion fence content                                                 |
+| thread tree for the UI            | `Comment.threadId` + `Comment.parentLocalId`                                    |
+| current-source display position   | `Comment.anchor` + `FileContent` at `(headSha, path)` (re-anchoring)            |
+| `inDiff` per Comment              | current PR diff + `Comment.anchor.range`                                        |
+| `role: 'author' \| 'reviewer'`    | `User.login` vs `PullRequest.author.login`, and `PullRequest.headRepo !== null` |
+| current `headSha` / `headRef`     | `PullRequest.headSha` / `PullRequest.headRef`                                   |
+| "is this my draft"                | `Comment.state === 'draft'`                                                     |
 
 `AppState` also holds **ephemeral UI state** — current selection, hovered thread, sidebar filter, current path, etc. None of it is persisted.
 

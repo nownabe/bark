@@ -142,6 +142,7 @@ async function renderAsAuthor(calls: string[]): Promise<HTMLElement> {
       body: "",
       headSha: "h",
       headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
       baseRef: "main",
       state: "open",
       draft: false,

@@ -204,6 +204,7 @@ describe("executor — dispatch", () => {
       kind: "commit",
       baseSha: "h0",
       headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
       fileEdits: [fileEdit()],
     };
     const { transport, calls } = fakeTransport({
@@ -232,6 +233,7 @@ describe("executor — ordering and aggregation", () => {
       kind: "commit",
       baseSha: "h",
       headRef: "topic",
+      headRepo: { owner: "o", repo: "r" },
       fileEdits: [fileEdit({ id: "f" })],
     };
     const { transport, calls } = fakeTransport();

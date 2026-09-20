@@ -73,6 +73,7 @@ function pr(overrides: Partial<PullRequest> = {}): PullRequest {
     body: "b",
     headSha: "h",
     headRef: "topic",
+    headRepo: { owner: "o", repo: "r" },
     baseRef: "main",
     state: "open",
     draft: false,
