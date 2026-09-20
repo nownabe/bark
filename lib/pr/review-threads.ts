@@ -4,7 +4,7 @@
 // outer `reviewThreads` connection and each thread's nested `comments`
 // connection must follow `pageInfo.hasNextPage` / `endCursor` (issue #178).
 // This helper hides that behind a flat "every thread with every comment"
-// result shared by the RemoteFetcher (fetchThreads) and the Transport
+// result shared by the RemoteFetcher (fetchRemoteState) and the Transport
 // (findCommentMappings).
 
 import { type GitHubClient, ghGraphQL } from "./github-api";

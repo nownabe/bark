@@ -1,16 +1,11 @@
-// Reviewer / author per-file edits (Pack B / R8b).
+// Reviewer / author per-file edits.
 //
-// Owns the two related maps the legacy App tracked side by side:
+// Owns two related maps:
 //   - suggestionEdits[path]      = the document + base + attached comments
 //   - suggestionComments[cid]    = the body for each pending suggestion
-// plus the debounced, ref-aware persistence the legacy used (a per-path
-// pending-write buffer flushed via a 400 ms timer, with read-modify-
-// write semantics so a path another tab edited mid-flight is preserved).
-//
-// Per-file content load (Effect 2 in App.tsx) stays in the parent for
-// now — it touches drafts / source / baseSource state that isn't owned
-// by this hook. The parent calls setSuggestionEdits / setSuggestionComments
-// while it runs that effect.
+// plus their debounced persistence: a per-path pending-write buffer flushed
+// via a 400 ms timer, read-modify-write so a path another tab edited
+// mid-flight is preserved.
 
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 import type { SuggestionEdit } from "../../../lib/drafts";

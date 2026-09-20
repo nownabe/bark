@@ -534,7 +534,7 @@ export interface SubmitGroup {
 }
 
 /** Counts for the single batched commit author Submit produces. */
-export interface SubmitCommitGroup {
+interface SubmitCommitGroup {
   /** Files with `source !== base` that will be in the commit. */
   editedFiles: number;
   /** Reviewer suggestions accepted by the author — their threads will be resolved. */
@@ -550,7 +550,7 @@ export interface SubmitCommitGroup {
  * batched Git commit (one per file edited + the threads to resolve for
  * accepted suggestions).
  */
-export interface SubmitSummary {
+interface SubmitSummary {
   total: number;
   /** In-diff items — sent as one review with inline comments. */
   review: SubmitGroup;

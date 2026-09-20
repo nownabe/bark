@@ -33,12 +33,6 @@ export type AppState = {
   /** Threads grouped with their Comments (preserves LocalState ordering). */
   threadGroups: ThreadGroup[];
 
-  /** Files available at the PR's current head SHA, sorted by path. The UI
-   *  reads its source-viewer file list from here so it never touches
-   *  RemoteState directly. Empty until both PullRequest and matching
-   *  FileContent entries are present. */
-  currentFiles: FileContent[];
-
   /** The PR's changed Markdown files still present at head (Bark's review
    *  scope; see `isMarkdownPath`), in GitHub API order, patches included so the UI can derive
    *  in-diff ranges. Empty until the remote snapshot carries the
@@ -77,7 +71,6 @@ export function deriveAppState(local: LocalState, remote: RemoteState): AppState
   }
 
   const threadGroups = buildThreadGroups(local.threads, commentViews);
-  const currentFiles = buildCurrentFiles(remote.fileContents, headSha);
 
   return {
     role: computeRole(remote.viewer, remote.pullRequest),
@@ -85,7 +78,6 @@ export function deriveAppState(local: LocalState, remote: RemoteState): AppState
     viewer: remote.viewer,
     commentViews,
     threadGroups,
-    currentFiles,
     changedMarkdownFiles: buildChangedMarkdownFiles(remote.changedFiles),
   };
 }
@@ -102,18 +94,6 @@ export function isMarkdownPath(path: string): boolean {
 function buildChangedMarkdownFiles(changed: ChangedFile[] | undefined): ChangedFile[] {
   if (!changed) return [];
   return changed.filter((f) => isMarkdownPath(f.path) && f.status !== "removed");
-}
-
-function buildCurrentFiles(files: FileContent[], headSha: string | null): FileContent[] {
-  if (!headSha) return [];
-  const seen = new Set<string>();
-  const out: FileContent[] = [];
-  for (const f of files) {
-    if (f.sha !== headSha || seen.has(f.path)) continue;
-    seen.add(f.path);
-    out.push(f);
-  }
-  return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
 // ---- Body parsing -------------------------------------------------------
@@ -194,8 +174,8 @@ function buildThreadGroups(
   // Synthesise a group for any threadId that owns comments but has no
   // corresponding Thread entity. Bark's own comments always carry one
   // (issue #272); this covers foreign review and foreign issue comments,
-  // which have no Bark metadata for remote-fetcher's fetchThreads to join
-  // on. Without this they would be invisible in the UI.
+  // which have no Bark metadata for remote-fetcher's thread derivation to
+  // join on. Without this they would be invisible in the UI.
   for (const [threadId, comments] of byThread) {
     if (knownIds.has(threadId)) continue;
     groups.push({

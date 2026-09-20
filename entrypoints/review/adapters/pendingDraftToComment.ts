@@ -1,15 +1,13 @@
-// Adapter from the legacy PendingDraft shape to the new data layer's
-// `Comment` (state: "draft"). Used during L4 to double-write the
-// addDraft call site into the Repository so a future repository.submitDrafts()
-// (L6) can find the same drafts in LocalState.
+// Adapter from the UI's PendingDraft shape to the data layer's `Comment`
+// (state: "draft"), so a drafted comment reaches LocalState and is picked up
+// by `repository.submitDrafts()`.
 
 import type { PendingDraft } from "../../../lib/drafts";
 import type { Comment } from "../../../lib/pr/types";
 
-/** Build a draft `Comment` from a legacy `PendingDraft`. The `parentLocalId`
+/** Build a draft `Comment` from a `PendingDraft`. The `parentLocalId`
  *  argument is the local id of the thread's root comment when the draft is
- *  a reply (legacy `addReply`). Pass `undefined` for a new top-level
- *  comment (legacy `addDraft`). */
+ *  a reply; pass `undefined` for a new top-level comment. */
 export function pendingDraftToComment(
   draft: PendingDraft,
   viewerLogin: string,

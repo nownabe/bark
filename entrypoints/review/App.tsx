@@ -373,16 +373,13 @@ function AppBody() {
   // The pending-suggestion ids seen on the previous render, so a newly created
   // suggestion can be scrolled into view in the review list (see effect below).
   const seenSuggestionCids = useRef<Set<string>>(new Set());
-  // Per-path suggestion edits awaiting a debounced write to storage (so pending
-  // (Debounced per-path persist buffer + timer live in useSuggestionEdits now.)
   // Set before a programmatic "jump to item" selection so the resulting
   // selection update does not pop the new-comment composer (we are highlighting
   // an existing item, not starting a new comment).
   const suppressNextAnchor = useRef(false);
 
-  // CommentView lookup by GitHub REST id — used by statusFor (L5) so it
-  // can read the new layer's displayPosition instead of running legacy
-  // reanchorComment on its own.
+  // CommentView lookup by GitHub REST id, so statusFor can read the
+  // comment's displayPosition.
   const commentViewByRemoteId = useMemo(() => {
     const out = new Map<number, CommentView>();
     if (!repositoryAppState) return out;
@@ -393,8 +390,7 @@ function AppBody() {
   }, [repositoryAppState]);
   // CommentView lookup by cid (Bark-authored Comment.id). Used by the
   // editor-highlight / thread-range / jumpTo paths to read each Bark
-  // comment's reanchored displayPosition (ADR 0004) without re-running
-  // the legacy reanchorComment inline.
+  // comment's reanchored displayPosition (ADR 0004).
   const commentViewByCid = useMemo(() => {
     const out = new Map<string, CommentView>();
     if (!repositoryAppState) return out;
@@ -647,9 +643,6 @@ function AppBody() {
     return ids;
   }, [visibleEntries]);
 
-  // The createdAtSha source for a comment, if we've fetched it — feeds the
-  // diff-based re-anchoring path (undefined → quote-search fallback).
-
   // Highlighted span of each thread on the current file, so clicking commented
   // text in the body can map back to its thread.
   const threadRanges = useMemo<ThreadRange[]>(() => {
@@ -660,9 +653,8 @@ function AppBody() {
       // Only threads visible in the sidebar (per the active filter) are clickable
       // in the document — resolved threads become clickable when Resolved is on.
       if (!visibleThreadIds.has(t.id)) continue;
-      // L7e-1: read the reanchored position from the new layer's CommentView
-      // instead of running legacy reanchorComment inline — for drafts too,
-      // whose stored range is head-coordinate and may sit at an older sha.
+      // Drafts go through a CommentView like synced comments do: their
+      // stored range is head-coordinate and may sit at an older sha.
       const cid = t.rootComment?.meta?.cid ?? t.rootDraft?.cid;
       if (!cid) continue;
       const dp = commentViewByCid.get(cid)?.displayPosition;
@@ -685,8 +677,6 @@ function AppBody() {
       .filter((r): r is { cid: string; from: number; to: number } => Boolean(r.cid));
   }, [role, source, baseSource, pendingSuggestions]);
 
-  // (PR info / help popover outside-click handlers live in useUiPanels.)
-
   // Starting a fresh selection (new-comment composer) means focus moved off the
   // emphasized item, so drop the emphasis. Programmatic jump/emphasis selections
   // set suppressNextAnchor and never set `anchor`, so they don't trigger this.
@@ -694,7 +684,6 @@ function AppBody() {
     if (anchor) clearEmphasis();
   }, [anchor]);
 
-  // Restore + device-flow polling now live in useAuthFlow.
   // pull / files / head SHA + ref / viewer derive from the Repository's
   // AppState (see the bootstrap block above). Pick the first file once the
   // file list arrives, and derive role once we know both the viewer and the
@@ -710,33 +699,21 @@ function AppBody() {
     if (repositoryAppState?.role) setRole(repositoryAppState.role);
   }, [repositoryAppState?.role]);
 
-  // L6d-1: while we are author, mirror suggestionEdits into Repository's
-  // LocalState as FileEdits so a future repository.submitDrafts() (L6d-3)
-  // can emit one Commit step for all pending edits. Reviewer doesn't need
-  // this — their edits become suggestion-block Comments at submit time
-  // (L6c).
+  // While we are author, mirror suggestionEdits into Repository's LocalState
+  // as FileEdits so repository.submitDrafts() emits one Commit step for all
+  // pending edits. Reviewer doesn't need this — their edits become
+  // suggestion-block Comments at submit time.
   useEffect(() => {
     if (!prRepository || !headSha || role !== "author") return;
     void syncFileEditsToRepository();
   }, [syncFileEditsToRepository, prRepository, headSha, role]);
-
-  // Per-file content load now lives in useSelectedFileContent.
-  // Re-anchoring file content (per createdAtSha) is fetched by the new
-  // layer's bootstrap/refresh via fileContentTargets — App.tsx no longer
-  // maintains its own oldSources cache.
-
-  // Drafts restore + persistence now live in useDrafts.
-  // Suggestion-edits restore + persistence now live in useSuggestionEdits.
-
-  // Author's accept/reject decisions (R3) restore + persistence now live
-  // in useDismissedSuggestions.
 
   // Push the base text into CM for tracked changes (reviewer suggest).
   useEffect(() => {
     cmRef.current?.view?.dispatch({ effects: setBaseText.of(baseSource) });
   }, [baseSource]);
 
-  // Highlight comment/draft anchors over the CM body (R6); pending uses a distinct color.
+  // Highlight comment/draft anchors over the CM body; pending uses a distinct color.
   // Always clip ranges to the current CM document length (out-of-range ranges crash on map).
   useEffect(() => {
     const view = cmRef.current?.view;
@@ -747,8 +724,8 @@ function AppBody() {
     // The document highlights track what the sidebar shows: only comments whose
     // thread is currently visible (per the filter) are highlighted, so resolved
     // threads light up exactly when the Resolved facet is selected.
-    // L7e-1: each visible comment's editor position comes from the
-    // CommentView's displayPosition (new layer's reanchor result).
+    // Each visible comment's editor position comes from its CommentView's
+    // displayPosition (the reanchor result).
     const existing = comments
       .filter(
         (c) =>
@@ -1052,9 +1029,6 @@ function AppBody() {
     }
   };
 
-  // author: record an accept/reject decision on a submitted suggestion.
-  // (setDecision now lives in useDismissedSuggestions.)
-
   // author: accept a suggestion. Stage two things:
   //   - apply the replacement to the editor source so the author sees the change
   //   - record "accepted" in the dismissed map (queue for thread resolve on Submit)
@@ -1186,7 +1160,7 @@ function AppBody() {
       // out-of-diff → PostIssueComment.
       const inRepo = new Set(prRepository.getLocalState().comments.map((c) => c.id));
       for (const d of toSubmit) {
-        if (inRepo.has(d.cid)) continue; // already double-written by L4/L6a
+        if (inRepo.has(d.cid)) continue; // already written to the Repository at draft time
         const body = composeDraftBody(d);
         // A top-level draft (d.cid === d.thread) has no parent to resolve.
         const parentLocalId =
@@ -1253,7 +1227,7 @@ function AppBody() {
       // (out-of-diff), and the Executor composes the out-of-diff quote and
       // permalink (issue #282).
 
-      // 1. Re-run the FileEdit mirror: the L6d-1 effect only runs after a
+      // 1. Re-run the FileEdit mirror: the mirror effect only runs after a
       //    render, so the impending commit must re-read the edits itself.
       //    Each carries the accepted suggestions' threads in resolveOnCommit.
       const wantedFileEdits = await syncFileEditsToRepository();
@@ -1288,9 +1262,9 @@ function AppBody() {
         .getLocalState()
         .fileEdits.find((fe) => fe.lastError)?.lastError;
 
-      // 4. Legacy state cleanup. Drafts auto-fall-out of the drafts useMemo
+      // 4. Local state cleanup. Drafts auto-fall-out of the drafts useMemo
       //    once submitDrafts flips them past "draft"; only suggestionEdits +
-      //    accepted-decision state still own their own storage.
+      //    accepted-decision state own their own storage.
       if (commitFailure) {
         reportError(
           `Commit failed: ${commitFailure.message} Your pending edits are kept — ` +
@@ -1336,8 +1310,7 @@ function AppBody() {
   };
 
   // After the auth hook drops the token, also wipe any PR-load-derived state
-  // so the surface returns to its "no PR loaded" baseline (matches what the
-  // legacy in-line implementation did).
+  // so the surface returns to its "no PR loaded" baseline.
   const handleClearToken = async () => {
     await clearAuthToken();
     setError(null);
@@ -1349,7 +1322,7 @@ function AppBody() {
     // the previous session's Repository (and its stale transport) survives
     // sign-out and keeps rendering until the next bootstrap resolves (#192).
     // Storage is not cleared (consistent with logging back in as the same
-    // user). Suggestion edits + dismissed still own their own legacy state.
+    // user); suggestion edits + dismissed keep their own persisted state.
     setPrRepository(null);
     setRefreshPr(null);
     resetSuggestionEdits();
@@ -1361,8 +1334,6 @@ function AppBody() {
     setSelection(null);
     setBubblePos(null);
   };
-
-  // flushSuggestionEdits / persistSuggestionEdit now live in useSuggestionEdits.
 
   const onSourceChange = (v: string) => {
     // Guard against edits fired before the selected file has loaded — at

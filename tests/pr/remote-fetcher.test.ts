@@ -5,13 +5,19 @@ import {
   fetchFileContent,
   fetchPullRequest,
   fetchRemoteState,
-  fetchThreads,
   fetchViewer,
   normalizeComments,
+  threadsFromRaw,
 } from "../../lib/pr/remote-fetcher";
+import { listReviewThreads } from "../../lib/pr/review-threads";
 import type { PrRef } from "../../lib/pr/types";
 
 const PR: PrRef = { owner: "o", repo: "r", number: 7 };
+
+/** What `fetchRemoteState` does for review threads, minus the REST comment
+ *  data: list every page, then derive the Thread entities. */
+const listThreads = async (fetch: typeof globalThis.fetch) =>
+  threadsFromRaw(await listReviewThreads({ token: "t", fetch }, PR));
 
 type CallRecord = { url: string; method: string; body?: string };
 
@@ -381,8 +387,8 @@ describe("remote-fetcher — normalizeComments foreign threadId (issues #180 / #
     expect(new Set(out.map((c) => c.threadId)).size).toBe(1);
   });
 
-  test("foreign comment threadId matches the Thread entity fetchThreads builds (#180)", () => {
-    // fetchThreads names an all-foreign thread `foreign-thread-<nodeId>`;
+  test("foreign comment threadId matches the Thread entity threadsFromRaw builds (#180)", () => {
+    // threadsFromRaw names an all-foreign thread `foreign-thread-<nodeId>`;
     // the map hands normalizeComments that exact id.
     const map = new Map<number, string>([[42, "foreign-thread-PRT_x"]]);
     const [comment] = normalizeComments([foreignReview(42)], [], map);
@@ -521,7 +527,7 @@ describe("remote-fetcher — fence identity binding (issue #190)", () => {
         },
       }),
     );
-    const out = await fetchThreads({ token: "t", fetch }, PR);
+    const out = await listThreads(fetch);
     expect(out.map((t) => t.id)).toEqual(["local-t1", "foreign-thread-PRT_B"]);
   });
 
@@ -695,7 +701,7 @@ describe("remote-fetcher — fence identity binding (issue #190)", () => {
   });
 });
 
-describe("remote-fetcher — fetchThreads", () => {
+describe("remote-fetcher — threadsFromRaw", () => {
   test("threads inherit local id from a contained Bark comment's metadata.threadId", async () => {
     const barkBody = embedMetadata("x", {
       cid: "c-x",
@@ -735,7 +741,7 @@ describe("remote-fetcher — fetchThreads", () => {
         },
       }),
     );
-    const out = await fetchThreads({ token: "t", fetch }, PR);
+    const out = await listThreads(fetch);
     expect(out).toEqual([
       { id: "local-thread-A", state: "synced", remoteThreadId: "PRT_A", resolved: true },
       { id: "foreign-thread-PRT_B", state: "synced", remoteThreadId: "PRT_B", resolved: false },
@@ -791,7 +797,7 @@ describe("remote-fetcher — fetchThreads", () => {
         },
       });
     });
-    const out = await fetchThreads({ token: "t", fetch }, PR);
+    const out = await listThreads(fetch);
     expect(out).toEqual([
       {
         id: "foreign-thread-PRT_page1",
@@ -856,7 +862,7 @@ describe("remote-fetcher — fetchThreads", () => {
         },
       });
     });
-    const out = await fetchThreads({ token: "t", fetch }, PR);
+    const out = await listThreads(fetch);
     expect(out).toEqual([
       { id: "local-thread-deep", state: "synced", remoteThreadId: "PRT_deep", resolved: false },
     ]);
@@ -873,6 +879,18 @@ describe("remote-fetcher — fetchFileContent URL encoding", () => {
     await fetchFileContent({ token: "t", fetch }, PR, "abc", "docs/sub dir/file.md");
     expect(calledUrl).toContain("/contents/docs/sub%20dir/file.md");
     expect(calledUrl).not.toContain("%2F");
+  });
+});
+
+describe("remote-fetcher — fetchFileContent decoding", () => {
+  test("decodes UTF-8 from the line-wrapped base64 GitHub returns", async () => {
+    const source = "# 日本語の見出し\n\nbody with emoji 🐕\n";
+    const wrapped = (
+      btoa(String.fromCharCode(...new TextEncoder().encode(source))).match(/.{1,60}/g) ?? []
+    ).join("\n");
+    const { fetch } = makeFetch(async () => jsonResponse({ content: wrapped, encoding: "base64" }));
+    const out = await fetchFileContent({ token: "t", fetch }, PR, "abc", "doc.md");
+    expect(out.source).toBe(source);
   });
 });
 

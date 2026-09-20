@@ -1,12 +1,12 @@
-// Adapter from the new data layer's DisplayPosition.status to the
-// legacy AnchorStatus values that App.tsx's badge code consumes.
+// Adapter from the data layer's DisplayPosition.status to the AnchorStatus
+// the badge UI consumes.
 //
 // AnchorStatus is a 3-state value ('current', 'reanchored', 'outdated')
-// that the badge UI inspects via STATUS_LABEL (uiHelpers). DisplayPosition
-// is the new layer's richer 4-state version — `mapped` and `shifted` both
-// indicate a successful LCS re-anchor, with the latter carrying a quote
-// mismatch. Both collapse to 'reanchored' as far as the legacy UI cares
-// (it can't tell `mapped` from `shifted` apart anyway).
+// the badge UI inspects via STATUS_LABEL (uiHelpers). DisplayPosition is the
+// richer 4-state version — `mapped` and `shifted` both indicate a successful
+// LCS re-anchor, with the latter carrying a quote mismatch. Both collapse to
+// 'reanchored': the badge has no distinct affordance for a quote mismatch,
+// and `canAccept` reads the DisplayPosition directly where that matters.
 
 import type { DisplayPosition } from "../../../lib/pr/reanchor";
 

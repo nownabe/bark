@@ -1,16 +1,13 @@
-// Modal + popover + FAB visibility flags (Pack C / R9).
+// Modal + popover + FAB visibility flags.
 //
-// Collects the boolean flags that drove App.tsx's five overlay surfaces
-// (Submit confirm, Discard confirm, PR info popover, Help popover,
-// Debug popover) plus the DOM refs the popovers need so an outside
-// mouse-down can close them. Outside-click handling for the two
-// popovers lives inside the hook — they were two near-identical
-// effects in the legacy App.
+// Collects the boolean flags for the five overlay surfaces (Submit confirm,
+// Discard confirm, PR info popover, Help popover, Debug popover) plus the
+// DOM refs the popovers need so an outside mouse-down can close them.
 //
-// The submit / discard confirmations are plain modals (no outside-
-// click DOM logic), so they expose the conventional show + setShow
-// pair. The popovers expose `toggle*` / `close*` actions because the
-// caller doesn't poke them imperatively beyond that.
+// The submit / discard confirmations are plain modals (no outside-click DOM
+// logic), so they expose the conventional show + setShow pair. The popovers
+// expose `toggle*` / `close*` actions because the caller doesn't poke them
+// imperatively beyond that.
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 
@@ -23,7 +20,6 @@ export type UiPanels = {
 
   showPrInfo: boolean;
   togglePrInfo: () => void;
-  closePrInfo: () => void;
   prInfoBtnRef: RefObject<HTMLButtonElement | null>;
   prInfoRef: RefObject<HTMLDivElement | null>;
 
@@ -82,7 +78,6 @@ export function useUiPanels(): UiPanels {
     setShowDiscardConfirm,
     showPrInfo,
     togglePrInfo: () => setShowPrInfo((v) => !v),
-    closePrInfo: () => setShowPrInfo(false),
     prInfoBtnRef,
     prInfoRef,
     showHelp,
