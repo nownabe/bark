@@ -25,8 +25,13 @@ export type CommentRemoteMapping = {
   remoteThreadId?: string;
 };
 
+/** `ok: true` means the review POST succeeded. `mappings` may still miss
+ *  some cids: the identity listing lagged behind the write, or failed
+ *  outright (`confirmError`). Either way the comments exist on GitHub, so
+ *  this must not be reported as `ok: false` — a plain retry would post them
+ *  again (issue #266). */
 export type PostReviewBatchOutcome =
-  | { ok: true; mappings: CommentRemoteMapping[] }
+  | { ok: true; mappings: CommentRemoteMapping[]; confirmError?: ErrorInfo }
   | { ok: false; error: ErrorInfo };
 
 export type PostReplyOutcome =

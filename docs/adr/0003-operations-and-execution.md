@@ -74,19 +74,24 @@ In-diff vs out-of-diff routing for `CreateComment` is computed at planning time 
 Each `ExecutionStep` returns per-item results:
 
 - A 1:1 Step succeeds or fails as a whole; the single affected item lands in `synced` or `draft + lastError`.
-- `PostReviewBatch` is atomic at GitHub — all-or-nothing — so its result is uniform across the bundled comments. (A protocol-level partial success is not possible; a network failure mid-call is treated as full failure pending re-fetch confirmation.)
+- `PostReviewBatch` is atomic at GitHub — all-or-nothing — so the POST result is uniform across the bundled comments. Confirmation (§7) is per-comment: a comment the identity round-trip could not map lands in `draft + lastError` ("posted but not confirmed"), never stays `syncing`, and is adopted by `cid` on the next refresh (§7). The Transport distinguishes "POST failed" (`ok: false`, nothing on GitHub) from "POST ok, confirmation failed" (`ok: true` with a `confirmError` and no mappings): the latter must not look like a plain failure, or a retry would post the review twice.
 - `Commit` is atomic from the Executor's perspective; intermediate failures (e.g. `updateRef` rejects with non-fast-forward) return every bundled `FileEdit` to `draft + lastError`.
 - `RejectComment` always fails: the `Comment` (and its not-yet-created `Thread`) returns to `draft + lastError` with a "could not map to the current head" message. The user re-creates the comment on the current text.
 
 The Reconciler is not responsible for retry. The user observes the error in the UI and re-triggers the action, which re-enters `draft → syncing`.
+
+**`syncing` never survives its sync invocation.** Every entity that enters `syncing` ends the invocation in `synced` or `draft + lastError`. Two safety nets close the paths where a step result cannot deliver that (issue #266):
+
+- **Hydrate** reverts any persisted `syncing` entity to `draft + lastError`. A fresh session has no step in flight, so nothing else would ever advance it, and the UI shows neither pending nor submitted items in that state.
+- **Refresh adopts by `cid`.** `draft`/`syncing` items are normally protected from refresh, but a remote item whose id equals a local item that has no `remoteId` / `remoteThreadId` yet can only be that item's own post (the id was minted locally). The merge adopts the remote copy instead of discarding it, so an unconfirmed or interrupted post heals on the next refresh rather than being posted again.
 
 ### 7. Identity matching at the wire
 
 For every `PostReviewBatch` / `PostReply` / `PostIssueComment`, the Executor:
 
 1. Embeds `{ cid: Comment.id, threadId: Comment.threadId, anchor }` as base64-encoded hidden metadata in the comment body (ADR 0002 §5).
-2. After the API call returns, matches the freshly-created GitHub comments back to `LocalState` `Comment` entries by extracting the same metadata from the response bodies.
-3. Populates `Comment.remoteId` (and, for a freshly-created thread, the matched `Thread.remoteThreadId`) and flips state to `synced`.
+2. After the API call returns, matches the freshly-created GitHub comments back to `LocalState` `Comment` entries by extracting the same metadata from the response bodies. `POST /pulls/{n}/reviews` returns only the review object, so for `PostReviewBatch` the Transport instead lists the PR's review threads via GraphQL right after the POST and matches by `cid`. GitHub's listing can lag behind the write, so while any posted `cid` is missing the Transport re-lists with a small bounded backoff (two retries, ~2 s total) before giving up.
+3. Populates `Comment.remoteId` (and, for a freshly-created thread, the matched `Thread.remoteThreadId`) and flips state to `synced`. A `cid` still missing after the bound is reported as unmapped and handled per §6 (`draft + lastError`, adopted on the next refresh).
 
 For Threads with no native body to embed in, identity is resolved at fetch time by joining GraphQL `reviewThreads` to the matched `Comment` set (any contained comment with a known `Comment.id` reveals the `Thread.id` ↔ `remoteThreadId` mapping).
 

@@ -60,6 +60,10 @@ async function postReviewBatch(
       `/repos/${prRef.owner}/${prRef.repo}/pulls/${prRef.number}/reviews`,
       { commit_id: step.commitId, event: "COMMENT", comments },
     );
+  } catch (e) {
+    return { ok: false, error: toErrorInfo(e) };
+  }
+  try {
     const mappings = await findCommentMappings(
       client,
       prRef,
@@ -67,7 +71,7 @@ async function postReviewBatch(
     );
     return { ok: true, mappings };
   } catch (e) {
-    return { ok: false, error: toErrorInfo(e) };
+    return { ok: true, mappings: [], confirmError: toErrorInfo(e) };
   }
 }
 
@@ -300,18 +304,39 @@ async function fetchBlobSha(
 
 // ---- Identity matching -------------------------------------------------
 
+/** GitHub's listing can lag behind the review POST (read-after-write); a
+ *  cid missing from the first listing usually appears within a second or
+ *  two. Bounded so a comment GitHub really dropped does not hang the
+ *  submit; the caller reports whatever is still unmapped (ADR 0003 §7). */
+const CONFIRM_BACKOFF_MS = [500, 1500];
+const defaultDelay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 /** After a review post, fetch the PR's review threads via GraphQL (all
  *  pages — see lib/pr/review-threads) and build cid → (remoteId,
  *  remoteThreadId) mappings for the freshly-posted comments by extracting
- *  hidden metadata from each comment body. */
+ *  hidden metadata from each comment body. Re-lists with backoff while
+ *  any cid is still missing. */
 async function findCommentMappings(
   client: GitHubClient,
   prRef: PrRef,
   cids: string[],
 ): Promise<CommentRemoteMapping[]> {
   if (cids.length === 0) return [];
+  const sleep = client.delay ?? defaultDelay;
+  let out: CommentRemoteMapping[] = [];
+  for (let attempt = 0; ; attempt++) {
+    out = await listCommentMappings(client, prRef, new Set(cids));
+    if (out.length === cids.length || attempt === CONFIRM_BACKOFF_MS.length) return out;
+    await sleep(CONFIRM_BACKOFF_MS[attempt]);
+  }
+}
+
+async function listCommentMappings(
+  client: GitHubClient,
+  prRef: PrRef,
+  want: Set<string>,
+): Promise<CommentRemoteMapping[]> {
   const threads = await listReviewThreads(client, prRef);
-  const want = new Set(cids);
   const out: CommentRemoteMapping[] = [];
   for (const thread of threads) {
     for (const c of thread.comments) {

@@ -14,12 +14,12 @@ While designing refresh, the question of how refresh failures (and failures gene
 
 ### 1. Refresh triggers
 
-| Trigger               | Behaviour                                                                                                             | Status                                                                |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| **Bootstrap**         | Full fetch on session start                                                                                           | Already established by [ADR 0001](0001-pr-data-layer-architecture.md) |
-| **Post-mutation**     | Executor refetches after a successful `ExecutionStep` to populate `remoteId` / `remoteThreadId` and confirm the write | Required for the state machine to advance `syncing → synced`          |
-| **Visibility change** | When the tab returns to visible after ≥ 30 s of being hidden, full refresh                                            | New                                                                   |
-| **Manual (debug)**    | Hidden behind a debug surface (settings panel / dev flag) — force a full refresh                                      | Debug only; not a production user feature in v1                       |
+| Trigger               | Behaviour                                                                                                                                                                                                                                                                                        | Status                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| **Bootstrap**         | Full fetch on session start                                                                                                                                                                                                                                                                      | Already established by [ADR 0001](0001-pr-data-layer-architecture.md) |
+| **Post-mutation**     | Executor refetches after a successful `ExecutionStep` to populate `remoteId` / `remoteThreadId` and confirm the write; a write the refetch cannot confirm falls back to `draft + lastError` and is adopted by `cid` on the next full refresh ([ADR 0003 §6–7](0003-operations-and-execution.md)) | Required for the state machine to advance `syncing → synced`          |
+| **Visibility change** | When the tab returns to visible after ≥ 30 s of being hidden, full refresh                                                                                                                                                                                                                       | New                                                                   |
+| **Manual (debug)**    | Hidden behind a debug surface (settings panel / dev flag) — force a full refresh                                                                                                                                                                                                                 | Debug only; not a production user feature in v1                       |
 
 **Periodic polling is intentionally excluded.** Bark is an asynchronous review tool; users do not expect real-time updates. Polling adds cost without UX gain.
 
@@ -41,7 +41,7 @@ A full refresh refetches:
 ### 3. Refresh semantics
 
 - **`RemoteState` is replaced wholesale** by the new snapshot. It is always a current GitHub mirror.
-- **`LocalState` is merged** per the [ADR 0001 §4](0001-pr-data-layer-architecture.md) conflict policy: `synced` items are overwritten by remote; `draft` and `syncing` items are protected; remote-deleted `synced` items are removed from `LocalState`.
+- **`LocalState` is merged** per the [ADR 0001 §4](0001-pr-data-layer-architecture.md) conflict policy: `synced` items are overwritten by remote; `draft` and `syncing` items are protected (except that a remote item carrying the same locally-minted id as a local item with no remote identity is adopted — [ADR 0003 §6](0003-operations-and-execution.md)); remote-deleted `synced` items are removed from `LocalState`.
 - **Refreshes are serialised** at the Repository. If a refresh is in flight, additional triggers coalesce: at most one queued refresh waits for the running one. A later trigger does not stack, it replaces the queued one.
 
 ### 4. Snackbar as global error surface

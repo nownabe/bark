@@ -18,6 +18,7 @@ import {
   completeNoopThreadSyncs,
   flipDraftsToSyncing,
   mergeRemoteIntoLocal,
+  revertOrphanedSyncing,
   setThreadResolvedToSyncing,
 } from "./state-machine";
 import type { StorageAdapter } from "./storage";
@@ -58,8 +59,9 @@ export class PullRequestRepository {
   async hydrate(): Promise<void> {
     const loaded = await this.storage.load();
     if (loaded) {
-      this.localState = loaded;
+      this.localState = revertOrphanedSyncing(loaded);
       this.notify();
+      if (this.localState !== loaded) await this.persist();
     }
   }
 
