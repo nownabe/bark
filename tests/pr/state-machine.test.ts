@@ -368,6 +368,37 @@ describe("state-machine — applyStepResults: PostReply / PostIssueComment", () 
     expect(out.comments[0]).toMatchObject({ state: "synced", remoteId: 7 });
   });
 
+  test("post-issue-comment success on a top-level comment marks its Thread synced with remoteIssueCommentId (issue #272)", () => {
+    const c = comment({ state: "syncing" });
+    const t = thread({ state: "syncing" });
+    const results: StepResult[] = [
+      {
+        step: { kind: "post-issue-comment", comment: c },
+        outcome: { ok: true, mapping: { cid: "c1", remoteId: 777 } },
+      },
+    ];
+    const out = applyStepResults(localState({ comments: [c], threads: [t] }), results);
+    expect(out.threads[0]).toEqual({
+      id: "t1",
+      state: "synced",
+      resolved: false,
+      remoteIssueCommentId: 777,
+      lastError: undefined,
+    });
+  });
+
+  test("post-issue-comment success on a reply leaves the Thread untouched", () => {
+    const c = comment({ id: "c2", state: "syncing", parentLocalId: "c0" });
+    const t = thread({ state: "synced", remoteIssueCommentId: 5 });
+    const out = applyStepResults(localState({ comments: [c], threads: [t] }), [
+      {
+        step: { kind: "post-issue-comment", comment: c },
+        outcome: { ok: true, mapping: { cid: "c2", remoteId: 777 } },
+      },
+    ]);
+    expect(out.threads[0]).toEqual(t);
+  });
+
   test("Failure reverts the single comment to draft + lastError", () => {
     const c = comment({ id: "x", state: "syncing" });
     const err = { message: "no" };
@@ -565,6 +596,19 @@ describe("state-machine — applyStepResultsToRemote", () => {
     expect(out.comments).toContainEqual(
       expect.objectContaining({ id: "c1", state: "synced", remoteId: 22 }),
     );
+  });
+
+  test("PostIssueComment success mirrors a new out-of-diff Thread into RemoteState (issue #272)", () => {
+    const c = comment({ id: "c1", state: "syncing", threadId: "t1" });
+    const out = applyStepResultsToRemote(remoteState({ pullRequest: pr() }), [
+      {
+        step: { kind: "post-issue-comment", comment: c },
+        outcome: { ok: true, mapping: { cid: "c1", remoteId: 777 } },
+      },
+    ]);
+    expect(out.threads).toEqual([
+      { id: "t1", state: "synced", resolved: false, remoteIssueCommentId: 777 },
+    ]);
   });
 
   test("Resolve / Unresolve success updates the mirrored thread's resolved", () => {

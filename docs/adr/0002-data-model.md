@@ -154,6 +154,8 @@ Field-by-field, which side conventionally populates each:
 
 A `Thread` has exactly one remote identity: `remoteThreadId` for a GitHub review thread, or `remoteIssueCommentId` for an out-of-diff thread whose comments are issue comments (which have no GraphQL thread). Both are absent while the thread is a local draft.
 
+A `Thread` is created together with its root `Comment`: upserting a top-level draft Comment inserts a `draft` Thread with the same id (`Comment.threadId`), which then follows the Comment's transitions. Replies never create Threads. A Thread with no remaining Comments and no remote identity is removed with its last Comment.
+
 `User` is a single value-object type used wherever a GitHub identity appears — `Comment.author`, `PullRequest.author`, and `PRState.viewer`. There is no GitHub-side user table to normalise against; the inlined form stays small and avoids reference indirection.
 
 ### 4. Derived data (`AppState`)

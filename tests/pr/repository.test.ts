@@ -275,6 +275,33 @@ describe("repository — mutations", () => {
     await r.discardComment("a");
     expect(r.getLocalState().comments.map((c) => c.id)).toEqual(["b"]);
   });
+
+  test("upsertComment of a top-level draft creates a draft Thread with the same id (issue #272)", async () => {
+    const r = makeRepo(happyTransport().transport);
+    await r.upsertComment(comment());
+    expect(r.getLocalState().threads).toEqual([{ id: "t1", state: "draft", resolved: false }]);
+  });
+
+  test("upsertComment of a reply creates no Thread", async () => {
+    const r = makeRepo(happyTransport().transport);
+    await r.upsertComment(comment({ id: "c2", parentLocalId: "c1" }));
+    expect(r.getLocalState().threads).toEqual([]);
+  });
+
+  test("upsertComment never overwrites an existing Thread", async () => {
+    const r = makeRepo(happyTransport().transport);
+    const existing = thread({ state: "synced", remoteThreadId: "PRT", resolved: true });
+    await r.upsertThread(existing);
+    await r.upsertComment(comment());
+    expect(r.getLocalState().threads).toEqual([existing]);
+  });
+
+  test("discarding the last comment of a draft Thread removes the Thread (issue #272)", async () => {
+    const r = makeRepo(happyTransport().transport);
+    await r.upsertComment(comment());
+    await r.discardComment("c1");
+    expect(r.getLocalState().threads).toEqual([]);
+  });
 });
 
 describe("repository — submitDrafts pipeline", () => {
@@ -607,6 +634,25 @@ describe("repository — setThreadResolved", () => {
     await r2.setRemoteState({ ...emptyState(), pullRequest: pr(), threads: [outThread(true)] });
     const app = deriveAppState(r2.getLocalState(), r2.getRemoteState());
     expect(app.threadGroups.find((g) => g.thread.id === "t-out")?.thread.resolved).toBe(true);
+  });
+});
+
+describe("repository — out-of-diff threads (issue #272)", () => {
+  test("a freshly submitted out-of-diff thread is resolvable in the same session", async () => {
+    const { transport, calls } = happyTransport();
+    const r = makeRepo(transport, () => false);
+    await r.setRemoteState({ ...emptyState(), pullRequest: pr() });
+    await r.upsertComment(comment());
+
+    await r.submitDrafts();
+    await r.setThreadResolved("t1", true);
+
+    expect(calls).toEqual(["post-issue-comment", "set-issue-thread-resolved"]);
+    expect(r.getLocalState().threads[0]).toMatchObject({
+      state: "synced",
+      resolved: true,
+      remoteIssueCommentId: 100,
+    });
   });
 });
 

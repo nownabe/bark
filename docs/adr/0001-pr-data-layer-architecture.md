@@ -194,7 +194,7 @@ sequenceDiagram
 
     Note over U,GH: Draft composition
     U->>R: drag-select + type
-    R->>L: add item (state: draft)
+    R->>L: add Comment + its Thread (state: draft)
     L->>C: persist
     L-->>A: re-derive
     A-->>R: re-render

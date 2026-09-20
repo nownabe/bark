@@ -24,7 +24,7 @@ import {
 import type { StorageAdapter } from "./storage";
 import type { Transport } from "./transport";
 import type { Comment, FileEdit, LocalId, LocalState, RemoteState, Thread } from "./types";
-import { emptyState } from "./types";
+import { emptyState, hasRemoteIdentity } from "./types";
 
 export type RepositoryOptions = {
   storage: StorageAdapter;
@@ -91,11 +91,22 @@ export class PullRequestRepository {
   // ---- Mutations ---------------------------------------------------------
 
   /** Insert or update a Comment in LocalState. The caller supplies the full
-   *  Comment object including id; this is meant for both creation and edits. */
+   *  Comment object including id; this is meant for both creation and edits.
+   *
+   *  A top-level Comment carries its Thread: if no Thread with the Comment's
+   *  `threadId` exists yet, a draft one is created alongside it, so the
+   *  Thread can receive the remote identity the submit returns and be
+   *  resolved in the same session (issue #272). Replies never create one. */
   async upsertComment(comment: Comment): Promise<void> {
+    const threads = this.localState.threads;
+    const needsThread =
+      comment.parentLocalId === undefined && !threads.some((t) => t.id === comment.threadId);
     this.localState = {
       ...this.localState,
       comments: upsertById(this.localState.comments, comment),
+      threads: needsThread
+        ? [...threads, { id: comment.threadId, state: "draft", resolved: false }]
+        : threads,
     };
     this.notify();
     await this.persist();
@@ -119,10 +130,16 @@ export class PullRequestRepository {
     await this.persist();
   }
 
+  /** Remove a Comment. A Thread left with no Comments and no remote identity
+   *  is a draft thread with nothing in it, so it goes too (issue #272). */
   async discardComment(id: LocalId): Promise<void> {
+    const comments = this.localState.comments.filter((c) => c.id !== id);
     this.localState = {
       ...this.localState,
-      comments: this.localState.comments.filter((c) => c.id !== id),
+      comments,
+      threads: this.localState.threads.filter(
+        (t) => hasRemoteIdentity(t) || comments.some((c) => c.threadId === t.id),
+      ),
     };
     this.notify();
     await this.persist();

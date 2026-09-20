@@ -143,11 +143,16 @@ function applyStepResult(local: LocalState, result: StepResult): LocalState {
     }
     case "reject-comment":
       return applyUnpostedCommentsFailure(local, [result.step.comment], result.step.error);
-    case "post-reply":
-    case "post-issue-comment": {
-      const o = result.outcome as PostReplyOutcome | PostIssueCommentOutcome;
+    case "post-reply": {
+      const o = result.outcome as PostReplyOutcome;
       return o.ok
         ? applyCommentMapping(local, o.mapping)
+        : applyCommentFailure(local, result.step.comment.id, o.error);
+    }
+    case "post-issue-comment": {
+      const o = result.outcome as PostIssueCommentOutcome;
+      return o.ok
+        ? applyIssueCommentMapping(local, result.step.comment, o.mapping)
         : applyCommentFailure(local, result.step.comment.id, o.error);
     }
     case "resolve-review-thread":
@@ -257,6 +262,26 @@ function applyCommentMapping(local: LocalState, m: CommentRemoteMapping): LocalS
   };
 }
 
+/** A posted top-level issue comment is its thread's root, so its REST id is
+ *  the thread's remote identity (ADR 0003 §7). Filling it here is what makes
+ *  a just-created out-of-diff thread resolvable without a refresh (#272). */
+function applyIssueCommentMapping(
+  local: LocalState,
+  comment: Comment,
+  m: CommentRemoteMapping,
+): LocalState {
+  const next = applyCommentMapping(local, m);
+  if (comment.parentLocalId !== undefined) return next;
+  return {
+    ...next,
+    threads: next.threads.map((t) =>
+      t.id === comment.threadId && t.state === "syncing" && !hasRemoteIdentity(t)
+        ? { ...t, state: "synced", remoteIssueCommentId: m.remoteId, lastError: undefined }
+        : t,
+    ),
+  };
+}
+
 function applyCommentFailure(local: LocalState, cid: LocalId, error: ErrorInfo): LocalState {
   return {
     ...local,
@@ -353,13 +378,21 @@ function applyStepResultToRemote(remote: RemoteState, result: StepResult): Remot
     case "post-issue-comment": {
       const o = result.outcome as PostReplyOutcome | PostIssueCommentOutcome;
       if (!o.ok) return remote;
+      const comment = result.step.comment;
       const synced: Comment = {
-        ...result.step.comment,
+        ...comment,
         state: "synced",
         remoteId: o.mapping.remoteId,
         lastError: undefined,
       };
-      return { ...remote, comments: upsertRemoteComment(remote.comments, synced) };
+      const next = { ...remote, comments: upsertRemoteComment(remote.comments, synced) };
+      if (result.step.kind === "post-reply" || comment.parentLocalId !== undefined) return next;
+      return {
+        ...next,
+        threads: upsertRemoteThread(next.threads, comment.threadId, {
+          remoteIssueCommentId: o.mapping.remoteId,
+        }),
+      };
     }
     case "resolve-review-thread":
     case "unresolve-review-thread":
@@ -402,14 +435,23 @@ function applyReviewBatchSuccessToRemote(
   }
   let threads = remote.threads;
   for (const [threadId, remoteThreadId] of threadRemotes) {
-    threads = threads.some((t) => t.id === threadId)
-      ? threads.map((t) =>
-          t.id === threadId ? { ...t, state: "synced", remoteThreadId, lastError: undefined } : t,
-        )
-      : // A thread just created on GitHub starts unresolved.
-        [...threads, { id: threadId, state: "synced", resolved: false, remoteThreadId }];
+    threads = upsertRemoteThread(threads, threadId, { remoteThreadId });
   }
   return { ...remote, comments, threads };
+}
+
+/** Record a thread GitHub just created in the mirror: merge the identity into
+ *  the existing entry, or add it as synced and unresolved. */
+function upsertRemoteThread(
+  threads: Thread[],
+  id: LocalId,
+  identity: Pick<Thread, "remoteThreadId" | "remoteIssueCommentId">,
+): Thread[] {
+  return threads.some((t) => t.id === id)
+    ? threads.map((t) =>
+        t.id === id ? { ...t, ...identity, state: "synced", lastError: undefined } : t,
+      )
+    : [...threads, { id, state: "synced", resolved: false, ...identity }];
 }
 
 function upsertRemoteComment(comments: Comment[], next: Comment): Comment[] {
