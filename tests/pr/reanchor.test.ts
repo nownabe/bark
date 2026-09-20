@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { reanchor } from "../../lib/pr/reanchor";
+import { buildLineMap } from "../../lib/pr/linemap";
+import { locateLine, reanchor } from "../../lib/pr/reanchor";
 import type { Anchor } from "../../lib/pr/types";
 
 function anchor(overrides: Partial<Anchor> = {}): Anchor {
@@ -198,5 +199,131 @@ describe("reanchor", () => {
       oldSrc,
     );
     expect(result).toEqual({ status: "outdated" });
+  });
+});
+
+// Issue #269: in prose Markdown a "line" is a whole paragraph, so the
+// byte-identical LCS line map drops every comment on a paragraph the moment
+// any sentence in it changes. A single-line anchor whose line no longer maps
+// is now looked for in the diff region between its nearest mapped neighbours
+// (bounded, uniqueness-gated), and its columns are carried through a
+// character diff of the old line against the located line.
+describe("region search (issue #269)", () => {
+  const OLD_PARAGRAPH = "# T\n\nOne one. Two two. Three three.\n\nEnd";
+  const withParagraph = (line: string) => `# T\n\n${line}\n\nEnd`;
+  // "One one. " is 9 chars, so "Two two." starts at column 10 and ends at 18.
+  const sentenceAnchor = anchor({
+    sha: "old",
+    range: { sl: 3, sc: 10, el: 3, ec: 18 },
+    quote: "Two two.",
+  });
+
+  test("a sentence-level comment survives an edit elsewhere in the same paragraph", () => {
+    const result = reanchor(
+      sentenceAnchor,
+      withParagraph("One one. Two two. THREE changed a lot."),
+      "head",
+      OLD_PARAGRAPH,
+    );
+    expect(result).toEqual({ status: "mapped", range: { sl: 3, sc: 10, el: 3, ec: 18 } });
+  });
+
+  test("an edit before the quote moves the columns → mapped at the new columns", () => {
+    const result = reanchor(
+      sentenceAnchor,
+      withParagraph("Zero. One one. Two two. Three three."),
+      "head",
+      OLD_PARAGRAPH,
+    );
+    expect(result).toEqual({ status: "mapped", range: { sl: 3, sc: 16, el: 3, ec: 24 } });
+  });
+
+  test("the quote itself was edited → shifted at the char-diff-mapped columns", () => {
+    const result = reanchor(
+      sentenceAnchor,
+      withParagraph("One one. Two TWO! Three three."),
+      "head",
+      OLD_PARAGRAPH,
+    );
+    expect(result).toEqual({ status: "shifted", range: { sl: 3, sc: 10, el: 3, ec: 18 } });
+  });
+
+  test("the paragraph was rewritten beyond the similarity floor → outdated", () => {
+    const result = reanchor(
+      sentenceAnchor,
+      withParagraph("Completely different words that share nothing."),
+      "head",
+      OLD_PARAGRAPH,
+    );
+    expect(result).toEqual({ status: "outdated" });
+  });
+
+  test("two candidate lines contain the quote and tie on similarity → outdated", () => {
+    const result = reanchor(
+      anchor({ sha: "old", range: { sl: 2, sc: 1, el: 2, ec: 9 }, quote: "Two two." }),
+      "a\nTwo two. x\nTwo two. y\nz",
+      "head",
+      "a\nTwo two.\nz",
+    );
+    expect(result).toEqual({ status: "outdated" });
+  });
+
+  test("a line-based suggestion anchor whose line was edited → shifted, columns stay 1/1", () => {
+    const result = reanchor(
+      anchor({ sha: "old", range: { sl: 2, sc: 1, el: 2, ec: 1 }, quote: "alpha beta gamma" }),
+      "h\nalpha beta GAMMA\nt",
+      "head",
+      "h\nalpha beta gamma\nt",
+    );
+    expect(result).toEqual({ status: "shifted", range: { sl: 2, sc: 1, el: 2, ec: 1 } });
+  });
+
+  test("a multi-line anchor with an unmapped endpoint stays outdated", () => {
+    const result = reanchor(
+      anchor({ sha: "old", range: { sl: 2, sc: 1, el: 3, ec: 2 }, quote: "b\nc" }),
+      "a\nB!\nc\nd",
+      "head",
+      "a\nb\nc\nd",
+    );
+    expect(result).toEqual({ status: "outdated" });
+  });
+
+  describe("region cap", () => {
+    const oldSrc = "top\nneedle sentence here\nbottom";
+    const needleAnchor = anchor({
+      sha: "old",
+      range: { sl: 2, sc: 1, el: 2, ec: 16 },
+      quote: "needle sentence",
+    });
+    // 200 rewritten lines replace the single old line: the needle lands at a
+    // configurable offset inside that region.
+    const newSrcWithNeedleAt = (offset: number) => {
+      const body = Array.from({ length: 200 }, (_, i) => `filler ${i + 1}`);
+      body[offset - 1] = "needle sentence HERE!";
+      return ["top", ...body, "bottom"].join("\n");
+    };
+
+    test("a candidate inside the capped window is found", () => {
+      const result = reanchor(needleAnchor, newSrcWithNeedleAt(10), "head", oldSrc);
+      expect(result).toEqual({ status: "mapped", range: { sl: 11, sc: 1, el: 11, ec: 16 } });
+    });
+
+    test("a candidate beyond the cap is never examined → outdated", () => {
+      const result = reanchor(needleAnchor, newSrcWithNeedleAt(150), "head", oldSrc);
+      expect(result).toEqual({ status: "outdated" });
+    });
+  });
+
+  test("locateLine returns null when the old line was deleted with nothing in its place", () => {
+    const oldSrc = "a\nb\nc";
+    const newSrc = "a\nc";
+    const located = locateLine(
+      oldSrc.split("\n"),
+      newSrc.split("\n"),
+      buildLineMap(oldSrc, newSrc),
+      2,
+      "b",
+    );
+    expect(located).toBeNull();
   });
 });

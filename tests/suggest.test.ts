@@ -281,6 +281,7 @@ describe("applyAcceptedSuggestion", () => {
       meta,
       replacement: "LINE TWO",
       displayPosition: dpCurrent(meta.range),
+      anchorSource: source,
     });
     expect(out).toBe("line one\nLINE TWO\nline three\n");
     // The pre-fix output would have been: "line one\nLINE TWOline two\nline three\n"
@@ -301,6 +302,7 @@ describe("applyAcceptedSuggestion", () => {
       meta,
       replacement: "X\nY",
       displayPosition: dpCurrent(meta.range),
+      anchorSource: source,
     });
     expect(out).toBe("h1\nX\nY\nh2\n");
   });
@@ -317,6 +319,7 @@ describe("applyAcceptedSuggestion", () => {
       meta: suggestionMeta({ sha: "OLD" }),
       replacement: "LINE TWO",
       displayPosition: { status: "mapped", range: { sl: 3, sc: 1, el: 3, ec: 1 } },
+      anchorSource: source,
     });
     expect(out).toBe("INSERTED\nline one\nLINE TWO\nline three\n");
   });
@@ -331,6 +334,7 @@ describe("applyAcceptedSuggestion", () => {
       meta: suggestionMeta({ sha: "OLD", quote: "not present" }),
       replacement: "anything",
       displayPosition: { status: "outdated" },
+      anchorSource: source,
     });
     expect(out).toBeNull();
   });
@@ -358,6 +362,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "X\nY",
         displayPosition: { status: "shifted", range: { sl: 2, sc: 1, el: 4, ec: 1 } },
+        anchorSource: source,
       });
       expect(out).toBeNull();
     });
@@ -372,6 +377,7 @@ describe("applyAcceptedSuggestion", () => {
         meta: suggestionMeta({ sha: "OLD" }), // quote: "line two"
         replacement: "LINE TWO",
         displayPosition: { status: "mapped", range: { sl: 2, sc: 1, el: 2, ec: 1 } },
+        anchorSource: source,
       });
       expect(out).toBeNull();
     });
@@ -390,6 +396,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "LINE TWO",
         displayPosition: { status: "shifted", range: meta.range },
+        anchorSource: source,
       });
       expect(out).toBe("line one\nLINE TWO\nline three\n");
     });
@@ -406,6 +413,7 @@ describe("applyAcceptedSuggestion", () => {
       meta,
       replacement: "",
       displayPosition: dpCurrent(meta.range),
+      anchorSource: source,
     });
     // Deleting "b" removes its trailing newline too (matching GitHub's Apply),
     // so no stray blank line remains.
@@ -429,6 +437,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "",
         displayPosition: dpCurrent(meta.range),
+        anchorSource: source,
       });
       expect(out).toBe("a\nc\n");
     });
@@ -444,6 +453,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "",
         displayPosition: dpCurrent(meta.range),
+        anchorSource: source,
       });
       expect(out).toBe("a\nb\n");
     });
@@ -459,6 +469,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "",
         displayPosition: dpCurrent(meta.range),
+        anchorSource: source,
       });
       expect(out).toBe("a\nb");
     });
@@ -474,6 +485,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "",
         displayPosition: dpCurrent(meta.range),
+        anchorSource: source,
       });
       expect(out).toBe("a\nd\n");
     });
@@ -489,6 +501,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "B",
         displayPosition: dpCurrent(meta.range),
+        anchorSource: source,
       });
       expect(out).toBe("a\nB\nc\n");
     });
@@ -517,6 +530,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "NEW2",
         displayPosition: dpCurrent(meta.range),
+        anchorSource: source,
       });
       expect(out).toBe("intro\nAAA\nBBB\nsame\nsame\nNEW2\nsame\n");
     });
@@ -538,6 +552,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "DUP!",
         displayPosition: dpCurrent(meta.range),
+        anchorSource: source,
       });
       // The first dup (head line 5 → edited line 3) is replaced, not the last.
       expect(out).toBe("h\nX\nDUP!\ndup\ndup\nend\n");
@@ -554,6 +569,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "NEW2",
         displayPosition: dpCurrent(meta.range),
+        anchorSource: source,
       });
       expect(out).toBeNull();
     });
@@ -572,6 +588,7 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "Y",
         displayPosition: dpCurrent(meta.range),
+        anchorSource: source,
       });
       expect(out).toBeNull();
     });
@@ -589,8 +606,80 @@ describe("applyAcceptedSuggestion", () => {
         meta,
         replacement: "X\nY",
         displayPosition: dpCurrent(meta.range),
+        anchorSource: source,
       });
       expect(out).toBe("top\nn1\nn2\nn3\nX\nY\nbottom\n");
+    });
+  });
+
+  // Issue #269: in prose a source line is a whole paragraph, so the first
+  // accepted suggestion on it makes every other suggestion on that paragraph
+  // unapplyable — the exact-quote path can no longer find its target. The
+  // fallback re-locates the target line from the anchor-sha file with the
+  // region search and applies the suggestion as a line-local three-way merge.
+  describe("line-local merge (issue #269)", () => {
+    const PARAGRAPH = "One one. Two two. Three three.";
+    const anchorSource = `h\n${PARAGRAPH}\nt\n`;
+    const paragraphMeta = suggestionMeta({
+      sha: "OLD",
+      range: { sl: 2, sc: 1, el: 2, ec: 1 },
+      quote: PARAGRAPH,
+    });
+    const accept = (source: string, replacement: string, anchor: string | null = anchorSource) =>
+      applyAcceptedSuggestion({
+        source,
+        baseSource: anchorSource,
+        lineStarts: buildLineIndex(source),
+        meta: paragraphMeta,
+        replacement,
+        displayPosition: dpCurrent(paragraphMeta.range),
+        anchorSource: anchor,
+      });
+
+    test("two suggestions on one paragraph both apply in sequence", () => {
+      const afterA = accept(anchorSource, "One one. Two two. THREE three.");
+      expect(afterA).toBe("h\nOne one. Two two. THREE three.\nt\n");
+      expect(accept(afterA as string, "One one. TWO two. Three three.")).toBe(
+        "h\nOne one. TWO two. THREE three.\nt\n",
+      );
+    });
+
+    test("a suggestion whose quote is no longer anywhere in the region is refused", () => {
+      const rewritten = "h\nCompletely different words that share nothing.\nt\n";
+      expect(accept(rewritten, "One one. TWO two. Three three.")).toBeNull();
+    });
+
+    test("the merge refuses when the replacement's hunks do not apply cleanly", () => {
+      const quote = "aaaa bbbb cccc dddd eeee ffff";
+      const meta = suggestionMeta({
+        sha: "OLD",
+        range: { sl: 2, sc: 1, el: 2, ec: 1 },
+        quote,
+      });
+      const base = `h\n${quote}\nt\n`;
+      // Similar enough to be located (only the first two words differ), but the
+      // patch's context is gone, so no hunk applies.
+      const source = "h\nzzzz yyyy cccc dddd eeee ffff\nt\n";
+      const out = applyAcceptedSuggestion({
+        source,
+        baseSource: base,
+        lineStarts: buildLineIndex(source),
+        meta,
+        replacement: "XXXX bbbb cccc dddd eeee ffff",
+        displayPosition: dpCurrent(meta.range),
+        anchorSource: base,
+      });
+      expect(out).toBeNull();
+    });
+
+    test("the fallback is skipped without an anchorSource", () => {
+      const afterA = accept(anchorSource, "One one. Two two. THREE three.") as string;
+      expect(accept(afterA, "One one. TWO two. Three three.", null)).toBeNull();
+    });
+
+    test("a fallback deletion removes the line's newline too (#191 parity)", () => {
+      const afterA = accept(anchorSource, "One one. Two two. THREE three.") as string;
+      expect(accept(afterA, "")).toBe("h\nt\n");
     });
   });
 });

@@ -73,8 +73,14 @@ describe("canAcceptSuggestion", () => {
     expect(canAcceptSuggestion({ status: "mapped", range })).toBe(true);
   });
 
-  test("shifted and outdated positions are refused (issue #176)", () => {
-    expect(canAcceptSuggestion({ status: "shifted", range })).toBe(false);
+  // Issue #269: a shifted target is offered again. The line-local merge in
+  // applyAcceptedSuggestion refuses on its own when the suggestion's hunks
+  // don't apply, so the gate no longer has to pre-emptively hide the button.
+  test("a shifted position is acceptable — the merge is the gate", () => {
+    expect(canAcceptSuggestion({ status: "shifted", range })).toBe(true);
+  });
+
+  test("an outdated position is refused (issue #176)", () => {
     expect(canAcceptSuggestion({ status: "outdated" })).toBe(false);
   });
 
