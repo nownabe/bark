@@ -15,6 +15,7 @@ import type {
   PostReplyStep,
   PostReviewBatchStep,
   ResolveReviewThreadStep,
+  SetIssueThreadResolvedStep,
   UnresolveReviewThreadStep,
 } from "./steps";
 import type {
@@ -41,6 +42,7 @@ export function createGitHubTransport(client: GitHubClient, prRef: PrRef): Trans
     postIssueComment: (step) => postIssueComment(client, prRef, step),
     resolveReviewThread: (step) => resolveReviewThread(client, step),
     unresolveReviewThread: (step) => unresolveReviewThread(client, step),
+    setIssueThreadResolved: (step) => setIssueThreadResolved(client, prRef, step),
     commit: (step) => commit(client, prRef, step),
   };
 }
@@ -191,6 +193,46 @@ async function unresolveReviewThread(
 ): Promise<ResolveOutcome> {
   try {
     await ghGraphQL(client, UNRESOLVE_MUTATION, { threadId: step.remoteThreadId });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: toErrorInfo(e) };
+  }
+}
+
+/** Out-of-diff threads have no GraphQL review thread, so their resolved
+ *  state lives in the hidden metadata of the thread's root issue comment:
+ *  re-embed the fence with `resolved` and PATCH the comment. Identity fields
+ *  come from the FETCHED fence, so a stale local copy cannot rewrite them;
+ *  a v1 fence is upgraded to v2 and `legacyResolveEvent` is dropped. */
+async function setIssueThreadResolved(
+  client: GitHubClient,
+  prRef: PrRef,
+  step: SetIssueThreadResolvedStep,
+): Promise<ResolveOutcome> {
+  const url = `/repos/${prRef.owner}/${prRef.repo}/issues/comments/${step.issueCommentId}`;
+  try {
+    // simplify: read-modify-write without a precondition — a concurrent edit
+    // of the root comment between GET and PATCH is overwritten. Upgrade path:
+    // carry `updated_at` from the GET into a conditional PATCH and retry once.
+    const current = await ghRequest<{ body: string }>(client, "GET", url);
+    const { body, meta } = extractMetadata(current.body);
+    if (!meta) {
+      return {
+        ok: false,
+        error: {
+          message:
+            "The thread's root comment no longer carries Bark metadata; it cannot be resolved from Bark.",
+        },
+      };
+    }
+    const next = embedMetadata(body, {
+      cid: meta.cid,
+      threadId: meta.threadId,
+      path: meta.path,
+      anchor: meta.anchor,
+      resolved: step.resolved,
+    });
+    await ghRequest(client, "PATCH", url, { body: next });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: toErrorInfo(e) };

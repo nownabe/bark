@@ -286,6 +286,102 @@ describe("github-transport — Resolve / Unresolve", () => {
   });
 });
 
+describe("github-transport — setIssueThreadResolved (issue #270)", () => {
+  const ROOT_URL = "https://api.github.com/repos/o/r/issues/comments/501";
+  const step = {
+    kind: "set-issue-thread-resolved" as const,
+    threadId: "t1",
+    issueCommentId: 501,
+    resolved: true,
+  };
+
+  test("rewrites the root comment's fence in place (GET → PATCH)", async () => {
+    const current = embedMetadata("Root text", {
+      cid: "c1",
+      threadId: "t1",
+      path: "f.md",
+      anchor,
+    });
+    const { fetch, calls } = makeFetch(async (req) =>
+      req.method === "GET" ? jsonResponse({ body: current }) : jsonResponse({ id: 501 }),
+    );
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const outcome = await transport.setIssueThreadResolved(step);
+    expect(outcome).toEqual({ ok: true });
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      `GET ${ROOT_URL}`,
+      `PATCH ${ROOT_URL}`,
+    ]);
+    expect(JSON.parse(calls[1]?.body ?? "{}").body).toBe(
+      embedMetadata("Root text", {
+        cid: "c1",
+        threadId: "t1",
+        path: "f.md",
+        anchor,
+        resolved: true,
+      }),
+    );
+  });
+
+  test("a root comment without Bark metadata fails without a PATCH", async () => {
+    const { fetch, calls } = makeFetch(async () => jsonResponse({ body: "plain comment" }));
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const outcome = await transport.setIssueThreadResolved(step);
+    expect(outcome).toEqual({
+      ok: false,
+      error: { message: expect.stringContaining("metadata") },
+    });
+    expect(calls.map((c) => c.method)).toEqual(["GET"]);
+  });
+
+  test("a 403 on the PATCH is reported as a failed outcome", async () => {
+    const current = embedMetadata("Root text", {
+      cid: "c1",
+      threadId: "t1",
+      path: "f.md",
+      anchor,
+    });
+    const { fetch } = makeFetch(async (req) =>
+      req.method === "GET"
+        ? jsonResponse({ body: current })
+        : jsonResponse({ message: "Forbidden" }, 403),
+    );
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const outcome = await transport.setIssueThreadResolved(step);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok === false && outcome.error.code).toBe(403);
+  });
+
+  test("a legacy v1 root fence is upgraded to v2 carrying resolved", async () => {
+    const v1 = btoa(
+      JSON.stringify({
+        cid: "c1",
+        thread: "t1",
+        path: "f.md",
+        sha: anchor.sha,
+        quote: anchor.quote,
+        range: anchor.range,
+      }),
+    );
+    const { fetch, calls } = makeFetch(async (req) =>
+      req.method === "GET"
+        ? jsonResponse({ body: `Root text\n\n<!-- bark:v1 ${v1} -->` })
+        : jsonResponse({ id: 501 }),
+    );
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    expect(await transport.setIssueThreadResolved(step)).toEqual({ ok: true });
+    expect(JSON.parse(calls[1]?.body ?? "{}").body).toBe(
+      embedMetadata("Root text", {
+        cid: "c1",
+        threadId: "t1",
+        path: "f.md",
+        anchor,
+        resolved: true,
+      }),
+    );
+  });
+});
+
 describe("github-transport — commit", () => {
   test("blobs -> tree -> commit -> updateRef, returns the new head sha", async () => {
     const { fetch, calls } = makeFetch(async (req) => {

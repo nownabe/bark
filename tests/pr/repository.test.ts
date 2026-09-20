@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { deriveAppState } from "../../lib/pr/appstate";
 import { PullRequestRepository } from "../../lib/pr/repository";
 import { InMemoryStorageAdapter } from "../../lib/pr/storage";
 import type {
@@ -9,7 +10,7 @@ import type {
   ResolveOutcome,
   Transport,
 } from "../../lib/pr/transport";
-import type { PostReviewBatchStep } from "../../lib/pr/steps";
+import type { PostReviewBatchStep, SetIssueThreadResolvedStep } from "../../lib/pr/steps";
 import { emptyState } from "../../lib/pr/types";
 import type { Comment, FileEdit, PullRequest, Range, Thread } from "../../lib/pr/types";
 
@@ -111,6 +112,10 @@ function happyTransport(
     },
     async unresolveReviewThread(): Promise<ResolveOutcome> {
       calls.push("unresolve-review-thread");
+      return { ok: true };
+    },
+    async setIssueThreadResolved(): Promise<ResolveOutcome> {
+      calls.push("set-issue-thread-resolved");
       return { ok: true };
     },
     async commit(step): Promise<CommitOutcome> {
@@ -503,6 +508,52 @@ describe("repository — setThreadResolved", () => {
 
     expect(calls).toEqual(["resolve-review-thread(fail)", "resolve-review-thread"]);
     expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: true });
+  });
+
+  test("an out-of-diff thread resolves via SetIssueThreadResolved and stays resolved across refresh and reload (issue #270)", async () => {
+    const { transport } = happyTransport();
+    const steps: SetIssueThreadResolvedStep[] = [];
+    const storage = new InMemoryStorageAdapter();
+    const repoWith = () =>
+      new PullRequestRepository({
+        storage,
+        transport: {
+          ...transport,
+          async setIssueThreadResolved(step): Promise<ResolveOutcome> {
+            steps.push(step);
+            return { ok: true };
+          },
+        },
+        isInDiff: () => false,
+      });
+    const outThread = (resolved: boolean): Thread => ({
+      id: "t-out",
+      state: "synced",
+      remoteIssueCommentId: 501,
+      resolved,
+    });
+
+    const r = repoWith();
+    await r.setRemoteState({ ...emptyState(), pullRequest: pr(), threads: [outThread(false)] });
+
+    await r.setThreadResolved("t-out", true);
+
+    expect(steps).toEqual([
+      { kind: "set-issue-thread-resolved", threadId: "t-out", issueCommentId: 501, resolved: true },
+    ]);
+    expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: true });
+    expect(r.getRemoteState().threads[0]?.resolved).toBe(true);
+
+    // Next refresh: the fetcher reports the fence-backed resolved state.
+    await r.setRemoteState({ ...emptyState(), pullRequest: pr(), threads: [outThread(true)] });
+    expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: true });
+
+    // New session on the same storage: the thread renders resolved.
+    const r2 = repoWith();
+    await r2.hydrate();
+    await r2.setRemoteState({ ...emptyState(), pullRequest: pr(), threads: [outThread(true)] });
+    const app = deriveAppState(r2.getLocalState(), r2.getRemoteState());
+    expect(app.threadGroups.find((g) => g.thread.id === "t-out")?.thread.resolved).toBe(true);
   });
 });
 

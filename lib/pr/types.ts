@@ -56,16 +56,42 @@ export type Comment = {
   anchor: Anchor;
 };
 
-/** Conversation grouping with resolve state. */
+/** Conversation grouping with resolve state.
+ *
+ *  A Thread has exactly one remote identity: `remoteThreadId` for a GitHub
+ *  review thread, or `remoteIssueCommentId` for an out-of-diff thread whose
+ *  comments are issue comments (which have no GraphQL thread). Both are
+ *  absent while the thread is a local draft. */
 export type Thread = {
   id: LocalId;
   state: EntityState;
   lastError?: ErrorInfo;
 
-  /** GraphQL node id; needed for resolveReviewThread. */
+  /** GraphQL node id (review threads); needed for resolveReviewThread. */
   remoteThreadId?: string;
+  /** REST id of the root issue comment (out-of-diff threads); its hidden
+   *  metadata carries the thread's resolved state (issue #270). */
+  remoteIssueCommentId?: number;
   resolved: boolean;
 };
+
+/** Whether the Thread exists on GitHub — as a review thread or as an
+ *  out-of-diff thread rooted in a Bark issue comment. */
+export function hasRemoteIdentity(
+  t: Pick<Thread, "remoteThreadId" | "remoteIssueCommentId">,
+): boolean {
+  return t.remoteThreadId !== undefined || t.remoteIssueCommentId !== undefined;
+}
+
+/** The remote mirror of a local Thread. Review threads join on the GraphQL
+ *  node id (local and remote ids may differ); out-of-diff threads have no
+ *  node id and join on the metadata threadId, which is the local id on both
+ *  sides. */
+export function findRemoteThread(remoteThreads: Thread[], t: Thread): Thread | undefined {
+  return t.remoteThreadId !== undefined
+    ? remoteThreads.find((r) => r.remoteThreadId === t.remoteThreadId)
+    : remoteThreads.find((r) => r.id === t.id);
+}
 
 /** Author-mode pending file edit. Transient: draft -> syncing -> removed. */
 export type FileEdit = {

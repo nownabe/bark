@@ -77,6 +77,7 @@ import {
 } from "../../lib/github";
 import { GitHubApiError } from "../../lib/pr/github-api";
 import { fetchFileContent } from "../../lib/pr/remote-fetcher";
+import { hasRemoteIdentity } from "../../lib/pr/types";
 import { type ChangedFile, isRangeInDiff, parseRightRanges } from "../../lib/pr/diff";
 import {
   clearAcceptedDecisions,
@@ -419,18 +420,18 @@ function AppBody() {
         .map((t) => t.id),
     );
   }, [prRepository, repositoryAppState]);
-  // Threads that can actually be resolved/reopened: they have a
-  // GitHub-native review thread (a Repository Thread with a remoteThreadId,
-  // resolvable via GraphQL). Out-of-diff Bark threads (issue comments) and
-  // foreign issue comments never get one, and a freshly-created in-diff
-  // thread has none until the next refresh — offering Resolve there is a
-  // silent no-op (issue #182), so gate the button on this set.
+  // Threads that can actually be resolved/reopened: they exist on GitHub
+  // with a remote identity — a review thread (GraphQL) or an out-of-diff
+  // thread whose root issue comment carries Bark metadata (issue #270). A
+  // thread created in the current session has neither until the next refresh
+  // (#272), so Resolve stays hidden there (issue #182); a foreign issue
+  // comment never gets one at all.
   const resolvableThreadKeys = useMemo(() => {
     if (!prRepository || !repositoryAppState) return new Set<string>();
     return new Set(
       prRepository
         .getLocalState()
-        .threads.filter((t) => t.remoteThreadId !== undefined)
+        .threads.filter(hasRemoteIdentity)
         .map((t) => t.id),
     );
   }, [prRepository, repositoryAppState]);
@@ -998,15 +999,15 @@ function AppBody() {
       return next;
     });
 
-  // Bark-authored and foreign review threads take the same path: the
-  // sidebar's t.id equals the Repository Thread id (see resolvableThreadKeys
-  // above), and the Resolve affordance is gated on that Thread carrying a
-  // remoteThreadId — so setThreadResolved always finds its target entity,
-  // whether the thread was created by Bark or natively on GitHub. The
-  // Reconciler flips Thread.resolved and the Executor runs the GraphQL
-  // resolve/unresolve mutation in its sync cycle; commentViews picks up the
-  // change via the listener — no extra refresh needed. (Issue-comment
-  // threads never get a remoteThreadId, so the button never shows there.)
+  // Bark-authored and foreign threads take the same path: the sidebar's t.id
+  // equals the Repository Thread id (see resolvableThreadKeys above), and the
+  // Resolve affordance is gated on that Thread having a remote identity — so
+  // setThreadResolved always finds its target entity, whether the thread was
+  // created by Bark or natively on GitHub. The Reconciler flips
+  // Thread.resolved and the Executor runs the GraphQL resolve/unresolve
+  // mutation (review threads) or rewrites the root issue comment's metadata
+  // (out-of-diff threads, issue #270) in its sync cycle; commentViews picks
+  // up the change via the listener — no extra refresh needed.
   const setThreadResolved = async (t: ReviewThread, resolved: boolean) => {
     if (!t.rootComment) return;
     setResolvingId(t.id);
@@ -1658,10 +1659,10 @@ function AppBody() {
       showAuthorActions && root?.meta
         ? canAcceptSuggestion(commentViewByCid.get(root.meta.cid)?.displayPosition)
         : false;
-    // Resolvable only when the thread has a GitHub-native review thread we
-    // can drive via GraphQL (resolvableThreadKeys). That covers Bark in-diff
-    // threads and foreign in-diff review threads, and excludes out-of-diff
-    // (issue-comment) threads where Resolve would be a silent no-op (#182).
+    // Resolvable only when the thread exists on GitHub with a remote identity
+    // (resolvableThreadKeys): a review thread driven via GraphQL, or a Bark
+    // out-of-diff thread whose root issue comment carries the resolved flag
+    // (#270). A thread with neither would make Resolve a silent no-op (#182).
     // Reopen is withheld when resolution came from accepting a suggestion
     // (which resolves implicitly), not from an explicit resolve.
     const acceptedRoot = root?.meta?.kind === "suggestion" && dismissed[root.id] === "accepted";

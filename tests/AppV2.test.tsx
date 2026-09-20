@@ -30,6 +30,9 @@ function noopTransport(): Transport {
     async unresolveReviewThread() {
       return { ok: true };
     },
+    async setIssueThreadResolved() {
+      return { ok: true };
+    },
     async commit() {
       return { ok: true, newHeadSha: "" };
     },

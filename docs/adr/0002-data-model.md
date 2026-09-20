@@ -84,7 +84,8 @@ type Thread = {
   state: "draft" | "syncing" | "synced";
   lastError?: ErrorInfo;
 
-  remoteThreadId?: string; // GraphQL node id; needed for resolveReviewThread
+  remoteThreadId?: string; // GraphQL node id (review threads); needed for resolveReviewThread
+  remoteIssueCommentId?: number; // REST id of the root issue comment (out-of-diff threads)
   resolved: boolean;
 };
 
@@ -151,6 +152,8 @@ Field-by-field, which side conventionally populates each:
 
 > **Amendment (2026-07-22).** `RemoteState` additionally carries an optional `changedFiles?: ChangedFile[]` — the `GET /pulls/{n}/files` listing already fetched every refresh for in-diff routing ([ADR 0003 §5](0003-operations-and-execution.md) treats the current diff as "part of `RemoteState`") — so `AppState` can derive the changed-`.md` file selector from the Repository. It is deliberately **not** part of the shared `PRState` shape: the Reconciler never diffs it, `LocalState` never populates it, and the unified-diff patches must not be persisted to `chrome.storage.local`. This is the one intentional exception to `RemoteState = PRState`.
 
+A `Thread` has exactly one remote identity: `remoteThreadId` for a GitHub review thread, or `remoteIssueCommentId` for an out-of-diff thread whose comments are issue comments (which have no GraphQL thread). Both are absent while the thread is a local draft.
+
 `User` is a single value-object type used wherever a GitHub identity appears — `Comment.author`, `PullRequest.author`, and `PRState.viewer`. There is no GitHub-side user table to normalise against; the inlined form stays small and avoids reference indirection.
 
 ### 4. Derived data (`AppState`)
@@ -179,6 +182,7 @@ The Executor embeds entity identity into the wire format so it survives the GitH
 - For each submitted `Comment`, the Executor embeds `{ cid: Comment.id, thread: Comment.threadId }` (plus the anchor) as base64-encoded hidden metadata in the comment body, exactly as the legacy implementation does.
 - On `RemoteState` fetch, the Executor extracts this metadata and pre-populates `Comment.id` / `Thread.id` so the Reconciler can match remote items to local ones structurally.
 - `Thread.remoteThreadId` is resolved by joining GraphQL `reviewThreads` data with the matched `Comment` set (any comment in a remote thread that maps to a known `Thread.id` tells us the `remoteThreadId` for that `Thread`).
+- For out-of-diff threads there is no GraphQL thread to join. The thread's identity is its root issue comment — the earliest comment bearing its `threadId` (the same ownership rule that binds `cid`s) — and its `resolved` state is read from that comment's hidden metadata (`resolved` in the envelope).
 
 The hidden metadata envelope (its layout, base64 encoding, version field) is the Executor's private concern. It is not visible to `LocalState`, `AppState`, the Reconciler, or React.
 
@@ -199,9 +203,9 @@ This keeps `LocalState` focused on entities that round-trip through GitHub and l
 - **`kind` field on Comment** — derived from `body`.
 - **`suggestion` (replacement) field on Comment** — derived from `body`.
 - **Reviewer-side `SourceDraft`** — replaced by component-local buffer + draft `Comment`s.
-- **`RejectedSuggestions`** — rejection is now expressed as "Thread is resolved without a corresponding commit". GitHub's GraphQL `isResolved` is the source of truth; Bark does not maintain a parallel local-only rejection set.
+- **`RejectedSuggestions`** — rejection is now expressed as "Thread is resolved without a corresponding commit", in diff and out of diff alike. GitHub is the source of truth (GraphQL `isResolved`, or the root comment's `resolved` metadata); Bark does not maintain a parallel local-only rejection set.
 - **`PendingDraft` / `CommentMetadata` / `ExistingComment`** — three legacy representations of a single concept, collapsed into one `Comment` with a `state` field.
-- **`event: 'resolve'` marker comments** — superseded by direct GraphQL `isResolved` reads in the Executor.
+- **`event: 'resolve'` marker comments** — superseded by direct GraphQL `isResolved` reads for review threads and, for out-of-diff (issue-comment) threads, by a `resolved` flag in the root comment's own hidden metadata that the Executor rewrites in place. Neither path posts a comment.
 
 ## Consequences
 
@@ -210,7 +214,7 @@ This keeps `LocalState` focused on entities that round-trip through GitHub and l
 - **One representation per concept.** The legacy three-way `PendingDraft` / `CommentMetadata` / `ExistingComment` split is gone.
 - **Structure-consistent states.** A `draft` and a `synced` `Comment` have the same shape, so generic code (selectors, renderers, the Reconciler) does not branch on lifecycle state.
 - **`LocalState` is small and disciplined.** Only data with identity and a sync lifecycle lives there. Everything UI-shaped is in `AppState`.
-- **GitHub is the sole source of truth for thread resolution.** No more dual-write-with-divergence between Bark resolve markers and GraphQL `isResolved`.
+- **GitHub is the sole source of truth for thread resolution.** No more dual-write-with-divergence between Bark resolve markers and GraphQL `isResolved`. Out-of-diff threads store it on GitHub too (root-comment metadata), so a fresh fetch reconstructs every thread's state.
 - **Hidden metadata is fully encapsulated** inside the Executor. Higher layers see plain entity fields only.
 - **The model survives a UX rewrite.** Editor buffer details are component-local; changing the editor doesn't change the persisted model.
 

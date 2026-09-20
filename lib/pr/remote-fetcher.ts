@@ -327,9 +327,42 @@ function toCommentFromIssue(ic: RawIssueComment, owners: FenceOwners): Comment |
 /** Fetch review threads (all pages — see lib/pr/review-threads). For each
  *  GraphQL thread, find a constituent comment carrying hidden metadata and
  *  use its `threadId` as the local Thread.id; otherwise synthesise one
- *  keyed off `remoteThreadId`. */
+ *  keyed off `remoteThreadId`.
+ *
+ *  Review threads only: out-of-diff (issue-comment) threads have no GraphQL
+ *  thread and are synthesised by `fetchRemoteState`, which has the REST
+ *  issue-comment data this entry point does not fetch. */
 export async function fetchThreads(client: GitHubClient, ref: PrRef): Promise<Thread[]> {
   return threadsFromRaw(await listReviewThreads(client, ref));
+}
+
+/** Thread entities for out-of-diff conversations: an issue comment that is
+ *  the earliest bearer of its `threadId` is that thread's root, and its
+ *  hidden `resolved` flag is the thread's resolved state (issue #270). A
+ *  later comment reusing the threadId is a reply, never the root, so it can
+ *  neither create a second Thread nor resolve someone else's (issue #190).
+ *  `taken` holds the review threads' local ids, so a fence naming one of
+ *  them (a reply to an in-diff thread, #184; or a fence forging a
+ *  synthesised `foreign-thread-*` id) never yields a second Thread entity. */
+function issueThreadsFromRaw(
+  issueRaw: RawIssueComment[],
+  owners: FenceOwners,
+  taken: ReadonlySet<string>,
+): Thread[] {
+  const out: Thread[] = [];
+  for (const ic of issueRaw) {
+    const { meta } = extractMetadata(ic.body);
+    if (!meta || meta.legacyResolveEvent) continue;
+    if (taken.has(meta.threadId)) continue;
+    if (owners.threadId.get(meta.threadId) !== issueOwnerKey(ic.id)) continue;
+    out.push({
+      id: meta.threadId,
+      state: "synced",
+      remoteIssueCommentId: ic.id,
+      resolved: meta.resolved === true,
+    });
+  }
+  return out;
 }
 
 function threadsFromRaw(raw: RawReviewThread[], owners?: FenceOwners): Thread[] {
@@ -497,6 +530,8 @@ export async function fetchRemoteState(
     buildCommentThreadMap(rawThreads, owners),
   );
   const threads = threadsFromRaw(rawThreads, owners);
+  const taken = new Set(threads.map((t) => t.id));
+  threads.push(...issueThreadsFromRaw(issueRaw, owners, taken));
 
   // Union of:
   //   - every fetched comment's anchor (foreign comments with anchor.sha

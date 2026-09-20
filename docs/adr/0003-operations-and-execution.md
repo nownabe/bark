@@ -28,7 +28,7 @@ The Reconciler runs whenever `LocalState` changes. For each entity diff, it emit
 - **Comment in `syncing` without `remoteId`, `parentLocalId` absent** → `CreateComment`.
 - **Comment in `syncing` without `remoteId`, `parentLocalId` present and parent is `synced`** → `CreateReply`.
 - **Comment in `syncing` with `parentLocalId` whose parent is not yet `synced`** → no Op emitted this cycle; the parent's `CreateComment` will sync first, and the next cycle re-evaluates.
-- **`Thread.resolved` differs from `RemoteState`, state is `syncing`** → `UpdateThreadResolved` (carrying the desired boolean).
+- **`Thread.resolved` differs from `RemoteState`, state is `syncing`, and the thread has a remote identity (`remoteThreadId` or `remoteIssueCommentId`)** → `UpdateThreadResolved` (carrying the desired boolean and that identity). A thread without either has not been created on GitHub yet and emits nothing.
 - **`FileEdit` in `syncing`** → `CommitFileEdit`.
 
 The Reconciler does not look at multiple entities to decide what to emit. Whether two `CreateComment`s become one review batch is the Executor's call.
@@ -44,26 +44,29 @@ The Executor receives a `ReconcileOperation[]` per Reconciler cycle and plans `E
 
 ### 4. `ReconcileOperation` catalog
 
-| Op                     | Inputs (from `LocalState`)                                       | Trigger                                   |
-| ---------------------- | ---------------------------------------------------------------- | ----------------------------------------- |
-| `CreateComment`        | `Comment` (state=syncing, remoteId absent, parentLocalId absent) | top-level draft Comment submitted         |
-| `CreateReply`          | `Comment` + parent `Comment` (parent must be synced)             | reply draft submitted with synced parent  |
-| `UpdateThreadResolved` | `threadId`, `desiredResolved: boolean`                           | `Thread.resolved` toggled and now syncing |
-| `CommitFileEdit`       | `FileEdit` (path, baseSha, editedSource)                         | `FileEdit` flipped to syncing             |
+| Op                     | Inputs (from `LocalState`)                                                         | Trigger                                   |
+| ---------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------- |
+| `CreateComment`        | `Comment` (state=syncing, remoteId absent, parentLocalId absent)                   | top-level draft Comment submitted         |
+| `CreateReply`          | `Comment` + parent `Comment` (parent must be synced)                               | reply draft submitted with synced parent  |
+| `UpdateThreadResolved` | `threadId`, `desiredResolved: boolean`, `remoteThreadId` \| `remoteIssueCommentId` | `Thread.resolved` toggled and now syncing |
+| `CommitFileEdit`       | `FileEdit` (path, baseSha, editedSource)                                           | `FileEdit` flipped to syncing             |
 
 That's the complete set. No `AcceptSuggestionOp`, no `AuthorSubmitOp`, no `DeleteCommentOp`, no `UpdateCommentBodyOp` — features that don't exist as separate state changes don't need their own Op.
 
 ### 5. `ExecutionStep` catalog
 
-| Step                    | Inputs                             | Bundles                                           | GitHub API                                                                                               |
-| ----------------------- | ---------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `PostReviewBatch`       | in-diff `CreateComment[]`          | many `CreateComment`s sharing the same submission | `POST /repos/.../pulls/{n}/reviews` (one call, atomic)                                                   |
-| `RejectComment`         | one unmappable `CreateComment`     | 1:1                                               | none — fails locally (see below)                                                                         |
-| `PostReply`             | one `CreateReply`                  | 1:1                                               | `POST /repos/.../pulls/{n}/comments` with `in_reply_to`                                                  |
-| `PostIssueComment`      | one out-of-diff `CreateComment`    | 1:1                                               | `POST /repos/.../issues/{n}/comments` (body includes quote + permalink)                                  |
-| `ResolveReviewThread`   | one `UpdateThreadResolved(true)`   | 1:1                                               | GraphQL `resolveReviewThread`                                                                            |
-| `UnresolveReviewThread` | one `UpdateThreadResolved(false)`  | 1:1                                               | GraphQL `unresolveReviewThread`                                                                          |
-| `Commit`                | all `CommitFileEdit`s in the cycle | many                                              | `createBlob`\* → `createTree` → `createCommit` → `updateRef` (Git Data API), executed as one atomic Step |
+| Step                     | Inputs                                                             | Bundles                                           | GitHub API                                                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------ | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PostReviewBatch`        | in-diff `CreateComment[]`                                          | many `CreateComment`s sharing the same submission | `POST /repos/.../pulls/{n}/reviews` (one call, atomic)                                                                                                                           |
+| `RejectComment`          | one unmappable `CreateComment`                                     | 1:1                                               | none — fails locally (see below)                                                                                                                                                 |
+| `PostReply`              | one `CreateReply`                                                  | 1:1                                               | `POST /repos/.../pulls/{n}/comments` with `in_reply_to`                                                                                                                          |
+| `PostIssueComment`       | one out-of-diff `CreateComment`                                    | 1:1                                               | `POST /repos/.../issues/{n}/comments` (body includes quote + permalink)                                                                                                          |
+| `ResolveReviewThread`    | one `UpdateThreadResolved(true)`                                   | 1:1                                               | GraphQL `resolveReviewThread`                                                                                                                                                    |
+| `UnresolveReviewThread`  | one `UpdateThreadResolved(false)`                                  | 1:1                                               | GraphQL `unresolveReviewThread`                                                                                                                                                  |
+| `SetIssueThreadResolved` | one `UpdateThreadResolved` whose thread has `remoteIssueCommentId` | 1:1                                               | `GET /repos/.../issues/comments/{id}` → rewrite the hidden metadata with `resolved` → `PATCH /repos/.../issues/comments/{id}` (read-modify-write; the visible body is preserved) |
+| `Commit`                 | all `CommitFileEdit`s in the cycle                                 | many                                              | `createBlob`\* → `createTree` → `createCommit` → `updateRef` (Git Data API), executed as one atomic Step                                                                         |
+
+`UpdateThreadResolved` routes on the thread's remote identity: `remoteThreadId` → the GraphQL resolve/unresolve steps; `remoteIssueCommentId` → `SetIssueThreadResolved`. Issue-comment threads have no GraphQL thread, so their resolved state is stored on the root comment itself (ADR 0002 §5).
 
 In-diff vs out-of-diff routing for `CreateComment` is computed at planning time from the current diff (which the Executor fetches as part of `RemoteState`), not from any field on the Op. This was an explicit deviation from the legacy model where `inDiff` was frozen at draft creation.
 
@@ -95,6 +98,8 @@ For every `PostReviewBatch` / `PostReply` / `PostIssueComment`, the Executor:
 
 For Threads with no native body to embed in, identity is resolved at fetch time by joining GraphQL `reviewThreads` to the matched `Comment` set (any contained comment with a known `Comment.id` reveals the `Thread.id` ↔ `remoteThreadId` mapping).
 
+For out-of-diff threads the join is by ownership instead: the earliest issue comment bearing a `threadId` is the thread's root, its REST id becomes `Thread.remoteIssueCommentId`, and `Thread.resolved` is read from that comment's `resolved` metadata. A later comment carrying the same `threadId` (a reply, or a forged fence) never contributes resolved state.
+
 **Legacy metadata is discarded.** Bark is pre-release, so no production data needs migration. Any hidden metadata in a comment body that does not match the current envelope (wrong version marker, wrong schema, unparseable) is silently dropped during extraction and the comment is treated as `meta: null` — i.e. as a foreign comment Bark did not author. The Executor never attempts to translate, repair, or re-emit legacy payloads.
 
 ## Consequences
@@ -104,7 +109,7 @@ For Threads with no native body to embed in, identity is resolved at fetch time 
 - **Reconciler stays pure and GitHub-ignorant.** Its inputs are state, its output is a flat list of intents; there is no API knowledge to leak.
 - **Executor owns API truth.** Batching, atomicity, in-diff routing, metadata embedding — all the GitHub-shaped concerns are in one place and not entangled with state machinery.
 - **`inDiff` is finally where it belongs.** It is recomputed at planning time, so a draft created against an old diff state is routed correctly when the diff has since shifted.
-- **The catalog is small.** Four Ops, six Steps. Most legacy "stages" of the author submit collapse into independent Steps; no orchestrator class is needed.
+- **The catalog is small.** Four Ops, eight Steps. Most legacy "stages" of the author submit collapse into independent Steps; no orchestrator class is needed.
 
 ### Negative / costs
 

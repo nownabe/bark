@@ -218,6 +218,40 @@ describe("reconciler — UpdateThreadResolved", () => {
       },
     ]);
   });
+
+  test("a syncing Thread with remoteIssueCommentId emits UpdateThreadResolved matched by local id (issue #270)", () => {
+    // Out-of-diff threads have no GraphQL node id; both sides key on the
+    // metadata threadId, which is the Thread's local id.
+    const local = thread({
+      id: "t-out",
+      state: "syncing",
+      remoteIssueCommentId: 501,
+      resolved: true,
+    });
+    const remote = thread({
+      id: "t-out",
+      state: "synced",
+      remoteIssueCommentId: 501,
+      resolved: false,
+    });
+    expect(reconcile(localState({ threads: [local] }), remoteState({ threads: [remote] }))).toEqual(
+      [
+        {
+          kind: "update-thread-resolved",
+          threadId: "t-out",
+          remoteThreadId: undefined,
+          remoteIssueCommentId: 501,
+          desiredResolved: true,
+        },
+      ],
+    );
+    expect(
+      reconcile(
+        localState({ threads: [local] }),
+        remoteState({ threads: [{ ...remote, resolved: true }] }),
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe("reconciler — CommitFileEdit", () => {

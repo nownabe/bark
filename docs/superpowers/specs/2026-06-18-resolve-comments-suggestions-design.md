@@ -1,5 +1,7 @@
 # Resolve comments & suggestions — design
 
+> **Superseded (2026-09).** Resolved state is no longer an event comment. Review threads use GitHub's native `isResolved`; out-of-diff threads carry `resolved` in the root comment's hidden metadata. See ADR 0002 §5/§7 and ADR 0003 §5.
+
 ## Goal
 
 Let reviewers and authors **resolve** Bark comment/suggestion threads, the way a

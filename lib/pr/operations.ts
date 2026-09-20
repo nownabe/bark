@@ -16,13 +16,15 @@ export type CreateReplyOp = {
   parent: Comment;
 };
 
-/** Thread.resolved differs from remote and the entity has been committed to sync.
- *  The Reconciler only emits this Op once the thread has a `remoteThreadId`,
- *  so the field is non-undefined here. */
+/** Thread.resolved differs from remote and the entity has been committed to
+ *  sync. The Reconciler only emits this Op once the thread exists on GitHub,
+ *  so exactly one of the two remote identities is set: `remoteThreadId` for a
+ *  review thread, `remoteIssueCommentId` for an out-of-diff thread. */
 export type UpdateThreadResolvedOp = {
   kind: "update-thread-resolved";
   threadId: LocalId;
-  remoteThreadId: string;
+  remoteThreadId?: string;
+  remoteIssueCommentId?: number;
   desiredResolved: boolean;
 };
 

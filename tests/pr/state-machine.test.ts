@@ -145,6 +145,12 @@ describe("state-machine — setThreadResolvedToSyncing", () => {
     const local = localState({ threads: [t] });
     expect(setThreadResolvedToSyncing(local, "other", true)).toEqual(local);
   });
+
+  test("a draft Thread whose only identity is remoteIssueCommentId re-enters syncing (issue #270)", () => {
+    const t = thread({ state: "draft", remoteIssueCommentId: 501, resolved: false });
+    const out = setThreadResolvedToSyncing(localState({ threads: [t] }), "t1", true);
+    expect(out.threads[0]).toMatchObject({ state: "syncing", resolved: true });
+  });
 });
 
 describe("state-machine — completeNoopThreadSyncs (issue #188)", () => {
@@ -176,6 +182,17 @@ describe("state-machine — completeNoopThreadSyncs (issue #188)", () => {
     const t = thread({ state: "syncing", remoteThreadId: "PRT_gone", resolved: false });
     const out = completeNoopThreadSyncs(localState({ threads: [t] }), remoteState());
     expect(out.threads[0]?.state).toBe("synced");
+  });
+
+  test("an out-of-diff Thread whose resolved already matches remote completes, matched by id (issue #270)", () => {
+    const t = thread({ id: "t-out", state: "syncing", remoteIssueCommentId: 501, resolved: true });
+    const remote = remoteState({
+      threads: [
+        thread({ id: "t-out", state: "synced", remoteIssueCommentId: 501, resolved: true }),
+      ],
+    });
+    const out = completeNoopThreadSyncs(localState({ threads: [t] }), remote);
+    expect(out.threads[0]).toMatchObject({ state: "synced", resolved: true });
   });
 });
 
@@ -371,6 +388,24 @@ describe("state-machine — applyStepResults: Resolve / Unresolve", () => {
       lastError: err,
     });
   });
+
+  test("SetIssueThreadResolved: ok marks the Thread synced, failure reverts it to draft + lastError (issue #270)", () => {
+    const t = thread({ id: "t-out", state: "syncing", resolved: true, remoteIssueCommentId: 501 });
+    const step = {
+      kind: "set-issue-thread-resolved" as const,
+      threadId: "t-out",
+      issueCommentId: 501,
+      resolved: true,
+    };
+    const ok = applyStepResults(localState({ threads: [t] }), [{ step, outcome: { ok: true } }]);
+    expect(ok.threads[0]).toMatchObject({ state: "synced", resolved: true });
+
+    const err = { message: "Forbidden", code: 403 };
+    const failed = applyStepResults(localState({ threads: [t] }), [
+      { step, outcome: { ok: false, error: err } },
+    ]);
+    expect(failed.threads[0]).toMatchObject({ state: "draft", resolved: true, lastError: err });
+  });
 });
 
 describe("state-machine — applyStepResults: Commit", () => {
@@ -487,6 +522,22 @@ describe("state-machine — applyStepResultsToRemote", () => {
     expect(unresolved.threads[0]?.resolved).toBe(false);
   });
 
+  test("SetIssueThreadResolved success updates the mirrored thread's resolved (issue #270)", () => {
+    const t = thread({ id: "t-out", state: "synced", remoteIssueCommentId: 501, resolved: false });
+    const out = applyStepResultsToRemote(remoteState({ threads: [t] }), [
+      {
+        step: {
+          kind: "set-issue-thread-resolved",
+          threadId: "t-out",
+          issueCommentId: 501,
+          resolved: true,
+        },
+        outcome: { ok: true },
+      },
+    ]);
+    expect(out.threads[0]?.resolved).toBe(true);
+  });
+
   test("failed outcomes leave the mirror unchanged", () => {
     const remote = remoteState({
       pullRequest: pr({ headSha: "h" }),
@@ -577,6 +628,36 @@ describe("state-machine — mergeRemoteIntoLocal", () => {
       remoteState({ threads: [remoteT] }),
     );
     expect(out.threads).toEqual([remoteT]);
+  });
+
+  test("adopts a remote out-of-diff Thread over a local draft Thread with the same id and no identity (issue #270)", () => {
+    const stuck = thread({ id: "t-out", state: "draft" });
+    const remoteT = thread({ id: "t-out", state: "synced", remoteIssueCommentId: 501 });
+    const out = mergeRemoteIntoLocal(
+      localState({ threads: [stuck] }),
+      remoteState({ threads: [remoteT] }),
+    );
+    expect(out.threads).toEqual([remoteT]);
+  });
+
+  test("keeps a protected local out-of-diff Thread that already has a remoteIssueCommentId (issue #270)", () => {
+    const pending = thread({
+      id: "t-out",
+      state: "syncing",
+      remoteIssueCommentId: 501,
+      resolved: true,
+    });
+    const remoteT = thread({
+      id: "t-out",
+      state: "synced",
+      remoteIssueCommentId: 501,
+      resolved: false,
+    });
+    const out = mergeRemoteIntoLocal(
+      localState({ threads: [pending] }),
+      remoteState({ threads: [remoteT] }),
+    );
+    expect(out.threads).toEqual([pending]);
   });
 
   test("keeps a protected local Thread that already has a remoteThreadId (pending resolve toggle wins)", () => {
