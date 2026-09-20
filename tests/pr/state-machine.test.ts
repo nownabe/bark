@@ -525,6 +525,33 @@ describe("state-machine — applyStepResults: Commit", () => {
     expect(out.fileEdits.map((f) => f.id)).toEqual(["f3"]);
   });
 
+  test("Commit success flips resolveOnCommit Threads to syncing with resolved=true (issue #278)", () => {
+    const f = fileEdit({ state: "syncing", resolveOnCommit: ["t1"] });
+    const t = thread({ state: "synced", remoteThreadId: "PRT", resolved: false });
+    const out = applyStepResults(localState({ fileEdits: [f], threads: [t] }), [
+      {
+        step: { kind: "commit", baseSha: "h0", headRef: "topic", fileEdits: [f] },
+        outcome: { ok: true, newHeadSha: "h1" },
+      },
+    ]);
+    expect(out.threads[0]).toMatchObject({ state: "syncing", resolved: true });
+    expect(out.fileEdits).toEqual([]);
+  });
+
+  test("Commit failure leaves resolveOnCommit Threads untouched and parks the edit (issue #278)", () => {
+    const f = fileEdit({ state: "syncing", resolveOnCommit: ["t1"] });
+    const t = thread({ state: "synced", remoteThreadId: "PRT", resolved: false });
+    const err = { message: "non-fast-forward" };
+    const out = applyStepResults(localState({ fileEdits: [f], threads: [t] }), [
+      {
+        step: { kind: "commit", baseSha: "h0", headRef: "topic", fileEdits: [f] },
+        outcome: { ok: false, error: err },
+      },
+    ]);
+    expect(out.threads[0]).toEqual(t);
+    expect(out.fileEdits[0]).toMatchObject({ state: "draft", lastError: err });
+  });
+
   test("Commit failure reverts every bundled FileEdit to draft + lastError", () => {
     const f = fileEdit({ id: "f", state: "syncing" });
     const err = { message: "non-fast-forward", code: 422 };

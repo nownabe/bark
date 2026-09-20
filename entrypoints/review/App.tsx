@@ -77,7 +77,7 @@ import {
 } from "../../lib/github";
 import { GitHubApiError } from "../../lib/pr/github-api";
 import { fetchFileContent } from "../../lib/pr/remote-fetcher";
-import { hasRemoteIdentity } from "../../lib/pr/types";
+import { type FileEdit, hasRemoteIdentity } from "../../lib/pr/types";
 import { type ChangedFile, isRangeInDiff, parseRightRanges } from "../../lib/pr/diff";
 import {
   clearAcceptedDecisions,
@@ -120,6 +120,18 @@ import {
 
 /** Stable empty file list for renders before AppState exists. */
 const NO_FILES: ChangedFile[] = [];
+
+/** Whether an upsert of `next` would change anything. */
+function sameFileEdit(current: FileEdit | undefined, next: FileEdit): boolean {
+  return (
+    current !== undefined &&
+    current.state === next.state &&
+    current.path === next.path &&
+    current.baseSha === next.baseSha &&
+    current.editedSource === next.editedSource &&
+    (current.resolveOnCommit ?? []).join("\0") === (next.resolveOnCommit ?? []).join("\0")
+  );
+}
 
 /** The review surface wrapped in its global error channel: every
  *  user-relevant error is announced via the Snackbar (ADR 0005 §4), so
@@ -575,6 +587,42 @@ function AppBody() {
     () => buildAuthorPendingItems(drafts, suggestionEdits, acceptedSuggestionInfos),
     [drafts, suggestionEdits, acceptedSuggestionInfos],
   );
+  // The FileEdits a commit should carry: one per path whose editor content
+  // diverges from its base, each listing the Threads of the suggestions
+  // accepted into it so a *successful* commit resolves them (issue #278).
+  // Both the mirror effect below and submitAuthor build them here, or the
+  // two could persist the same path with and without resolveOnCommit.
+  const fileEditsFromEdits = useCallback((): Map<string, FileEdit> => {
+    const wanted = new Map<string, FileEdit>();
+    if (!headSha) return wanted;
+    const threadsByPath = new Map<string, string[]>();
+    const syncedThreadIds = new Set(
+      (prRepository?.getLocalState().threads ?? [])
+        .filter((t) => t.state === "synced")
+        .map((t) => t.id),
+    );
+    for (const info of acceptedSuggestionInfos) {
+      const threadId = commentViewByRemoteId.get(info.commentId)?.comment.threadId;
+      if (threadId === undefined || !syncedThreadIds.has(threadId)) continue;
+      threadsByPath.set(info.path, [...(threadsByPath.get(info.path) ?? []), threadId]);
+    }
+    for (const [path, edit] of Object.entries(suggestionEdits)) {
+      if (!isMeaningfulEdit(edit.base, edit.source)) continue;
+      const resolveOnCommit = threadsByPath.get(path);
+      wanted.set(`fileedit-${path}`, {
+        id: `fileedit-${path}`,
+        state: "draft",
+        path,
+        // The edit's own baseSha (the head its base text was fetched at) is
+        // what the commit conflict check compares (issue #187); edits
+        // persisted before the field existed fall back to the current head.
+        baseSha: edit.baseSha ?? headSha,
+        editedSource: edit.source,
+        ...(resolveOnCommit ? { resolveOnCommit } : {}),
+      });
+    }
+    return wanted;
+  }, [acceptedSuggestionInfos, commentViewByRemoteId, headSha, prRepository, suggestionEdits]);
   // The active pending-items list for the topbar count + Submit confirm modal —
   // author mode shows author-shaped items, reviewer keeps the existing flow.
   const activePendingItems = role === "author" ? pendingAuthorItems : pendingItems;
@@ -662,35 +710,20 @@ function AppBody() {
   useEffect(() => {
     if (!prRepository || !headSha || role !== "author") return;
     void (async () => {
-      const wanted = new Map<string, { path: string; source: string; baseSha: string }>();
-      for (const [path, edit] of Object.entries(suggestionEdits)) {
-        if (!isMeaningfulEdit(edit.base, edit.source)) continue;
-        // The edit's own baseSha (the head its base text was fetched at) is
-        // what the commit conflict check compares (issue #187); edits
-        // persisted before the field existed fall back to the current head.
-        wanted.set(`fileedit-${path}`, {
-          path,
-          source: edit.source,
-          baseSha: edit.baseSha ?? headSha,
-        });
+      const wanted = fileEditsFromEdits();
+      // Only write what actually differs: every write notifies subscribers,
+      // which rebuilds this effect's inputs, which would re-run it forever.
+      const existing = new Map(prRepository.getLocalState().fileEdits.map((fe) => [fe.id, fe]));
+      for (const fe of wanted.values()) {
+        if (!sameFileEdit(existing.get(fe.id), fe)) await prRepository.upsertFileEdit(fe);
       }
-      for (const [id, { path, source, baseSha }] of wanted) {
-        await prRepository.upsertFileEdit({
-          id,
-          state: "draft",
-          path,
-          baseSha,
-          editedSource: source,
-        });
-      }
-      const existing = prRepository.getLocalState().fileEdits;
-      for (const fe of existing) {
+      for (const fe of prRepository.getLocalState().fileEdits) {
         if (fe.state === "draft" && !wanted.has(fe.id)) {
           await prRepository.discardFileEdit(fe.id);
         }
       }
     })();
-  }, [suggestionEdits, prRepository, headSha, role]);
+  }, [fileEditsFromEdits, prRepository, headSha, role]);
 
   // Per-file content load now lives in useSelectedFileContent.
   // Re-anchoring file content (per createdAtSha) is fetched by the new
@@ -1267,23 +1300,10 @@ function AppBody() {
 
       // 2. Re-sync FileEdits authoritatively (the L6d-1 effect is best-
       //    effort; this is the source of truth for the impending commit).
-      const wantedFileEdits = new Map<string, { path: string; source: string; baseSha: string }>();
-      for (const [path, edit] of Object.entries(suggestionEdits)) {
-        if (!isMeaningfulEdit(edit.base, edit.source)) continue;
-        wantedFileEdits.set(`fileedit-${path}`, {
-          path,
-          source: edit.source,
-          baseSha: edit.baseSha ?? headSha,
-        });
-      }
-      for (const [id, { path, source, baseSha }] of wantedFileEdits) {
-        await prRepository.upsertFileEdit({
-          id,
-          state: "draft",
-          path,
-          baseSha,
-          editedSource: source,
-        });
+      //    Each carries the accepted suggestions' threads in resolveOnCommit.
+      const wantedFileEdits = fileEditsFromEdits();
+      for (const fe of wantedFileEdits.values()) {
+        await prRepository.upsertFileEdit(fe);
       }
       for (const fe of prRepository.getLocalState().fileEdits) {
         if (fe.state === "draft" && !wantedFileEdits.has(fe.id)) {
@@ -1291,20 +1311,23 @@ function AppBody() {
         }
       }
 
-      // 3. Accepted-suggestion threads → resolved. setThreadResolved runs
-      //    its own sync cycle (immediate GraphQL mutation). The Commit
-      //    step in submitDrafts (next) lands the accepted source change
-      //    in the same commit as any other edits.
+      // 3. Accepted suggestions whose replacement is already in the file
+      //    produce no FileEdit, so there is no commit to wait for: resolve
+      //    them now. The rest ride on their FileEdit's resolveOnCommit and
+      //    are resolved by the Commit's own success (issue #278).
       const acceptedResolvedRemoteIds: number[] = [];
       for (const info of acceptedSuggestionInfos) {
         const view = commentViewByRemoteId.get(info.commentId);
         if (!view) continue;
-        await prRepository.setThreadResolved(view.comment.threadId, true);
+        if (!wantedFileEdits.has(`fileedit-${info.path}`)) {
+          await prRepository.setThreadResolved(view.comment.threadId, true);
+        }
         acceptedResolvedRemoteIds.push(info.commentId);
       }
 
       // 4. Submit — Reconciler emits PostReviewBatch / PostIssueComment /
-      //    PostReply + one Commit step for the FileEdits.
+      //    PostReply + one Commit step for the FileEdits, then a follow-up
+      //    cycle for the threads that Commit flipped to syncing.
       await prRepository.submitDrafts();
       reportSubmitErrors();
       const newHeadSha = prRepository.getRemoteState().pullRequest?.headSha ?? headSha;

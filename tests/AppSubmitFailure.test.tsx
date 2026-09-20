@@ -258,3 +258,152 @@ describe("App — reviewer submit that succeeds", () => {
     expect(container.querySelector(".snackbar")).toBeNull();
   });
 });
+
+// ---- Author submit with an accepted suggestion (issue #278) --------------
+
+const DISMISSED_KEY = "pr:o/r#1:dismissed-suggestions";
+const SUGGESTION_REMOTE_ID = 55;
+const SUGGESTION_BODY = ["Please rename this.", "```suggestion", "B", "```"].join("\n");
+
+/** A transport that records its calls; `commitOk` drives the Commit outcome. */
+function authorTransport(commitOk: boolean): { transport: Transport; calls: string[] } {
+  const calls: string[] = [];
+  const transport: Transport = {
+    ...happyTransport(),
+    async resolveReviewThread() {
+      calls.push("resolve-review-thread");
+      return { ok: true };
+    },
+    async unresolveReviewThread() {
+      calls.push("unresolve-review-thread");
+      return { ok: true };
+    },
+    async commit() {
+      calls.push("commit");
+      return commitOk
+        ? { ok: true, newHeadSha: "h2" }
+        : { ok: false, error: { message: "non-fast-forward" } };
+    },
+  };
+  return { transport, calls };
+}
+
+/** Render App as the PR author, with one submitted suggestion the author has
+ *  accepted and a persisted editor edit that applies it, then submit. */
+async function submitAsAuthor(transport: Transport): Promise<HTMLElement> {
+  for (const k of Object.keys(store)) delete store[k];
+  Object.assign(store, {
+    github_token: "tok",
+    auth_method: "app",
+    [EDITS_KEY]: {
+      "README.md": { base: BASE, source: EDITED_ONE, baseSha: "h", comments: {} },
+    },
+    [DISMISSED_KEY]: { [String(SUGGESTION_REMOTE_ID)]: "accepted" },
+  });
+  repository = new PullRequestRepository({
+    storage: new InMemoryStorageAdapter(),
+    transport,
+    isInDiff: () => true,
+  });
+  const suggestion = {
+    id: "c-sug",
+    state: "synced" as const,
+    remoteId: SUGGESTION_REMOTE_ID,
+    threadId: "t-sug",
+    body: SUGGESTION_BODY,
+    author: { login: "alice" },
+    path: "README.md",
+    anchor: { sha: "h", range: { sl: 2, sc: 1, el: 2, ec: 2 }, quote: "b" },
+  };
+  const thread = {
+    id: "t-sug",
+    state: "synced" as const,
+    remoteThreadId: "PRT_sug",
+    resolved: false,
+  };
+  await repository.upsertComment(suggestion);
+  await repository.upsertThread(thread);
+  await repository.setRemoteState({
+    ...emptyState(),
+    pullRequest: {
+      owner: "o",
+      repo: "r",
+      number: 1,
+      title: "Some PR",
+      body: "",
+      headSha: "h",
+      headRef: "topic",
+      baseRef: "main",
+      state: "open",
+      draft: false,
+      merged: false,
+      // The viewer IS the author, so App derives the author role.
+      author: { login: "bob" },
+    },
+    viewer: { login: "bob" },
+    comments: [suggestion],
+    threads: [thread],
+    fileContents: [{ sha: "h", path: "README.md", source: BASE }],
+    changedFiles: [
+      {
+        path: "README.md",
+        status: "modified",
+        patch: "@@ -1,5 +1,5 @@\n-a0\n+a\n b\n c\n d\n e\n",
+      },
+    ],
+  });
+
+  (globalThis as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(
+    "https://localhost/?owner=o&repo=r&pr=1",
+  );
+  let container!: HTMLElement;
+  await act(async () => {
+    ({ container } = render(<App />));
+  });
+  await waitFor(() => {
+    expect(container.querySelector(".topbar__pr-title")).not.toBeNull();
+  });
+  const submit = await waitFor(() => {
+    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.startsWith("Submit ("),
+    );
+    expect(btn).toBeDefined();
+    return btn as HTMLButtonElement;
+  });
+  await act(async () => {
+    fireEvent.click(submit);
+  });
+  const confirm = container.querySelector(".modal__footer .btn--primary");
+  expect(confirm).not.toBeNull();
+  await act(async () => {
+    fireEvent.click(confirm as HTMLButtonElement);
+  });
+  return container;
+}
+
+function threadResolved(): boolean | undefined {
+  return repository.getLocalState().threads.find((t) => t.id === "t-sug")?.resolved;
+}
+
+describe("App — author submit of an accepted suggestion (issue #278)", () => {
+  test("a failing commit does not resolve the accepted suggestion's thread", async () => {
+    const { transport, calls } = authorTransport(false);
+    const container = await submitAsAuthor(transport);
+
+    await waitFor(() => {
+      expect(container.querySelector(".snackbar")?.textContent).toContain("Commit failed");
+    });
+    expect(calls.filter((c) => c === "resolve-review-thread")).toEqual([]);
+    expect(threadResolved()).toBe(false);
+  });
+
+  test("a succeeding commit resolves the accepted thread after the commit", async () => {
+    const { transport, calls } = authorTransport(true);
+    await submitAsAuthor(transport);
+
+    await waitFor(() => {
+      expect(calls).toEqual(["commit", "resolve-review-thread"]);
+    });
+    expect(threadResolved()).toBe(true);
+  });
+});

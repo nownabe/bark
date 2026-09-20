@@ -837,6 +837,47 @@ describe("repository — drafts created at an older head (issue #265)", () => {
   });
 });
 
+describe("repository — accepted-suggestion threads resolve on commit (issue #278)", () => {
+  async function repoWithAcceptedSuggestion(transport: Transport) {
+    const r = makeRepo(transport);
+    const synced = thread({ id: "t1", state: "synced", remoteThreadId: "PRT", resolved: false });
+    await r.setRemoteState({ ...emptyState(), pullRequest: pr(), threads: [synced] });
+    await r.upsertThread(synced);
+    await r.upsertFileEdit(fileEdit({ resolveOnCommit: ["t1"] }));
+    return r;
+  }
+
+  test("the resolve runs in the cycle after the commit", async () => {
+    const { transport, calls } = happyTransport();
+    const r = await repoWithAcceptedSuggestion(transport);
+
+    await r.submitDrafts();
+
+    expect(calls).toEqual(["commit", "resolve-review-thread"]);
+    expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: true });
+    expect(r.getRemoteState().pullRequest?.headSha).toBe("h2");
+  });
+
+  test("when the commit fails no resolve is sent", async () => {
+    const { transport, calls } = happyTransport();
+    const failing: Transport = {
+      ...transport,
+      async commit(): Promise<CommitOutcome> {
+        calls.push("commit");
+        return { ok: false, error: { message: "non-fast-forward" } };
+      },
+    };
+    const r = await repoWithAcceptedSuggestion(failing);
+
+    await r.submitDrafts();
+
+    expect(calls).toEqual(["commit"]);
+    expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: false });
+    expect(r.getLocalState().fileEdits[0]).toMatchObject({ state: "draft" });
+    expect(r.getLocalState().fileEdits[0]?.lastError).toBeDefined();
+  });
+});
+
 describe("repository — refresh serialisation (issue #281)", () => {
   /** A promise whose settlement the test controls. */
   function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {

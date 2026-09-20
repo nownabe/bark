@@ -38,7 +38,7 @@ The Reconciler does not look at multiple entities to decide what to emit. Whethe
 The Executor receives a `ReconcileOperation[]` per Reconciler cycle and plans `ExecutionStep[]`. It is responsible for:
 
 - **Batching.** All `CreateComment` Ops targeting in-diff anchors collapse into one `PostReviewBatch`. Out-of-diff `CreateComment`s become one `PostIssueComment` each. `CreateReply`s map 1:1 to `PostReply` (no batch API exists).
-- **Ordering.** No global ordering constraint exists today: the Bark resolve marker is gone (ADR 0002 §7), so `ResolveReviewThread` no longer depends on a prior `Commit`. Steps can run concurrently within one cycle. Steps never interleave with a `RemoteState` refresh ([ADR 0005 §3](0005-refresh-policy.md)).
+- **Ordering.** Steps within one cycle are independent and may run in any order. The one cross-entity dependency — a suggestion accepted into a `FileEdit` must not be resolved unless that edit was committed — is not a step-ordering rule but a state transition: `FileEdit.resolveOnCommit` lists the Threads, and a successful `Commit` flips them `synced → syncing (resolved: true)` so the next cycle emits their `UpdateThreadResolved`. A failed `Commit` leaves them untouched (issue #278). Steps never interleave with a `RemoteState` refresh ([ADR 0005 §3](0005-refresh-policy.md)).
 - **Atomicity.** `PostReviewBatch` is atomic by GitHub design. `Commit` is multi-call but the Executor treats it as one atomic Step: a failure at any sub-call fails the whole Step.
 - **Identity round-trip.** The Executor embeds `{ cid, threadId, anchor }` as base64 hidden metadata in any comment body it posts, and extracts the same on fetch.
 
