@@ -58,14 +58,18 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
         }
         break;
       }
-      case "create-reply":
-        // A reply to an in-diff review comment nests via the review-reply
-        // endpoint. GitHub issue comments are flat — there is no reply
-        // endpoint for them — so a reply to an out-of-diff (issue-comment)
-        // parent must be posted as another issue comment; Bark reconstructs
-        // the thread from the shared metadata threadId. Routing it to
-        // post-reply would 404 on the issue-comment id (issue #184).
-        if (ctx.isInDiff(op.parent)) {
+      case "create-reply": {
+        // Routed on the GitHub object the parent actually became: a review
+        // comment nests via the review-reply endpoint, while issue comments
+        // are flat — there is no reply endpoint for them — so a reply to an
+        // issue-comment parent is another issue comment that Bark ties to
+        // the thread by its metadata threadId (issue #184). The current diff
+        // must not decide this: a parent's creation-time lines drift in and
+        // out of the diff as the author pushes (issue #285). The isInDiff
+        // fallback only serves LocalState written before `remoteKind`
+        // existed; the first refresh replaces those with the remote copy.
+        const kind = op.parent.remoteKind ?? (ctx.isInDiff(op.parent) ? "review" : "issue");
+        if (kind === "review") {
           replies.push({
             kind: "post-reply",
             comment: op.comment,
@@ -75,6 +79,7 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
           outOfDiff.push(op.comment);
         }
         break;
+      }
       case "update-thread-resolved":
         // Routed on the thread's remote identity: a review thread resolves
         // via GraphQL, an out-of-diff thread by rewriting its root issue

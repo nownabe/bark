@@ -147,8 +147,8 @@ describe("planner — CreateComment routing", () => {
 });
 
 describe("planner — CreateReply", () => {
-  test("a reply to an in-diff parent maps 1:1 to PostReply (never batched)", () => {
-    const parent = comment({ id: "p", state: "synced", remoteId: 10 });
+  test("a reply to a review-comment parent maps 1:1 to PostReply (never batched)", () => {
+    const parent = comment({ id: "p", state: "synced", remoteId: 10, remoteKind: "review" });
     const r1 = comment({ id: "r1", parentLocalId: "p" });
     const r2 = comment({ id: "r2", parentLocalId: "p" });
     const ops: ReconcileOperation[] = [
@@ -162,27 +162,59 @@ describe("planner — CreateReply", () => {
     ]);
   });
 
-  test("a reply to an out-of-diff parent becomes a PostIssueComment (issue #184)", () => {
-    // The parent was posted as an issue comment; issue comments are flat,
-    // so the reply must post as another issue comment, not via the
-    // review-reply endpoint (which would 404 on the issue-comment id).
-    const parent = comment({ id: "p", state: "synced", remoteId: 10 });
+  test("a reply to an issue-comment parent is a PostIssueComment even when the parent's lines are in the current diff", () => {
+    // Issue comments are flat and their REST id is not a review-comment id,
+    // so the review-reply endpoint would 404 — regardless of whether the
+    // parent's creation-time lines happen to sit in today's diff (#285).
+    const parent = comment({ id: "p", state: "synced", remoteId: 10, remoteKind: "issue" });
     const reply = comment({ id: "r1", parentLocalId: "p" });
     const ops: ReconcileOperation[] = [{ kind: "create-reply", comment: reply, parent }];
-    const steps = planExecution(ops, context({ isInDiff: () => false }));
+    const steps = planExecution(ops, context({ isInDiff: () => true }));
     expect(steps).toEqual([{ kind: "post-issue-comment", comment: reply }]);
   });
 
-  test("replies route per parent: in-diff → PostReply, out-of-diff → PostIssueComment", () => {
-    const inParent = comment({ id: "pin", state: "synced", remoteId: 1, path: "in.md" });
-    const outParent = comment({ id: "pout", state: "synced", remoteId: 2, path: "out.md" });
+  test("a reply to a review-comment parent is a PostReply even when the parent's lines left the diff", () => {
+    const parent = comment({ id: "p", state: "synced", remoteId: 10, remoteKind: "review" });
+    const reply = comment({ id: "r1", parentLocalId: "p" });
+    const ops: ReconcileOperation[] = [{ kind: "create-reply", comment: reply, parent }];
+    const steps = planExecution(ops, context({ isInDiff: () => false }));
+    expect(steps).toEqual([{ kind: "post-reply", comment: reply, parent }]);
+  });
+
+  test("a parent without remoteKind (legacy LocalState) falls back to the diff heuristic", () => {
+    const parent = comment({ id: "p", state: "synced", remoteId: 10 });
+    const reply = comment({ id: "r1", parentLocalId: "p" });
+    const ops: ReconcileOperation[] = [{ kind: "create-reply", comment: reply, parent }];
+    expect(planExecution(ops, context({ isInDiff: () => false }))).toEqual([
+      { kind: "post-issue-comment", comment: reply },
+    ]);
+    expect(planExecution(ops, context({ isInDiff: () => true }))).toEqual([
+      { kind: "post-reply", comment: reply, parent },
+    ]);
+  });
+
+  test("replies route per parent: review parent → PostReply, issue parent → PostIssueComment", () => {
+    const inParent = comment({
+      id: "pin",
+      state: "synced",
+      remoteId: 1,
+      remoteKind: "review",
+      path: "in.md",
+    });
+    const outParent = comment({
+      id: "pout",
+      state: "synced",
+      remoteId: 2,
+      remoteKind: "issue",
+      path: "out.md",
+    });
     const inReply = comment({ id: "rin", parentLocalId: "pin", path: "in.md" });
     const outReply = comment({ id: "rout", parentLocalId: "pout", path: "out.md" });
     const ops: ReconcileOperation[] = [
       { kind: "create-reply", comment: inReply, parent: inParent },
       { kind: "create-reply", comment: outReply, parent: outParent },
     ];
-    const steps = planExecution(ops, context({ isInDiff: (c) => c.path === "in.md" }));
+    const steps = planExecution(ops, context({ isInDiff: () => true }));
     expect(steps).toEqual([
       { kind: "post-issue-comment", comment: outReply },
       { kind: "post-reply", comment: inReply, parent: inParent },

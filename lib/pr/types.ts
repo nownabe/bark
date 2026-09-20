@@ -43,6 +43,8 @@ export type Comment = {
 
   /** GitHub REST id, populated by the Executor on successful sync. */
   remoteId?: number;
+  /** Which GitHub object `remoteId` names; set together with it. */
+  remoteKind?: "review" | "issue";
   /** Parent Thread.id (always set). */
   threadId: LocalId;
   /** Reply target within the same thread; absent for top-level. */

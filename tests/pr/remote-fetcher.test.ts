@@ -116,6 +116,7 @@ describe("remote-fetcher — fetchComments", () => {
       id: "local-c1",
       state: "synced",
       remoteId: 100,
+      remoteKind: "review",
       threadId: "local-t1",
       parentLocalId: undefined,
       body: "Looks off",
@@ -274,6 +275,56 @@ describe("remote-fetcher — fetchComments", () => {
     });
     const out = await fetchComments({ token: "t", fetch }, PR);
     expect(out).toEqual([]);
+  });
+});
+
+describe("remote-fetcher — remoteKind (issue #285)", () => {
+  const barkBody = (cid: string) =>
+    embedMetadata("text", {
+      cid,
+      threadId: "t1",
+      path: "src/x.md",
+      anchor: { sha: "h0", range: { sl: 1, sc: 1, el: 1, ec: 2 }, quote: "q" },
+    });
+
+  test("a fetched review comment carries remoteKind 'review'", async () => {
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.includes("/pulls/7/comments"))
+        return jsonResponse([
+          {
+            id: 100,
+            body: barkBody("bark-review"),
+            path: "src/x.md",
+            line: 1,
+            user: { login: "alice", avatar_url: "" },
+          },
+          {
+            id: 101,
+            body: "foreign",
+            path: "src/x.md",
+            line: 2,
+            user: { login: "carol", avatar_url: "" },
+          },
+        ]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchComments({ token: "t", fetch }, PR);
+    expect(out.map((c) => c.remoteKind)).toEqual(["review", "review"]);
+  });
+
+  test("a fetched issue comment carries remoteKind 'issue'", async () => {
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
+      if (req.url.includes("/issues/7/comments"))
+        return jsonResponse([
+          { id: 50, body: barkBody("bark-issue"), user: { login: "alice", avatar_url: "" } },
+          { id: 51, body: "Just a comment", user: { login: "dan", avatar_url: "" } },
+        ]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+    const out = await fetchComments({ token: "t", fetch }, PR);
+    expect(out.map((c) => c.remoteKind)).toEqual(["issue", "issue"]);
   });
 });
 

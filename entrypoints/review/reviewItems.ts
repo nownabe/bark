@@ -188,6 +188,40 @@ export function canReplyToThread(t: ReviewThread): boolean {
   return !!root && root.source === "review" && root.line !== undefined;
 }
 
+/**
+ * The anchor a reply inherits from its thread — the three cases
+ * `canReplyToThread` admits, in the same order; null when none applies.
+ *
+ * The sha travels with the range it belongs to: a Bark or draft root's range
+ * is in that root's own sha, so stamping the head sha there would make
+ * `reanchor` treat stale lines as current (issue #285). Only the foreign
+ * review root anchors at the head, because GitHub's `line` is head-side.
+ */
+export function replyAnchor(
+  t: ReviewThread,
+  headSha: string | null,
+): { path: string; range: AnchorRange; quote: string; thread: string; sha: string } | null {
+  const root = t.rootComment;
+  if (root?.meta) {
+    const { path, range, quote, thread, sha } = root.meta;
+    return { path, range, quote, thread, sha };
+  }
+  if (t.rootDraft) {
+    const { path, range, quote, thread, sha } = t.rootDraft;
+    return { path, range, quote, thread, sha };
+  }
+  if (root && root.source === "review" && root.path && root.line !== undefined) {
+    return {
+      path: root.path,
+      range: { sl: root.line, sc: 1, el: root.line, ec: 1 },
+      quote: "",
+      thread: t.id,
+      sha: headSha ?? "",
+    };
+  }
+  return null;
+}
+
 /** A thread's highlighted span in the body, used to map an editor click to a thread. */
 export interface ThreadRange {
   id: string;

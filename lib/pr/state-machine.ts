@@ -181,7 +181,7 @@ function applyStepResult(local: LocalState, result: StepResult): LocalState {
     case "post-reply": {
       const o = result.outcome as PostReplyOutcome;
       return o.ok
-        ? applyCommentMapping(local, o.mapping)
+        ? applyCommentMapping(local, o.mapping, remoteKindOf(result.step.kind))
         : applyCommentFailure(local, result.step.comment.id, o.error);
     }
     case "post-issue-comment": {
@@ -254,7 +254,13 @@ function applyReviewBatchSuccess(
     comments: local.comments.map((c) => {
       const m = byCid.get(c.id);
       if (!m) return c;
-      return { ...c, state: "synced", remoteId: m.remoteId, lastError: undefined };
+      return {
+        ...c,
+        state: "synced",
+        remoteId: m.remoteId,
+        remoteKind: "review",
+        lastError: undefined,
+      };
     }),
     threads: local.threads.map((t) => {
       const newRemoteThreadId = threadRemotes.get(t.id);
@@ -294,11 +300,23 @@ function applyUnpostedCommentsFailure(
   };
 }
 
-function applyCommentMapping(local: LocalState, m: CommentRemoteMapping): LocalState {
+/** Which GitHub object a successful post produced — the field that routes
+ *  later replies (ADR 0003 §3, issue #285). */
+function remoteKindOf(stepKind: "post-issue-comment" | "post-reply"): Comment["remoteKind"] {
+  return stepKind === "post-issue-comment" ? "issue" : "review";
+}
+
+function applyCommentMapping(
+  local: LocalState,
+  m: CommentRemoteMapping,
+  remoteKind: Comment["remoteKind"],
+): LocalState {
   return {
     ...local,
     comments: local.comments.map((c) =>
-      c.id === m.cid ? { ...c, state: "synced", remoteId: m.remoteId, lastError: undefined } : c,
+      c.id === m.cid
+        ? { ...c, state: "synced", remoteId: m.remoteId, remoteKind, lastError: undefined }
+        : c,
     ),
   };
 }
@@ -311,7 +329,7 @@ function applyIssueCommentMapping(
   comment: Comment,
   m: CommentRemoteMapping,
 ): LocalState {
-  const next = applyCommentMapping(local, m);
+  const next = applyCommentMapping(local, m, "issue");
   if (comment.parentLocalId !== undefined) return next;
   return {
     ...next,
@@ -435,6 +453,7 @@ function applyStepResultToRemote(remote: RemoteState, result: StepResult): Remot
         ...comment,
         state: "synced",
         remoteId: o.mapping.remoteId,
+        remoteKind: remoteKindOf(result.step.kind),
         lastError: undefined,
       };
       const next = { ...remote, comments: upsertRemoteComment(remote.comments, synced) };
@@ -481,6 +500,7 @@ function applyReviewBatchSuccessToRemote(
       ...c,
       state: "synced",
       remoteId: m.remoteId,
+      remoteKind: "review",
       lastError: undefined,
     });
     if (m.remoteThreadId) threadRemotes.set(c.threadId, m.remoteThreadId);

@@ -17,6 +17,7 @@ import {
   canReplyToThread,
   deriveRole,
   filterReviewEntries,
+  replyAnchor,
   revealSubmittedFacets,
   reviewEntryCounts,
   summarizePending,
@@ -289,6 +290,49 @@ describe("canReplyToThread", () => {
     const foreign = comment({ id: 9, source: "issue", meta: null, threadKey: "k" });
     const threads = buildThreads([foreign], [], "a.md");
     expect(canReplyToThread(threads[0]!)).toBe(false);
+  });
+});
+
+describe("replyAnchor (issue #285)", () => {
+  test("a reply to a Bark root inherits the root's sha, not the head sha", () => {
+    const root = comment({ id: 1, meta: { ...meta(5), sha: "A" } });
+    const threads = buildThreads([root], [], "a.md");
+    expect(replyAnchor(threads[0]!, "B")).toEqual({
+      path: "a.md",
+      range: { sl: 5, sc: 1, el: 5, ec: 5 },
+      quote: "quote 5",
+      thread: "t5",
+      sha: "A",
+    });
+  });
+
+  test("a reply to a draft root inherits the draft's sha", () => {
+    const threads = buildThreads([], [draft({ cid: "d1", sha: "A" })], "a.md");
+    expect(replyAnchor(threads[0]!, "B")?.sha).toBe("A");
+  });
+
+  test("a reply to a foreign review root anchors to its GitHub line at the head sha", () => {
+    const foreign = comment({
+      id: 9,
+      meta: null,
+      threadKey: "foreign-thread-PRT_a",
+      path: "a.md",
+      line: 3,
+    });
+    const threads = buildThreads([foreign], [], "a.md");
+    expect(replyAnchor(threads[0]!, "B")).toEqual({
+      path: "a.md",
+      range: { sl: 3, sc: 1, el: 3, ec: 1 },
+      quote: "",
+      thread: "foreign-thread-PRT_a",
+      sha: "B",
+    });
+  });
+
+  test("a foreign issue root yields null", () => {
+    const foreign = comment({ id: 9, source: "issue", meta: null, threadKey: "k" });
+    const threads = buildThreads([foreign], [], "a.md");
+    expect(replyAnchor(threads[0]!, "B")).toBeNull();
   });
 });
 
