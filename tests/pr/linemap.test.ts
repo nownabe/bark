@@ -48,4 +48,13 @@ describe("linemap", () => {
     const map = buildLineMap("a\nb", "c\nd");
     expect(map.size).toBe(0);
   });
+
+  test("treats a trailing newline as a final (empty) line, matching buildLineIndex", () => {
+    // "a\nb\n" is three lines: ["a","b",""] — the same view lib/anchor's
+    // buildLineIndex takes, so line numbers line up with the anchor offsets.
+    const map = buildLineMap("a\nb\n", "x\na\nb\n");
+    expect(map.get(1)).toBe(2); // a → line 2
+    expect(map.get(2)).toBe(3); // b → line 3
+    expect(map.get(3)).toBe(4); // the trailing empty line is a line of its own
+  });
 });
