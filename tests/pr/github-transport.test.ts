@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { createGitHubTransport, type PrRef } from "../../lib/pr/github-transport";
+import { createGitHubTransport } from "../../lib/pr/github-transport";
 import { contentDigest, embedMetadata, extractMetadata } from "../../lib/pr/metadata";
-import type { Comment } from "../../lib/pr/types";
+import type { Comment, PrRef } from "../../lib/pr/types";
 
 const PR: PrRef = { owner: "o", repo: "r", number: 7 };
 const author = { login: "alice" };

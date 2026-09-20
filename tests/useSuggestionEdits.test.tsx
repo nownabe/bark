@@ -9,7 +9,7 @@ import {
   useSuggestionEdits,
 } from "../entrypoints/review/hooks/useSuggestionEdits";
 import type { SuggestionEdit } from "../lib/drafts";
-import type { PrRef } from "../lib/github";
+import type { PrRef } from "../lib/pr/types";
 
 afterEach(() => {
   cleanup();

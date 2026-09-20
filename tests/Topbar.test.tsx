@@ -6,7 +6,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { createRef } from "react";
 import { Topbar, type TopbarProps } from "../entrypoints/review/components/Topbar";
-import type { ChangedFile, PullInfo } from "../lib/github";
+import type { ChangedFile, PullRequest } from "../lib/pr/types";
 
 afterEach(() => {
   cleanup();
@@ -45,12 +45,17 @@ function makeProps(overrides: Partial<TopbarProps> = {}): TopbarProps {
   };
 }
 
-const samplePull = (overrides: Partial<PullInfo> = {}): PullInfo => ({
+const samplePull = (overrides: Partial<PullRequest> = {}): PullRequest => ({
+  owner: "o",
+  repo: "r",
+  number: 1,
   title: "Add docs",
-  author: "alice",
+  author: { login: "alice" },
   body: "",
   headSha: "abcdef0123456",
   headRef: "feature",
+  headRepo: { owner: "o", repo: "r" },
+  baseRef: "main",
   state: "open",
   draft: false,
   merged: false,

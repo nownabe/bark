@@ -8,7 +8,7 @@
 // (findCommentMappings).
 
 import { type GitHubClient, ghGraphQL } from "./github-api";
-import type { PrRef } from "./github-transport";
+import type { PrRef } from "./types";
 
 export type RawReviewThread = {
   id: string;

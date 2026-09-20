@@ -133,6 +133,13 @@ export type FileEdit = {
   resolveOnCommit?: LocalId[];
 };
 
+/** Identifies a pull request on GitHub. */
+export type PrRef = {
+  owner: string;
+  repo: string;
+  number: number;
+};
+
 /** Pull request metadata mirrored from GitHub. */
 export type PullRequest = {
   owner: string;

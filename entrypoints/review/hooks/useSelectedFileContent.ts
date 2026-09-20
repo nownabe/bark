@@ -19,9 +19,9 @@
 
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 import type { SuggestionEdit } from "../../../lib/drafts";
-import type { PrRef } from "../../../lib/github";
 import type { GitHubClient } from "../../../lib/pr/github-api";
 import { fetchFileContent } from "../../../lib/pr/remote-fetcher";
+import type { PrRef } from "../../../lib/pr/types";
 import { isMeaningfulEdit } from "../../../lib/suggest";
 import { errMessage } from "../uiHelpers";
 

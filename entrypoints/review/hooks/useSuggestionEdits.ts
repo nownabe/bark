@@ -14,7 +14,7 @@
 
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 import type { SuggestionEdit } from "../../../lib/drafts";
-import type { PrRef } from "../../../lib/github";
+import type { PrRef } from "../../../lib/pr/types";
 import { isMeaningfulEdit } from "../../../lib/suggest";
 
 const SAVE_DEBOUNCE_MS = 400;

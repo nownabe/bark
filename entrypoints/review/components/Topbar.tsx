@@ -7,13 +7,8 @@
 // spans more than just this component.
 
 import type { RefObject } from "react";
-import {
-  avatarUrl,
-  type ChangedFile,
-  type PrRef,
-  type PullInfo,
-  type PullStatus,
-} from "../../../lib/github";
+import { avatarUrl, type PullStatus } from "../../../lib/github";
+import type { ChangedFile, PrRef, PullRequest } from "../../../lib/pr/types";
 import type { Role } from "../reviewItems";
 import { PR_STATUS_LABEL, type ViewMode } from "../uiHelpers";
 
@@ -22,7 +17,7 @@ export type TopbarProps = {
   owner: string | null;
   repo: string | null;
   prNum: string | null;
-  pull: PullInfo | null;
+  pull: PullRequest | null;
   prStatus: PullStatus | null;
   headSha: string | null;
   files: ChangedFile[];
@@ -214,13 +209,13 @@ export function Topbar({
           <div className="pr-info__meta">
             <img
               className="comment__avatar"
-              src={avatarUrl(pull.author, 40)}
+              src={avatarUrl(pull.author.login, 40)}
               alt=""
               width={18}
               height={18}
               loading="lazy"
             />
-            <span className="comment__author">{pull.author}</span>
+            <span className="comment__author">{pull.author.login}</span>
             {prStatus ? (
               <span className={`badge badge--pr badge--pr-${prStatus}`}>
                 {PR_STATUS_LABEL[prStatus]}

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { PrRef } from "../../lib/pr/github-transport";
 import { listReviewThreads } from "../../lib/pr/review-threads";
+import type { PrRef } from "../../lib/pr/types";
 
 const PR: PrRef = { owner: "o", repo: "r", number: 7 };
 

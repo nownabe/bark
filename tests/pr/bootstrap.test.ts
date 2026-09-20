@@ -2,8 +2,8 @@ import { describe, expect, mock, test } from "bun:test";
 import { deriveAppState } from "../../lib/pr/appstate";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { BrowserStorageAPI } from "../../lib/pr/chrome-storage";
-import type { PrRef } from "../../lib/pr/github-transport";
 import { embedMetadata } from "../../lib/pr/metadata";
+import type { PrRef } from "../../lib/pr/types";
 
 const PR: PrRef = { owner: "o", repo: "r", number: 7 };
 

@@ -27,13 +27,7 @@ import type {
   ResolveOutcome,
   Transport,
 } from "./transport";
-import type { Comment, ErrorInfo } from "./types";
-
-export type PrRef = {
-  owner: string;
-  repo: string;
-  number: number;
-};
+import type { Comment, ErrorInfo, PrRef } from "./types";
 
 export function createGitHubTransport(client: GitHubClient, prRef: PrRef): Transport {
   return {

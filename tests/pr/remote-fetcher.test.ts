@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { PrRef } from "../../lib/pr/github-transport";
 import { embedMetadata } from "../../lib/pr/metadata";
 import {
   fetchComments,
@@ -10,6 +9,7 @@ import {
   fetchViewer,
   normalizeComments,
 } from "../../lib/pr/remote-fetcher";
+import type { PrRef } from "../../lib/pr/types";
 
 const PR: PrRef = { owner: "o", repo: "r", number: 7 };
 

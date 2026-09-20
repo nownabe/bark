@@ -9,11 +9,10 @@
 
 import type { ChangedFile } from "./diff";
 import { type GitHubClient, ghPaginate, ghRequest } from "./github-api";
-import type { PrRef } from "./github-transport";
 import { contentDigest, extractMetadata } from "./metadata";
 import { extractTextAtRange } from "./reanchor";
 import { listReviewThreads, type RawReviewThread } from "./review-threads";
-import type { Comment, FileContent, PullRequest, RemoteState, Thread, User } from "./types";
+import type { Comment, FileContent, PrRef, PullRequest, RemoteState, Thread, User } from "./types";
 
 // ---- PullRequest -------------------------------------------------------
 

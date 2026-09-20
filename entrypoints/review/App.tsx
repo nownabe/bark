@@ -72,16 +72,10 @@ import {
 import { buildLineMap, invertLineMap } from "../../lib/pr/linemap";
 import { buildLineIndex, type SourceAnchor } from "../../lib/anchor";
 import type { ExistingComment } from "../../lib/comments";
-import {
-  buildBlobPermalink,
-  buildSuggestionBlock,
-  pullStatus,
-  type PrRef,
-  type PullInfo,
-} from "../../lib/github";
+import { buildBlobPermalink, buildSuggestionBlock, pullStatus } from "../../lib/github";
 import { GitHubApiError } from "../../lib/pr/github-api";
 import { fetchFileContent } from "../../lib/pr/remote-fetcher";
-import { canResolveThread, type FileEdit } from "../../lib/pr/types";
+import { canResolveThread, type FileEdit, type PrRef } from "../../lib/pr/types";
 import { type ChangedFile, isRangeInDiff, parseRightRanges } from "../../lib/pr/diff";
 import {
   clearAcceptedDecisions,
@@ -272,21 +266,6 @@ function AppBody() {
 
   const repositoryAppState = useAppStateFromRepository(prRepository);
   const pullRequest = repositoryAppState?.pullRequest ?? null;
-  // Legacy PullInfo shape for Topbar & friends (author flattened to login).
-  const pull = useMemo<PullInfo | null>(
-    () =>
-      pullRequest && {
-        headSha: pullRequest.headSha,
-        headRef: pullRequest.headRef,
-        title: pullRequest.title,
-        body: pullRequest.body,
-        author: pullRequest.author.login,
-        state: pullRequest.state,
-        draft: pullRequest.draft,
-        merged: pullRequest.merged,
-      },
-    [pullRequest],
-  );
   const files = repositoryAppState?.changedMarkdownFiles ?? NO_FILES;
   // headSha advances automatically when a commit lands: the Executor's
   // apply step writes the new head into RemoteState.pullRequest and the
@@ -587,7 +566,7 @@ function AppBody() {
     [threads, pendingSuggestions, curPath],
   );
   const counts = reviewEntryCounts(entries);
-  const prStatus = pull ? pullStatus(pull) : null;
+  const prStatus = pullRequest ? pullStatus(pullRequest) : null;
   const pendingItems = buildPendingItems(drafts, allPendingSuggestions);
   // Author-side pending list: the accepted-suggestion infos are derived from
   // submitted suggestion comments × the author's `dismissed` map. They drive
@@ -1767,7 +1746,7 @@ function AppBody() {
         owner={owner}
         repo={repo}
         prNum={prNum}
-        pull={pull}
+        pull={pullRequest}
         prStatus={prStatus}
         headSha={headSha}
         files={files}
