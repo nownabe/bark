@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ReconcileOperation } from "../../lib/pr/operations";
 import { planExecution, type PlannerContext } from "../../lib/pr/planner";
-import type { Comment, FileEdit } from "../../lib/pr/types";
+import type { Comment, FileEdit, PullRequest } from "../../lib/pr/types";
 
 const author = { login: "alice" };
 // Anchored at the planner's head sha: comments at an older sha are
@@ -37,12 +37,31 @@ function fileEdit(overrides: Partial<FileEdit> = {}): FileEdit {
   };
 }
 
+function pullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
+  return {
+    owner: "o",
+    repo: "r",
+    number: 7,
+    title: "t",
+    body: "",
+    headSha: "current-head",
+    headRef: "topic",
+    baseRef: "main",
+    state: "open",
+    draft: false,
+    merged: false,
+    author,
+    ...overrides,
+  };
+}
+
 function context(overrides: Partial<PlannerContext> = {}): PlannerContext {
   return {
     isInDiff: () => true,
     headSha: "current-head",
     headRef: "topic",
     fileContents: [],
+    pullRequest: pullRequest(),
     ...overrides,
   };
 }
@@ -259,6 +278,34 @@ describe("planner — CommitFileEdit", () => {
       kind: "commit",
       fileEdits: [f1, f2, f3],
     });
+  });
+
+  test("a merged PR gets no CommitStep — the edits are refused instead (#288)", () => {
+    const fe = fileEdit();
+    const ops: ReconcileOperation[] = [{ kind: "commit-file-edit", fileEdit: fe }];
+    const steps = planExecution(ops, context({ pullRequest: pullRequest({ merged: true }) }));
+    expect(steps.some((s) => s.kind === "commit")).toBe(false);
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ kind: "reject-commit", fileEdits: [fe] });
+    expect((steps[0] as { error: { message: string } }).error.message).toContain("merged");
+  });
+
+  test("a closed PR gets no CommitStep — the edits are refused instead (#288)", () => {
+    const fe = fileEdit();
+    const ops: ReconcileOperation[] = [{ kind: "commit-file-edit", fileEdit: fe }];
+    const steps = planExecution(ops, context({ pullRequest: pullRequest({ state: "closed" }) }));
+    expect(steps[0]).toMatchObject({ kind: "reject-commit", fileEdits: [fe] });
+    expect((steps[0] as { error: { message: string } }).error.message).toContain("closed");
+  });
+
+  test("comments still go out on a merged PR — only the commit is refused (#288)", () => {
+    const c = comment({ id: "c-new" });
+    const ops: ReconcileOperation[] = [
+      { kind: "create-comment", comment: c },
+      { kind: "commit-file-edit", fileEdit: fileEdit() },
+    ];
+    const steps = planExecution(ops, context({ pullRequest: pullRequest({ merged: true }) }));
+    expect(steps[0]).toMatchObject({ kind: "post-review-batch", comments: [c] });
   });
 });
 

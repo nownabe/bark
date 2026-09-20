@@ -186,6 +186,7 @@ export class PullRequestRepository {
       headSha: pr.headSha,
       headRef: pr.headRef,
       fileContents: this.remoteState.fileContents,
+      pullRequest: pr,
     };
   }
 
