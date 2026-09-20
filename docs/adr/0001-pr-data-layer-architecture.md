@@ -53,6 +53,8 @@ PullRequestRepository
 
 - **`LocalState` and `RemoteState` have the same structure**, as plain objects, so a structural diff between them is the unit of work.
 - **`LocalState` is the only persisted state** (cached to `chrome.storage.local`). `RemoteState` is fetched fresh from GitHub each session; it is not cached.
+- **Retention.** The synced part of a persisted `LocalState` is a first-paint cache of GitHub, not user data. On every bootstrap the Repository layer removes the persisted state of every _other_ PR that holds no `draft`/`syncing` entity, and removes everything stored for the current PR once it is merged (nothing stored for a merged PR can still be submitted). Drafts, in-progress suggestion edits and pending accept decisions are never evicted while the PR is open or closed-but-reopenable. The extension does not request `unlimitedStorage`; steady-state storage is bounded by the PRs that still carry unsubmitted work.
+- **Persist failures.** A failed write to `chrome.storage.local` (quota, transient error) never fails the mutation: the in-memory `LocalState` stays authoritative, the failure is surfaced through the global Snackbar (ADR 0005 §4), and the next mutation's whole-state write retries it.
 - **`PullRequestReconciler`** computes the `ReconcileOperation`s needed to bring `RemoteState` into agreement with `LocalState`, given a diff. It knows about state but not about GitHub APIs.
 - **`PullRequestOperationExecutor`** consumes `ReconcileOperation`s and turns them into `ExecutionStep`s — the actual GitHub API call sequences — handling batching, ordering, atomicity, and hidden-metadata serialization. It knows about GitHub and the wire format but not about higher-level state semantics.
 
