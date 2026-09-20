@@ -54,13 +54,13 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
   for (const op of ops) {
     switch (op.kind) {
       case "create-comment": {
-        const comment = toHeadCoordinates(op.comment, ctx);
-        if (comment === null) {
-          rejects.push({ kind: "reject-comment", comment: op.comment, error: OUTDATED_ANCHOR });
-        } else if (isTooLarge(comment)) {
+        const rebased = toHeadCoordinates(op.comment, ctx);
+        if ("error" in rebased) {
+          rejects.push({ kind: "reject-comment", comment: op.comment, error: rebased.error });
+        } else if (isTooLarge(rebased.comment)) {
           rejects.push({ kind: "reject-comment", comment: op.comment, error: BODY_TOO_LARGE });
         } else {
-          (ctx.isInDiff(comment) ? inDiff : outOfDiff).push(comment);
+          (ctx.isInDiff(rebased.comment) ? inDiff : outOfDiff).push(rebased.comment);
         }
         break;
       }
@@ -198,12 +198,28 @@ const OUTDATED_ANCHOR: ErrorInfo = {
     "Could not map the commented lines to the current head commit. Refresh, or re-create the comment on the current text.",
 };
 
+const SHIFTED_ANCHOR: ErrorInfo = {
+  message:
+    "The text this comment was written on changed upstream (position shifted). Review the current text and re-create the comment.",
+};
+
 /** A review is posted against one `commit_id` (the current head), so a draft
  *  anchored at an older sha must be posted with its line numbers mapped into
  *  the head — otherwise it lands on the wrong lines or 422s (issue #265).
  *  `Comment.anchor` itself stays immutable (ADR 0002 §2); only the posted
- *  copy is rebased. Returns null when the anchor cannot be mapped. */
-function toHeadCoordinates(comment: Comment, ctx: PlannerContext): Comment | null {
+ *  copy is rebased.
+ *
+ *  Policy (ADR 0003 §5, issue #313): `mapped` — including a range recovered by
+ *  the region search — posts at the mapped range, its quote unchanged by
+ *  definition. `shifted` is refused: the line was located but the quoted text
+ *  changed upstream, so posting would attach the reviewer's words (and, for a
+ *  suggestion, an applicable replacement) to text they never saw, and the
+ *  posted `quote` would no longer be the text at its range (ADR 0002 §3). The
+ *  draft already carries the same `shifted` badge before Submit. */
+function toHeadCoordinates(
+  comment: Comment,
+  ctx: PlannerContext,
+): { comment: Comment } | { error: ErrorInfo } {
   const source = (sha: string) =>
     ctx.fileContents.find((f) => f.sha === sha && f.path === comment.path)?.source;
   const current = source(ctx.headSha) ?? "";
@@ -221,7 +237,10 @@ function toHeadCoordinates(comment: Comment, ctx: PlannerContext): Comment | nul
           current,
         ),
   );
-  if (position.status === "current") return comment;
-  if (position.status === "outdated") return null;
-  return { ...comment, anchor: { ...comment.anchor, sha: ctx.headSha, range: position.range } };
+  if (position.status === "current") return { comment };
+  if (position.status === "outdated") return { error: OUTDATED_ANCHOR };
+  if (position.status === "shifted") return { error: SHIFTED_ANCHOR };
+  return {
+    comment: { ...comment, anchor: { ...comment.anchor, sha: ctx.headSha, range: position.range } },
+  };
 }
