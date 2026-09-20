@@ -6,7 +6,7 @@ import { lineColToOffset } from "./anchor";
 import type { SuggestionEdit } from "./drafts";
 import type { CommentMetadata } from "./metadata";
 import { buildLineMap, lineDiff } from "./pr/linemap";
-import { type DisplayPosition, locateLine } from "./pr/reanchor";
+import { type DisplayPosition, locateSpan } from "./pr/reanchor";
 
 /** A ```suggestion block: group 1 is the opening fence, group 2 the replacement.
  *
@@ -50,11 +50,11 @@ export function extractSuggestionBlock(body: string): string | null {
  * the LCS line map before applying; an unmapped line (deleted or modified
  * locally) fails the fast path (issue #177).
  *
- * When the fast path fails, a single-line (in prose: whole-paragraph) target
- * gets a second chance (issue #269): the line is re-located directly in
- * `source` from the anchor-sha revision via the bounded region search, and the
- * suggestion is applied as a line-local three-way merge. Every patch hunk must
- * apply, and nothing outside that one line is ever touched.
+ * When the fast path fails, the target gets a second chance (issues #269,
+ * #311): its span — one line or several — is re-located directly in `source`
+ * from the anchor-sha revision via the bounded region search, per endpoint, and
+ * the suggestion is applied as a span-local three-way merge. Every patch hunk
+ * must apply, and nothing outside that span is ever touched.
  */
 export function applyAcceptedSuggestion(args: {
   source: string;
@@ -88,26 +88,18 @@ export function applyAcceptedSuggestion(args: {
   );
   if (exact !== null) return exact;
 
-  // simplify: Phase 1 of #269 merges single-line targets only. Multi-line
-  // anchors need the region search run per endpoint first (tracked as the
-  // issue's deferred list).
   const { sl, el } = meta.range;
-  if (anchorSource === null || sl !== el) return null;
+  if (anchorSource === null) return null;
   const oldLines = anchorSource.split("\n");
-  // Only a whole-line suggestion anchor can be merged line-locally; anything
+  // Only a whole-line suggestion anchor can be merged span-locally; anything
   // else means the caller handed us a revision the quote did not come from.
-  if (oldLines[sl - 1] !== quote) return null;
-  const located = locateLine(
-    oldLines,
-    source.split("\n"),
-    buildLineMap(anchorSource, source),
-    sl,
-    quote,
-  );
-  if (located === null) return null;
-  const merged = mergeLine(quote, replacement, located.text);
+  if (oldLines.slice(sl - 1, el).join("\n") !== quote) return null;
+  const lines = source.split("\n");
+  const span = locateSpan(oldLines, lines, buildLineMap(anchorSource, source), meta.range, quote);
+  if (span === null) return null;
+  const merged = mergeSpan(quote, replacement, lines.slice(span.sl - 1, span.el).join("\n"));
   if (merged === null) return null;
-  return replaceLine(source, located.line, merged, replacement === "");
+  return replaceLines(source, span.sl, span.el, merged, replacement === "");
 }
 
 /** The exact path: the target line's text must still be byte-identical to the
@@ -141,21 +133,27 @@ function applyExactQuote(
   return source.slice(0, from) + replacement + source.slice(to);
 }
 
-/** Apply the quote → replacement delta to a line that has drifted from the
+/** Apply the quote → replacement delta to a span that has drifted from the
  *  quote. Null when any hunk fails: a partially applied suggestion would stage
  *  text neither the reviewer nor the author wrote. */
-function mergeLine(quote: string, replacement: string, lineText: string): string | null {
-  if (lineText === quote) return replacement;
+function mergeSpan(quote: string, replacement: string, spanText: string): string | null {
+  if (spanText === quote) return replacement;
   const dmp = new diff_match_patch();
-  const [merged, results] = dmp.patch_apply(dmp.patch_make(quote, replacement), lineText);
+  const [merged, results] = dmp.patch_apply(dmp.patch_make(quote, replacement), spanText);
   return results.every(Boolean) ? merged : null;
 }
 
-function replaceLine(source: string, line: number, text: string, deleteLine: boolean): string {
+function replaceLines(
+  source: string,
+  sl: number,
+  el: number,
+  text: string,
+  deleteLines: boolean,
+): string {
   const lines = source.split("\n");
-  // Issue #191 parity: a deletion takes the line's newline with it.
-  if (deleteLine && text === "") lines.splice(line - 1, 1);
-  else lines[line - 1] = text;
+  // Issue #191 parity: a deletion takes the deleted lines' newlines with it.
+  if (deleteLines && text === "") lines.splice(sl - 1, el - sl + 1);
+  else lines.splice(sl - 1, el - sl + 1, text);
   return lines.join("\n");
 }
 
