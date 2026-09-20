@@ -90,12 +90,7 @@ import {
   type PendingDraft,
   type SuggestionDecision,
 } from "../../lib/drafts";
-import {
-  embedMetadata,
-  extractMetadata,
-  type AnchorRange,
-  type CommentMetadata,
-} from "../../lib/metadata";
+import type { AnchorRange, CommentMetadata } from "../../lib/metadata";
 import { BODY_LIMIT, envelopeOf, wireBodyLength } from "../../lib/pr/metadata";
 import { browser } from "wxt/browser";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
@@ -771,8 +766,7 @@ function AppBody() {
       r.from >= 0 && r.to <= docLen && r.from < r.to;
     // The document highlights track what the sidebar shows: only comments whose
     // thread is currently visible (per the filter) are highlighted, so resolved
-    // threads light up exactly when the Resolved facet is selected. Resolution-
-    // event markers carry the root's anchor but aren't real messages → excluded.
+    // threads light up exactly when the Resolved facet is selected.
     // L7e-1: each visible comment's editor position comes from the
     // CommentView's displayPosition (new layer's reanchor result).
     const existing = comments
@@ -781,7 +775,6 @@ function AppBody() {
           c.meta &&
           c.meta.path === curPath &&
           c.meta.kind !== "suggestion" &&
-          !c.meta.event &&
           visibleThreadIds.has(c.meta.thread),
       )
       .flatMap((c) => {
@@ -882,20 +875,6 @@ function AppBody() {
     const o = toEditedOffsets(dp.range);
     if (o) jumpToOffsets(o.from, o.to);
   };
-
-  const meta: CommentMetadata | null = anchor
-    ? {
-        cid: "preview",
-        path: selectedPath ?? "sample",
-        range: { sl: anchor.startLine, sc: anchor.startCol, el: anchor.endLine, ec: anchor.endCol },
-        quote: anchor.quotedText,
-        sha: headSha ?? "",
-        thread: "preview",
-        kind: "comment",
-      }
-    : null;
-  const previewBody = meta ? embedMetadata(commentBody || "(comment body)", meta) : "";
-  const restored = previewBody ? extractMetadata(previewBody) : null;
 
   // Collapse the editor selection (deselect) without removing the comment
   // highlight, which is driven separately by the draft ranges.
@@ -1872,8 +1851,6 @@ function AppBody() {
         edited={source !== baseSource}
         draftsCount={drafts.length}
         anchor={anchor}
-        previewBody={previewBody}
-        restored={restored}
       />
 
       {/* Development-only role switch (bottom-right); see BARK_DEV_ROLE_SWITCH. */}

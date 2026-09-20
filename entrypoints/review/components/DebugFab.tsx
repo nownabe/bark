@@ -1,10 +1,8 @@
 // Floating debug affordance (bottom-left). Always rendered; a click toggles
 // a popover with current internal state — role, view mode, head SHA, edit /
-// draft counts, and (when text is selected) the active anchor info and the
-// body that would be posted, including the live "round-trip" check.
+// draft counts, and (when text is selected) the active anchor info.
 
 import type { SourceAnchor } from "../../../lib/anchor";
-import type { CommentMetadata } from "../../../lib/metadata";
 import type { Role } from "../reviewItems";
 import type { ViewMode } from "../uiHelpers";
 
@@ -19,8 +17,6 @@ export type DebugFabProps = {
   edited: boolean;
   draftsCount: number;
   anchor: SourceAnchor | null;
-  previewBody: string;
-  restored: { meta: CommentMetadata | null } | null;
   /** Debug-only manual full refresh (ADR 0005 §5). Omitted while the
    *  bootstrap refresh function is not available; the button then hides. */
   onRefresh?: () => void;
@@ -36,8 +32,6 @@ export function DebugFab({
   edited,
   draftsCount,
   anchor,
-  previewBody,
-  restored,
   onRefresh,
 }: DebugFabProps) {
   return (
@@ -98,14 +92,6 @@ export function DebugFab({
               </dl>
               <div style={{ marginTop: 8 }}>quoted:</div>
               <pre>{anchor.quotedText}</pre>
-              <div style={{ marginTop: 8 }}>GitHub body to be posted:</div>
-              <pre>{previewBody}</pre>
-              {restored?.meta ? (
-                <p style={{ color: "var(--green)" }}>
-                  ✓ live round-trip OK: L{restored.meta.range.sl}:{restored.meta.range.sc}–L
-                  {restored.meta.range.el}:{restored.meta.range.ec}
-                </p>
-              ) : null}
             </>
           ) : (
             <p className="empty">Select text in the body to see anchor info.</p>

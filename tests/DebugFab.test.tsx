@@ -35,8 +35,6 @@ function makeProps(overrides: Partial<DebugFabProps> = {}): DebugFabProps {
     edited: false,
     draftsCount: 0,
     anchor: null,
-    previewBody: "",
-    restored: null,
     ...overrides,
   };
 }
@@ -116,7 +114,7 @@ describe("DebugFab — popover (visible)", () => {
     expect(container.querySelector(".debug-popover .empty")?.textContent).toContain("Select text");
   });
 
-  test("with an anchor, shows offset / range / quote / preview body", () => {
+  test("with an anchor, shows offset / range / quote", () => {
     const { container } = render(
       <DebugFab
         {...makeProps({
@@ -130,7 +128,6 @@ describe("DebugFab — popover (visible)", () => {
             endCol: 5,
             quotedText: "foo bar",
           }),
-          previewBody: "Looks good!",
         })}
       />,
     );
@@ -138,7 +135,5 @@ describe("DebugFab — popover (visible)", () => {
     expect(text).toContain("10–20");
     expect(text).toContain("L2:1–L2:5");
     expect(container.querySelector(".debug-popover pre")?.textContent).toBe("foo bar");
-    const pres = container.querySelectorAll(".debug-popover pre");
-    expect(pres[1]?.textContent).toBe("Looks good!");
   });
 });
