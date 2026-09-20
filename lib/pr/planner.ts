@@ -6,7 +6,7 @@
 // See docs/adr/0003-operations-and-execution.md §3.
 
 import { lineMapFor } from "./linemap";
-import { BODY_LIMIT, envelopeOf, wireBodyLength } from "./metadata";
+import { BODY_LIMIT, composeIssueCommentBody, envelopeOf, wireBodyLength } from "./metadata";
 import type { ReconcileOperation } from "./operations";
 import { reanchor } from "./reanchor";
 import type {
@@ -57,18 +57,17 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
         const rebased = toHeadCoordinates(op.comment, ctx);
         if ("error" in rebased) {
           rejects.push({ kind: "reject-comment", comment: op.comment, error: rebased.error });
-        } else if (isTooLarge(rebased.comment)) {
+          break;
+        }
+        const asIssue = !ctx.isInDiff(rebased.comment);
+        if (isTooLarge(rebased.comment, asIssue, ctx)) {
           rejects.push({ kind: "reject-comment", comment: op.comment, error: BODY_TOO_LARGE });
         } else {
-          (ctx.isInDiff(rebased.comment) ? inDiff : outOfDiff).push(rebased.comment);
+          (asIssue ? outOfDiff : inDiff).push(rebased.comment);
         }
         break;
       }
       case "create-reply": {
-        if (isTooLarge(op.comment)) {
-          rejects.push({ kind: "reject-comment", comment: op.comment, error: BODY_TOO_LARGE });
-          break;
-        }
         // Routed on the GitHub object the parent actually became: a review
         // comment nests via the review-reply endpoint, while issue comments
         // are flat — there is no reply endpoint for them — so a reply to an
@@ -79,7 +78,9 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
         // fallback only serves LocalState written before `remoteKind`
         // existed; the first refresh replaces those with the remote copy.
         const kind = op.parent.remoteKind ?? (ctx.isInDiff(op.parent) ? "review" : "issue");
-        if (kind === "review") {
+        if (isTooLarge(op.comment, kind === "issue", ctx)) {
+          rejects.push({ kind: "reject-comment", comment: op.comment, error: BODY_TOO_LARGE });
+        } else if (kind === "review") {
           replies.push({
             kind: "post-reply",
             comment: op.comment,
@@ -183,9 +184,12 @@ function commitRefusalReason(pr: PullRequest): string | null {
 }
 
 /** A review batch is atomic, so an oversized comment would take every other
- *  comment in the same submit down with it (issue #279). Reject it alone. */
-function isTooLarge(c: Comment): boolean {
-  return wireBodyLength(c.body, envelopeOf(c)) > BODY_LIMIT;
+ *  comment in the same submit down with it (issue #279). Reject it alone.
+ *  An out-of-diff post is measured with the quote and permalink the Transport
+ *  composes onto it, which is what GitHub's limit applies to (issue #282). */
+function isTooLarge(c: Comment, asIssue: boolean, ctx: PlannerContext): boolean {
+  const body = asIssue ? composeIssueCommentBody(c, ctx.pullRequest) : c.body;
+  return wireBodyLength(body, envelopeOf(c)) > BODY_LIMIT;
 }
 
 const BODY_TOO_LARGE: ErrorInfo = {

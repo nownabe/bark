@@ -1,4 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import {
+  BODY_LIMIT,
+  composeIssueCommentBody,
+  envelopeOf,
+  wireBodyLength,
+} from "../../lib/pr/metadata";
 import type { ReconcileOperation } from "../../lib/pr/operations";
 import { planExecution, type PlannerContext } from "../../lib/pr/planner";
 import type { Comment, FileEdit, PullRequest } from "../../lib/pr/types";
@@ -109,6 +115,38 @@ describe("planner — CreateComment routing", () => {
     });
     expect(steps[1]).toMatchObject({ kind: "reject-comment", comment: huge });
     expect((steps[1] as { error: { message: string } }).error.message).toContain("too large");
+  });
+
+  // Issue #282: the Transport composes the quoted excerpt and the permalink
+  // onto every out-of-diff post, so the size check has to measure that body.
+  describe("the size check measures the body the Transport will send", () => {
+    const quote = Array.from({ length: 12 }, (_, i) => `quoted line ${i}`).join("\n");
+    const sized = (bodyLength: number) =>
+      comment({ anchor: { ...anchor, quote }, body: "x".repeat(bodyLength) });
+    /** Longest raw body that still fits GitHub's limit once the fence is on. */
+    const maxRawBody = BODY_LIMIT - wireBodyLength("", envelopeOf(sized(0))) - "\n\n".length;
+    const composedOverhead =
+      composeIssueCommentBody(sized(1), pullRequest()).length - sized(1).body.length;
+    const planOne = (c: Comment, inDiff: boolean) =>
+      planExecution([{ kind: "create-comment", comment: c }], context({ isInDiff: () => inDiff }));
+
+    test("an out-of-diff comment is rejected once the composed body goes over", () => {
+      const c = sized(maxRawBody);
+      expect(wireBodyLength(c.body, envelopeOf(c))).toBe(BODY_LIMIT);
+      expect(planOne(c, false)).toEqual([
+        { kind: "reject-comment", comment: c, error: expect.objectContaining({}) },
+      ]);
+      // The same comment in the diff posts as-is: only the composition went over.
+      expect(planOne(c, true)[0]).toMatchObject({ kind: "post-review-batch" });
+    });
+
+    test("an out-of-diff comment whose composed body just fits is posted", () => {
+      const c = sized(maxRawBody - composedOverhead);
+      expect(wireBodyLength(composeIssueCommentBody(c, pullRequest()), envelopeOf(c))).toBe(
+        BODY_LIMIT,
+      );
+      expect(planOne(c, false)).toEqual([{ kind: "post-issue-comment", comment: c }]);
+    });
   });
 
   test("multiple in-diff CreateComments bundle into one PostReviewBatch", () => {

@@ -1,15 +1,62 @@
 import { describe, expect, test } from "bun:test";
 import {
   BODY_LIMIT,
+  composeIssueCommentBody,
   contentDigest,
   embedMetadata,
   envelopeOf,
   extractMetadata,
   QUOTE_EXCERPT_CHARS,
+  quoteBlock,
   type WireMetadata,
   wireBodyLength,
 } from "../../lib/pr/metadata";
 import type { Comment } from "../../lib/pr/types";
+
+describe("quoteBlock (issue #279)", () => {
+  test("a short quote becomes one blockquote line per source line, with no trailer", () => {
+    expect(quoteBlock("a\nb\nc")).toBe("> a\n> b\n> c");
+  });
+
+  test("a long quote is cut to 12 lines and marked as an excerpt", () => {
+    const lines = quoteBlock(
+      Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n"),
+    ).split("\n");
+    expect(lines).toHaveLength(13);
+    expect(lines[11]).toBe("> line 12");
+    expect(lines[12]).toBe("> …");
+  });
+
+  test("a single line over the character cap is cut too", () => {
+    const out = quoteBlock("z".repeat(5000));
+    expect(out.length).toBeLessThan(1100);
+    expect(out.endsWith("\n> …")).toBe(true);
+  });
+});
+
+describe("composeIssueCommentBody (issue #282)", () => {
+  const ref = { owner: "o", repo: "r", number: 7 };
+  const base: Comment = {
+    id: "c1",
+    state: "draft",
+    threadId: "t1",
+    body: "typo here",
+    author: { login: "alice" },
+    path: "docs/a b.md",
+    anchor: { sha: "h0", range: { sl: 3, sc: 1, el: 3, ec: 5 }, quote: "abcd" },
+  };
+
+  test("appends the quoted excerpt and a permalink to the raw text", () => {
+    expect(composeIssueCommentBody(base, ref)).toBe(
+      "typo here\n\n> abcd\nhttps://github.com/o/r/blob/h0/docs/a%20b.md#L3",
+    );
+  });
+
+  test("an anchor with nothing to quote or link leaves the text alone", () => {
+    const bare = { ...base, anchor: { sha: "", range: base.anchor.range, quote: "" } };
+    expect(composeIssueCommentBody(bare, ref)).toBe("typo here");
+  });
+});
 
 function meta(overrides: Partial<WireMetadata> = {}): WireMetadata {
   return {
