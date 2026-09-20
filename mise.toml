@@ -1,5 +1,5 @@
 [tools]
-"aqua:nodejs/node" = "24.19.0"
+"aqua:nodejs/node" = "26.9.0"
 "aqua:oven-sh/bun" = "1.3.14"
 "aqua:rhysd/actionlint" = "1.7.12"
 "aqua:suzuki-shunsuke/ghalint" = "1.5.6"
