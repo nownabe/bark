@@ -98,6 +98,7 @@ type FileEdit = {
   path: string;
   baseSha: string;
   editedSource: string;
+  resolveOnCommit?: LocalId[]; // Threads to resolve once this edit is committed (accepted suggestions)
 };
 
 type PullRequest = {

@@ -72,7 +72,7 @@ Every PR-scoped entity carries a state. The diagram is in the [Data flow](#entit
 Two paths into `syncing`:
 
 - **`draft → syncing`** — the normal path for newly-created entities (Comment, FileEdit) that the user composes and then submits.
-- **`synced → syncing`** — a mutable field on an already-synced entity changes. In practice the only such case is **`Thread.resolved` toggling** (resolve / unresolve), which is an immediate action with no separate compose step. Comments are immutable post-sync, and `FileEdit` has no synced state, so no other entity reaches this transition.
+- **`synced → syncing`** — a mutable field on an already-synced entity changes. In practice the only such case is **`Thread.resolved` toggling** (resolve / unresolve), which is an immediate action with no separate compose step. Comments are immutable post-sync, and `FileEdit` has no synced state, so no other entity reaches this transition. A successful `Commit` also drives this edge for the Threads listed in the committed `FileEdit.resolveOnCommit` (accepted suggestions, [ADR 0003 §3](0003-operations-and-execution.md)).
 
 On failure, a newly-created entity (the `draft → syncing` path) returns to `draft` with `lastError` set. An entity that was already synced (the `synced → syncing` path) returns to `synced` with `lastError` set and its mutable field reverted to the last-known remote value — a `draft` never carries a remote identifier ([ADR 0002 §2](0002-data-model.md)). There is no automatic retry; the user re-triggers the action explicitly. This keeps the Reconciler stateless about retry policy.
 

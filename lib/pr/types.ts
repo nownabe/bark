@@ -102,6 +102,10 @@ export type FileEdit = {
   path: string;
   baseSha: string;
   editedSource: string;
+  /** Threads to resolve once this edit is committed (accepted suggestions).
+   *  A failed commit leaves them alone — nothing on GitHub claims the change
+   *  landed, so no compensating unresolve is needed (issue #278). */
+  resolveOnCommit?: LocalId[];
 };
 
 /** Pull request metadata mirrored from GitHub. */

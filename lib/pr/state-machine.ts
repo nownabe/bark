@@ -205,8 +205,14 @@ function applyStepResult(local: LocalState, result: StepResult): LocalState {
     }
     case "commit": {
       const o = result.outcome as CommitOutcome;
-      const ids = result.step.fileEdits.map((f) => f.id);
-      return o.ok ? applyCommitSuccess(local, ids) : applyCommitFailure(local, ids, o.error);
+      const edits = result.step.fileEdits;
+      return o.ok
+        ? applyCommitSuccess(local, edits)
+        : applyCommitFailure(
+            local,
+            edits.map((f) => f.id),
+            o.error,
+          );
     }
     case "reject-commit":
       return applyCommitFailure(
@@ -362,11 +368,22 @@ function applyThreadSyncFailure(
   };
 }
 
-function applyCommitSuccess(local: LocalState, fileEditIds: LocalId[]): LocalState {
-  const ids = new Set(fileEditIds);
+/** A committed edit removes its FileEdit and drives the `synced → syncing`
+ *  edge for the Threads whose suggestions it applied: the next reconcile
+ *  cycle emits their UpdateThreadResolved. Expressing the dependency as a
+ *  transition rather than step ordering means a failed commit needs no
+ *  compensation — the resolve simply never happens (issue #278). */
+function applyCommitSuccess(local: LocalState, fileEdits: FileEdit[]): LocalState {
+  const ids = new Set(fileEdits.map((f) => f.id));
+  const toResolve = new Set(fileEdits.flatMap((f) => f.resolveOnCommit ?? []));
   return {
     ...local,
     fileEdits: local.fileEdits.filter((f) => !ids.has(f.id)),
+    threads: local.threads.map((t) =>
+      t.state === "synced" && toResolve.has(t.id)
+        ? { ...t, state: "syncing" as const, resolved: true, lastError: undefined }
+        : t,
+    ),
   };
 }
 
