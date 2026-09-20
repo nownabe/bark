@@ -75,6 +75,8 @@ export type Thread = {
    *  metadata carries the thread's resolved state (issue #270). */
   remoteIssueCommentId?: number;
   resolved: boolean;
+  /** Remote-derived: the viewer may toggle `resolved`; undefined while draft. */
+  viewerCanResolve?: boolean;
 };
 
 /** Whether the Thread exists on GitHub — as a review thread or as an
@@ -83,6 +85,12 @@ export function hasRemoteIdentity(
   t: Pick<Thread, "remoteThreadId" | "remoteIssueCommentId">,
 ): boolean {
   return t.remoteThreadId !== undefined || t.remoteIssueCommentId !== undefined;
+}
+
+/** Whether to offer Resolve/Reopen: the Thread is on GitHub and GitHub would
+ *  accept the toggle from this viewer (issue #274). */
+export function canResolveThread(t: Thread): boolean {
+  return hasRemoteIdentity(t) && t.viewerCanResolve === true;
 }
 
 /** The remote mirror of a local Thread. Review threads join on the GraphQL

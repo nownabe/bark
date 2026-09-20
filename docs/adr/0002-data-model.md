@@ -88,6 +88,7 @@ type Thread = {
   remoteThreadId?: string; // GraphQL node id (review threads); needed for resolveReviewThread
   remoteIssueCommentId?: number; // REST id of the root issue comment (out-of-diff threads)
   resolved: boolean;
+  viewerCanResolve?: boolean; // remote-derived: the viewer may toggle `resolved`; undefined while draft
 };
 
 type FileEdit = {
@@ -157,6 +158,8 @@ Field-by-field, which side conventionally populates each:
 A `Thread` has exactly one remote identity: `remoteThreadId` for a GitHub review thread, or `remoteIssueCommentId` for an out-of-diff thread whose comments are issue comments (which have no GraphQL thread). Both are absent while the thread is a local draft.
 
 A `Thread` is created together with its root `Comment`: upserting a top-level draft Comment inserts a `draft` Thread with the same id (`Comment.threadId`), which then follows the Comment's transitions. Replies never create Threads. A Thread with no remaining Comments and no remote identity is removed with its last Comment.
+
+`viewerCanResolve` is a mirrored fact like `resolved`: the fetcher derives it from the viewer's repository permission (`permissions.push` on `GET /repos/{o}/{r}`) plus GitHub's ownership rule — the PR author may resolve review threads; the root comment's author may rewrite an out-of-diff root; write access covers both. The Reconciler ignores it; the UI hides Resolve/Reopen when it is not `true`.
 
 A synced `Comment` records `remoteKind`, the endpoint its `remoteId` belongs to (a pull-request review comment or a flat issue comment). It is set when the comment is fetched or when its post succeeds, and it is what routes replies ([ADR 0003 §3](0003-operations-and-execution.md)): GitHub issue comments have no reply endpoint, and the two REST ids are indistinguishable integers.
 

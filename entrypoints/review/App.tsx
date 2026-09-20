@@ -78,7 +78,7 @@ import {
 } from "../../lib/github";
 import { GitHubApiError } from "../../lib/pr/github-api";
 import { fetchFileContent } from "../../lib/pr/remote-fetcher";
-import { type FileEdit, hasRemoteIdentity } from "../../lib/pr/types";
+import { canResolveThread, type FileEdit } from "../../lib/pr/types";
 import { type ChangedFile, isRangeInDiff, parseRightRanges } from "../../lib/pr/diff";
 import {
   clearAcceptedDecisions,
@@ -443,17 +443,18 @@ function AppBody() {
         .map((t) => t.id),
     );
   }, [prRepository, repositoryAppState]);
-  // Threads that can actually be resolved/reopened: they exist on GitHub
-  // with a remote identity — a review thread (GraphQL) or an out-of-diff
-  // thread whose root issue comment carries Bark metadata (issue #270). A
-  // thread created in this session gets its identity from the step result
-  // that posted it (issue #272); a foreign issue comment never gets one.
+  // Threads that can actually be resolved/reopened: they exist on GitHub —
+  // a review thread (GraphQL) or an out-of-diff thread whose root issue
+  // comment carries Bark metadata (issue #270) — AND GitHub would accept the
+  // toggle from this viewer (issue #274). A thread created in this session
+  // gets its identity from the step result that posted it (issue #272); a
+  // foreign issue comment never gets one.
   const resolvableThreadKeys = useMemo(() => {
     if (!prRepository || !repositoryAppState) return new Set<string>();
     return new Set(
       prRepository
         .getLocalState()
-        .threads.filter(hasRemoteIdentity)
+        .threads.filter(canResolveThread)
         .map((t) => t.id),
     );
   }, [prRepository, repositoryAppState]);

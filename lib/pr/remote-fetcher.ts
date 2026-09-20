@@ -50,6 +50,18 @@ export async function fetchPullRequest(client: GitHubClient, ref: PrRef): Promis
   };
 }
 
+/** Whether the viewer has write access to the repository — GitHub's own
+ *  precondition for resolving a review thread or editing someone else's
+ *  comment (issue #274). One ETag-cached GET; a 304 costs no rate limit. */
+export async function fetchRepoPushPermission(client: GitHubClient, ref: PrRef): Promise<boolean> {
+  const raw = await ghRequest<{ permissions?: { push?: boolean } }>(
+    client,
+    "GET",
+    `/repos/${ref.owner}/${ref.repo}`,
+  );
+  return raw.permissions?.push === true;
+}
+
 // ---- Viewer ------------------------------------------------------------
 
 type RawUser = { login: string; avatar_url: string };
@@ -352,6 +364,7 @@ function issueThreadsFromRaw(
   issueRaw: RawIssueComment[],
   owners: FenceOwners,
   taken: ReadonlySet<string>,
+  viewerCanResolve?: (root: RawIssueComment) => boolean,
 ): Thread[] {
   const out: Thread[] = [];
   for (const ic of issueRaw) {
@@ -364,20 +377,29 @@ function issueThreadsFromRaw(
       state: "synced",
       remoteIssueCommentId: ic.id,
       resolved: meta.resolved === true,
+      ...(viewerCanResolve ? { viewerCanResolve: viewerCanResolve(ic) } : {}),
     });
   }
   return out;
 }
 
-function threadsFromRaw(raw: RawReviewThread[], owners?: FenceOwners): Thread[] {
+function threadsFromRaw(
+  raw: RawReviewThread[],
+  owners?: FenceOwners,
+  viewerCanResolve?: boolean,
+): Thread[] {
   const localIds = threadLocalIds(raw, owners);
   return raw.map((t) => ({
     id: localIds.get(t.id) ?? `foreign-thread-${t.id}`,
     state: "synced",
     remoteThreadId: t.id,
     resolved: t.isResolved,
+    ...(viewerCanResolve === undefined ? {} : { viewerCanResolve }),
   }));
 }
+
+/** GitHub logins are case-insensitive. */
+const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /** Local id per thread node id, deduplicated: the first thread claiming a
  *  local id keeps it; a later claimant (a forged fence duplicating another
@@ -528,12 +550,15 @@ export async function fetchRemoteState(
   // data is needed both to build Thread entities and to key foreign
   // comments' threadId off their GraphQL thread node id, so comment
   // normalisation waits on the raw fetch (not on a second round trip).
-  const [pullRequest, viewer, reviewRaw, issueRaw, rawThreads] = await Promise.all([
+  const [pullRequest, viewer, reviewRaw, issueRaw, rawThreads, canWrite] = await Promise.all([
     fetchPullRequest(client, ref),
     opts.viewer ? Promise.resolve(opts.viewer) : fetchViewer(client),
     fetchReviewCommentsRaw(client, ref),
     fetchIssueCommentsRaw(client, ref),
     listReviewThreads(client, ref),
+    // A refresh must never fail because of the permission probe; without the
+    // signal we withhold the Resolve affordance rather than offer a dead end.
+    fetchRepoPushPermission(client, ref).catch(() => false),
   ]);
   const owners = buildFenceOwners(reviewRaw, issueRaw);
   const comments = normalizeComments(
@@ -541,9 +566,23 @@ export async function fetchRemoteState(
     issueRaw,
     buildCommentThreadMap(rawThreads, owners),
   );
-  const threads = threadsFromRaw(rawThreads, owners);
+  // GitHub accepts `resolveReviewThread` from the PR author or anyone with
+  // write access, and a rewrite of an out-of-diff root (the #310 transport)
+  // from that comment's author or anyone with write access (issue #274).
+  const threads = threadsFromRaw(
+    rawThreads,
+    owners,
+    canWrite || sameLogin(viewer.login, pullRequest.author.login),
+  );
   const taken = new Set(threads.map((t) => t.id));
-  threads.push(...issueThreadsFromRaw(issueRaw, owners, taken));
+  threads.push(
+    ...issueThreadsFromRaw(
+      issueRaw,
+      owners,
+      taken,
+      (root) => canWrite || sameLogin(viewer.login, root.user.login),
+    ),
+  );
 
   // Union of:
   //   - every fetched comment's anchor (foreign comments with anchor.sha
