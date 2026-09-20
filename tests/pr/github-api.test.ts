@@ -223,6 +223,22 @@ describe("github-api — ETag caching", () => {
     expect(second).toEqual([{ id: 1 }]);
     expect(calls[1]?.headers["If-None-Match"]).toBe('"p1"');
   });
+
+  test("ghPaginate still follows to page 2 when the 304 carries no Link header", async () => {
+    const { fetch, calls } = makeFetch([
+      jsonResponse([{ id: 1 }], 200, {
+        ETag: '"p1"',
+        Link: '<https://api.github.com/x?page=2>; rel="next"',
+      }),
+      jsonResponse([{ id: 2 }], 200, { ETag: '"p2"' }),
+      notModified(),
+      notModified(),
+    ]);
+    const client = { token: "t", fetch };
+    expect(await ghPaginate<{ id: number }>(client, "/x")).toEqual([{ id: 1 }, { id: 2 }]);
+    expect(await ghPaginate<{ id: number }>(client, "/x")).toEqual([{ id: 1 }, { id: 2 }]);
+    expect(calls[3]?.url).toBe("https://api.github.com/x?page=2");
+  });
 });
 
 // ---- Retry with backoff (issue #9b) ------------------------------------

@@ -41,10 +41,14 @@ export class GitHubApiError extends Error {
 
 // ---- ETag cache --------------------------------------------------------
 
-/** url -> { etag, body }. GET-only; a 304 replays `body` for free (no
+/** url -> { etag, body, next }. GET-only; a 304 replays `body` for free (no
  *  rate-limit cost). Module-level: shared across all clients for the
- *  page / service-worker lifetime; there is no persistence by design. */
-const etagCache = new Map<string, { etag: string; body: unknown }>();
+ *  page / service-worker lifetime; there is no persistence by design.
+ *
+ *  `next` is the paginated rel=next link; a 304 is not required to repeat the
+ *  `Link` header, so the cached value is what keeps the page walk going.
+ *  It is absent for entries written by non-paginated GETs. */
+const etagCache = new Map<string, { etag: string; body: unknown; next?: string | null }>();
 
 /** Test seam: drop cached ETags so cases don't leak into one another. */
 export function clearEtagCache(): void {
@@ -191,15 +195,19 @@ async function fetchPage<T>(
   const f = client.fetch ?? fetch;
   const resp = await f(url, { headers });
   if (resp.status === 304 && cached) {
-    return { items: cached.body as T[], next: parseNextLink(resp.headers.get("Link")) };
+    return {
+      items: cached.body as T[],
+      next: cached.next ?? parseNextLink(resp.headers.get("Link")),
+    };
   }
   if (!resp.ok) {
     throw new GitHubApiError(resp.status, await safeText(resp));
   }
   const items = (await resp.json()) as T[];
+  const next = parseNextLink(resp.headers.get("Link"));
   const etag = resp.headers.get("ETag");
-  if (etag) etagCache.set(url, { etag, body: items });
-  return { items, next: parseNextLink(resp.headers.get("Link")) };
+  if (etag) etagCache.set(url, { etag, body: items, next });
+  return { items, next };
 }
 
 function parseNextLink(linkHeader: string | null): string | null {
