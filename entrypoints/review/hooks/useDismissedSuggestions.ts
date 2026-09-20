@@ -1,11 +1,9 @@
-// Author's accept / reject decisions on submitted suggestions
-// (Pack B / R8c).
-//
-// Mirrors the useDrafts shape: a plain map + a restore effect + the
-// "set + persist" actions. The id → SuggestionDecision mapping is keyed
-// by the submitted comment's REST id (stringified) and is used by the
-// review list to hide accepted/rejected suggestions and by submit flows
-// to materialise accepted ones into actual commits.
+// Author's accept / reject decisions on submitted suggestions: a plain map
+// + a restore effect + the "set + persist" actions. The id →
+// SuggestionDecision mapping is keyed by the submitted comment's REST id
+// (stringified) and is used by the review list to hide accepted/rejected
+// suggestions and by submit flows to materialise accepted ones into actual
+// commits.
 
 import { useEffect, useState } from "react";
 import type { SuggestionDecision } from "../../../lib/drafts";

@@ -5,7 +5,7 @@
 // step results back to LocalState per the state machine.
 //
 // React subscribes via `subscribe(listener)` and reads via `getLocalState()`
-// / `getRemoteState()`. The AppState derivation layer (Phase 4) sits on top.
+// / `getRemoteState()`; `lib/pr/appstate.ts` derives the UI view on top.
 //
 // See docs/adr/0001-pr-data-layer-architecture.md §2.
 

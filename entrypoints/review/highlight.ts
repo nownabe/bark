@@ -1,4 +1,4 @@
-// Highlight the anchor ranges of existing comments over the CM document (§R6, Google Docs style).
+// Highlight the anchor ranges of existing comments over the CM document, Google Docs style.
 // A StateField + theme whose ranges are swapped via the setCommentHighlights effect.
 import { StateEffect, StateField } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";

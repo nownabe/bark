@@ -353,9 +353,6 @@ select.input:focus {
   border-color: var(--border);
   box-shadow: none;
 }
-.field--mono {
-  font-family: var(--font-mono);
-}
 
 /* ---- layout ---- */
 .layout {
@@ -626,25 +623,13 @@ select.input:focus {
   background: var(--bg-inset);
   color: var(--muted);
 }
-.badge--review {
-  background: var(--brand-tint);
-  color: var(--brand);
-}
 .badge--issue {
   background: var(--amber-tint);
   color: var(--amber);
 }
-.badge--suggestion {
-  background: var(--accent-tint);
-  color: var(--accent-strong);
-}
 .badge--pending {
   background: var(--amber-tint);
   color: var(--amber);
-}
-.badge--anchored {
-  background: var(--brand-tint);
-  color: var(--brand);
 }
 .badge--reanchored {
   background: var(--amber-tint);
@@ -782,10 +767,6 @@ select.input:focus {
 }
 
 /* ---- composer ---- */
-.composer__routing {
-  font-size: 12px;
-  margin: 0 0 8px;
-}
 .review-item--composer {
   border-color: var(--accent);
   box-shadow: var(--ring);
@@ -808,18 +789,6 @@ select.input:focus {
   gap: 8px;
   align-items: center;
   margin-top: 10px;
-}
-.radio-row {
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-  margin-bottom: 8px;
-}
-.radio-row label {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  cursor: pointer;
 }
 
 /* ---- debug ---- */

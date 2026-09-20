@@ -260,7 +260,9 @@ function base64Encode(s: string): string {
   return btoa(bin);
 }
 
-function base64Decode(s: string): string {
+/** Decode base64 to a UTF-8 string. Shared with the remote fetcher, which
+ *  decodes GitHub's file contents with it. */
+export function base64Decode(s: string): string {
   const bin = atob(s);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);

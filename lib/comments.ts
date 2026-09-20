@@ -1,9 +1,5 @@
-// Comment shape consumed by the legacy review UI. Sourced now from the new
-// data layer's commentViews via `entrypoints/review/adapters/
-// commentViewsToExisting.ts`; the original normaliser + read-after-write
-// poller were retired in L7c (Repository.submitDrafts updates LocalState
-// directly, so commentViews reflects just-submitted items without an extra
-// fetch).
+// Comment shape the review UI renders. Built from the data layer's
+// commentViews by `entrypoints/review/adapters/commentViewsToExisting.ts`.
 import type { CommentMetadata } from "./metadata";
 
 export interface ExistingComment {

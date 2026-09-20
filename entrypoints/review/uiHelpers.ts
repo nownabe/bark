@@ -62,7 +62,7 @@ export const DEV_ROLE_SWITCH = Boolean(import.meta.env.BARK_DEV_ROLE_SWITCH);
 /** Public slug of the Bark GitHub App, used to build the install URL so
  *  a 404 / 403 (likely "not installed on this repo") can offer a
  *  one-click install. */
-export const APP_SLUG = import.meta.env.BARK_GITHUB_APP_SLUG;
+const APP_SLUG = import.meta.env.BARK_GITHUB_APP_SLUG;
 
 /** GitHub App install URL, or null when no slug is configured. */
 export const installUrl: string | null = APP_SLUG

@@ -1,6 +1,6 @@
-// Local storage layer.
-//  - chrome.storage.local: token, settings, lightweight metadata
-//  - IndexedDB: per-PR pending comments/suggestions, snapshots (later slice)
+// chrome.storage.local: the auth token and the marker for how it was obtained,
+// plus the per-PR key prefix every other storage module builds on
+// (ADR 0001 §2 — there is no IndexedDB layer).
 import { browser } from "wxt/browser";
 
 const TOKEN_KEY = "github_token";

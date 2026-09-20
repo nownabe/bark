@@ -4,6 +4,7 @@
 // The class takes the storage API as a constructor argument so it stays
 // unit-testable (no `browser` global needed in tests).
 
+import { storageKeys } from "../storage";
 import type { StorageAdapter } from "./storage";
 import type { LocalState } from "./types";
 
@@ -32,7 +33,7 @@ export class BrowserStorageAdapter implements StorageAdapter {
 
 /** Conventional storage key for a PR's LocalState. */
 export function prStorageKey(owner: string, repo: string, number: number): string {
-  return `pr:${owner}/${repo}#${number}:state`;
+  return `${storageKeys.pr(owner, repo, number)}:state`;
 }
 
 const PR_KEY_SUFFIXES = [":state", ":suggestion-edits", ":dismissed-suggestions"] as const;
@@ -40,7 +41,7 @@ const PR_KEY_SUFFIXES = [":state", ":suggestion-edits", ":dismissed-suggestions"
 /** Every key one PR occupies, built on the same prefix as `prStorageKey` so
  *  eviction and `lib/drafts.ts` cannot drift apart. */
 export function prStorageKeys(owner: string, repo: string, number: number): string[] {
-  const prefix = prStorageKey(owner, repo, number).replace(/:state$/, "");
+  const prefix = storageKeys.pr(owner, repo, number);
   return PR_KEY_SUFFIXES.map((suffix) => `${prefix}${suffix}`);
 }
 

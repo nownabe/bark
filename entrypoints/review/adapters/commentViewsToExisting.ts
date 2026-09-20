@@ -1,18 +1,16 @@
-// Bridge from the new data layer's CommentView to the legacy review UI's
-// ExistingComment shape (Pack B/L2 prep — invoked from App.tsx so the
-// existing render / re-anchoring pipeline can consume comments sourced
-// from the Repository's AppState).
+// Bridge from the data layer's CommentView to the review UI's
+// ExistingComment shape, so the render / re-anchoring pipeline consumes
+// comments sourced from the Repository's AppState.
 //
-// One-way only. The new layer is the source of truth going forward; the
-// legacy UI just reads through this adapter until each rendering slice
-// is rewritten to consume CommentView directly.
+// One-way only: the data layer is the source of truth, and nothing written
+// here flows back into it.
 
 import type { CommentView } from "../../../lib/pr/appstate";
 import type { ExistingComment } from "../../../lib/comments";
 import type { CommentMetadata } from "../../../lib/metadata";
 
 /** Convert an iterable of CommentView (the values of `AppState.commentViews`)
- *  to the legacy `ExistingComment[]` shape.
+ *  to the `ExistingComment[]` shape.
  *
  *  - Only synced comments with a known remoteId are included; drafts and
  *    syncing items belong to the pending list, not the submitted list.
@@ -20,7 +18,7 @@ import type { CommentMetadata } from "../../../lib/metadata";
  *    Comment's anchor + threadId + parsed body kind.
  *  - Foreign comments (from `foreign-review-*` / `foreign-issue-*` ids)
  *    surface with `meta=null` and degrade to GitHub-native path/line
- *    (review comments only), matching the legacy normaliser. */
+ *    (review comments only). */
 export function commentViewsToExisting(views: Iterable<CommentView>): ExistingComment[] {
   const out: ExistingComment[] = [];
   for (const view of views) {
@@ -63,8 +61,8 @@ function toExistingComment(view: CommentView): ExistingComment | null {
     base.path = c.path;
     // ExistingComment.line carries the GitHub-native end line (right side).
     // remote-fetcher encodes "no line known" (the comment is outdated /
-    // sits outside the diff) as range.el === 0; mirror the legacy
-    // normaliser's `c.line ?? undefined` by leaving `line` undefined.
+    // sits outside the diff) as range.el === 0; leave `line` undefined
+    // rather than forwarding a 0 the UI would read as a real line.
     if (c.anchor.range.el > 0) base.line = c.anchor.range.el;
   }
   return base;

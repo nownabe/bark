@@ -1,15 +1,15 @@
 // RemoteFetcher — assembles a RemoteState from GitHub.
 //
 // Each entry point (fetchPullRequest, fetchViewer, fetchComments,
-// fetchThreads, fetchFileContent) is exposed individually so callers
-// can refetch a subset on demand. `fetchRemoteState` is the orchestrator
-// that the Repository calls on bootstrap / refresh.
+// fetchFileContent) is exposed individually so callers can refetch a subset
+// on demand. `fetchRemoteState` is the orchestrator that the Repository
+// calls on bootstrap / refresh.
 //
 // See docs/adr/0005-refresh-policy.md §2 for what a full refresh covers.
 
 import type { ChangedFile } from "./diff";
 import { type GitHubClient, ghPaginate, ghRequest } from "./github-api";
-import { contentDigest, extractMetadata } from "./metadata";
+import { base64Decode, contentDigest, extractMetadata } from "./metadata";
 import { extractTextAtRange } from "./reanchor";
 import { listReviewThreads, type RawReviewThread } from "./review-threads";
 import type { Comment, FileContent, PrRef, PullRequest, RemoteState, Thread, User } from "./types";
@@ -170,7 +170,7 @@ function fetchIssueCommentsRaw(client: GitHubClient, ref: PrRef): Promise<RawIss
 
 /** Normalise raw review + issue comments to the unified `Comment` shape.
  *  `threadLocalIdByCommentId` maps a review comment's REST id to the LOCAL
- *  id of the review thread it belongs to — the same id `fetchThreads` gives
+ *  id of the review thread it belongs to — the same id `threadsFromRaw` gives
  *  the Thread entity (a contained Bark comment's metadata threadId, else the
  *  synthesised `foreign-thread-<nodeId>`). Foreign comments adopt it as
  *  their `threadId`, so every review comment satisfies
@@ -258,7 +258,7 @@ function toCommentFromReview(
   // comments only) or render it elsewhere.
   const headLine = rc.line ?? 0;
   // Adopt the thread's local id (via the map) so the comment matches the
-  // Thread entity from fetchThreads — for a mixed thread that's the Bark
+  // Thread entity from threadsFromRaw — for a mixed thread that's the Bark
   // metadata threadId, for an all-foreign one the synthesised
   // foreign-thread-<nodeId>. Fall back to the comment's own id only when
   // the thread data is unavailable.
@@ -341,18 +341,6 @@ function toCommentFromIssue(ic: RawIssueComment, owners: FenceOwners): Comment |
 
 // ---- Threads -----------------------------------------------------------
 
-/** Fetch review threads (all pages — see lib/pr/review-threads). For each
- *  GraphQL thread, find a constituent comment carrying hidden metadata and
- *  use its `threadId` as the local Thread.id; otherwise synthesise one
- *  keyed off `remoteThreadId`.
- *
- *  Review threads only: out-of-diff (issue-comment) threads have no GraphQL
- *  thread and are synthesised by `fetchRemoteState`, which has the REST
- *  issue-comment data this entry point does not fetch. */
-export async function fetchThreads(client: GitHubClient, ref: PrRef): Promise<Thread[]> {
-  return threadsFromRaw(await listReviewThreads(client, ref));
-}
-
 /** Thread entities for out-of-diff conversations: an issue comment that is
  *  the earliest bearer of its `threadId` is that thread's root, and its
  *  hidden `resolved` flag is the thread's resolved state (issue #270). A
@@ -384,7 +372,13 @@ function issueThreadsFromRaw(
   return out;
 }
 
-function threadsFromRaw(
+/** Thread entities for the GraphQL review threads: each one takes the
+ *  `threadId` of a constituent comment's hidden metadata as its local id, or
+ *  a synthesised id keyed off `remoteThreadId` when no comment carries one.
+ *
+ *  Review threads only: out-of-diff (issue-comment) threads have no GraphQL
+ *  thread and come from `issueThreadsFromRaw`. */
+export function threadsFromRaw(
   raw: RawReviewThread[],
   owners?: FenceOwners,
   viewerCanResolve?: boolean,
@@ -438,9 +432,8 @@ function buildCommentThreadMap(raw: RawReviewThread[], owners?: FenceOwners): Ma
 /** With `owners` (the fetchRemoteState path), a fence names its thread only
  *  when the naming comment is the earliest bearer of that threadId — a
  *  forged fence cannot name someone else's thread, including an out-of-diff
- *  (issue-comment) thread's id (issue #190). Without owners (standalone
- *  fetchThreads, no REST comment data) the fence is trusted as before and
- *  only the `threadLocalIds` dedup applies. */
+ *  (issue-comment) thread's id (issue #190). Without owners (no REST comment
+ *  data) the fence is trusted and only the `threadLocalIds` dedup applies. */
 function findThreadLocalId(thread: RawReviewThread, owners?: FenceOwners): string {
   for (const c of thread.comments) {
     const { meta } = extractMetadata(c.body);
@@ -503,17 +496,9 @@ export async function fetchFileContent(
   return {
     sha,
     path,
-    source: decodeBase64Utf8(raw.content),
+    // GitHub wraps the base64 at 60 chars; atob rejects the line breaks.
+    source: base64Decode(raw.content.replace(/\s+/g, "")),
   };
-}
-
-function decodeBase64Utf8(b64: string): string {
-  // GitHub returns base64 with line breaks every 60 chars.
-  const cleaned = b64.replace(/\s+/g, "");
-  const bin = atob(cleaned);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
 }
 
 // ---- Orchestrator ------------------------------------------------------

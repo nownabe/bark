@@ -8,6 +8,7 @@ import {
 } from "../../lib/pr/chrome-storage";
 import type { LocalState } from "../../lib/pr/types";
 import { emptyState } from "../../lib/pr/types";
+import { storageKeys } from "../../lib/storage";
 
 /** In-memory fake of the chrome.storage.local subset we use. */
 function fakeBrowserStorage(): BrowserStorageAPI {
@@ -78,6 +79,10 @@ describe("chrome-storage — prStorageKey", () => {
   test("keys for different PRs differ", () => {
     expect(prStorageKey("a", "b", 1)).not.toBe(prStorageKey("a", "b", 2));
     expect(prStorageKey("a", "b", 1)).not.toBe(prStorageKey("a", "c", 1));
+  });
+
+  test("shares its prefix with the keys lib/drafts.ts builds", () => {
+    expect(prStorageKey("acme", "site", 42)).toBe(`${storageKeys.pr("acme", "site", 42)}:state`);
   });
 
   test("prStorageKeys lists every key a PR occupies, on the same prefix", () => {

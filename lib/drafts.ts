@@ -1,8 +1,6 @@
-// Per-PR client state still owned by chrome.storage: the reviewer's
-// in-progress suggestion edits and the author's accept/reject decisions
-// on submitted suggestions. Pending comment drafts moved to Repository in
-// L7d-1; suggestion edits are scheduled to follow in L7d-2 and dismissed
-// in L7d-3.
+// Per-PR client state owned by chrome.storage: the reviewer's in-progress
+// suggestion edits and the author's accept/reject decisions on submitted
+// suggestions. Comment drafts are not here — the Repository owns those.
 import { browser } from "wxt/browser";
 import { storageKeys } from "./storage";
 import type { AnchorRange } from "./metadata";

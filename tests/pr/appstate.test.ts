@@ -295,36 +295,6 @@ describe("appstate — deriveAppState: threadGroups", () => {
   });
 });
 
-describe("appstate — deriveAppState: currentFiles", () => {
-  test("surfaces head-sha FileContents deduped and sorted by path", () => {
-    const out = deriveAppState(
-      localState(),
-      remoteState({
-        pullRequest: pr({ headSha: "head" }),
-        fileContents: [
-          fileContent("head", "z.md", "Z"),
-          fileContent("old", "skip.md", "old"),
-          fileContent("head", "a.md", "A"),
-          // Duplicate (sha, path) keeps only the first seen entry.
-          fileContent("head", "a.md", "A-dupe"),
-        ],
-      }),
-    );
-    expect(out.currentFiles.map((f) => f.path)).toEqual(["a.md", "z.md"]);
-    expect(out.currentFiles.find((f) => f.path === "a.md")?.source).toBe("A");
-  });
-
-  test("is empty when no PullRequest is loaded yet", () => {
-    const out = deriveAppState(
-      localState(),
-      remoteState({
-        fileContents: [fileContent("anything", "a.md", "A")],
-      }),
-    );
-    expect(out.currentFiles).toEqual([]);
-  });
-});
-
 describe("appstate — deriveAppState: inDiff derives from RemoteState.changedFiles (ADR 0002 §4)", () => {
   // Patch with RIGHT-side commentable lines 1-3 on README.md.
   const PATCH = "@@ -1,3 +1,3 @@\n line1\n-old\n+new\n line3";

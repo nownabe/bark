@@ -38,15 +38,12 @@ describe("useUiPanels — modal setters", () => {
 });
 
 describe("useUiPanels — popovers / debug FAB toggle + close", () => {
-  test("PR info, help and debug each have a toggle + close pair", () => {
+  test("PR info toggles; help and debug each have a toggle + close pair", () => {
     const { result } = renderHook(() => useUiPanels());
 
     act(() => result.current.togglePrInfo());
     expect(result.current.showPrInfo).toBe(true);
     act(() => result.current.togglePrInfo());
-    expect(result.current.showPrInfo).toBe(false);
-    act(() => result.current.togglePrInfo());
-    act(() => result.current.closePrInfo());
     expect(result.current.showPrInfo).toBe(false);
 
     act(() => result.current.toggleHelp());

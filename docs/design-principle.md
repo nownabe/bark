@@ -119,7 +119,7 @@ heavy drop shadows.
   raised active chip. Default active = accent (blue); `--dark` active = `--fg`
   (used for view mode). Distinct active colors keep different switches legible.
 - **Fields** (`.field`, `select.input`): hairline border, accent border + ring on
-  focus. `.field--mono` for code-ish input.
+  focus.
 - **Panels** (`.panel`, `.panel__title`, `.panel__head`): elevated card with an
   uppercase eyebrow title.
 - **Threads / comments** (`.thread`, `.thread--clickable`, `.thread--emphasized`,

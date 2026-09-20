@@ -1,7 +1,6 @@
 // Authentication flow (token + device-flow polling + PAT completion).
 //
-// The legacy App used to inline all of this; pulling it into a hook gives
-// us a single, testable surface for the lifecycle:
+// One surface for the whole lifecycle:
 //
 //   - tokenLoaded → initial read of the persisted token + method completed
 //   - deviceAuth  → an in-progress GitHub App "device flow" grant

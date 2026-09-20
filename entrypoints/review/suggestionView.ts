@@ -1,4 +1,4 @@
-// Display submitted Suggestions over the document in Google Docs style (R3 display side).
+// Display submitted Suggestions over the document in Google Docs style.
 // Suggestions are rendered char-level (like the reviewer's own pending edits): only
 // the characters that actually change are decorated — the removed run is struck
 // through inline in the document, and the inserted run is shown as a small inline

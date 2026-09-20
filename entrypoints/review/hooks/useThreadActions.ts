@@ -1,7 +1,5 @@
-// Per-thread interaction state (Pack C / R10).
-//
-// The legacy App tracked four pieces of state that all sit "between
-// the user and a thread row":
+// Per-thread interaction state — the pieces that sit "between the user and a
+// thread row":
 //   - replyTo / replyText : which thread's inline reply box is open
 //                            and what's typed in it
 //   - emphasizedThreadId   : which thread row (or live suggestion) is
@@ -9,11 +7,8 @@
 //   - resolvingId          : which thread has a resolve/reopen request
 //                            in flight (drives the inline button label)
 //
-// They are all UI-local and have no IO of their own; this hook
-// concentrates the named actions the parent kept inlining
-// (start a reply, cancel a reply, drop emphasis) so future surfaces
-// can call them by name. The actual GitHub API call for resolve /
-// reopen still lives in the parent because it depends on the
+// They are all UI-local and have no IO of their own. The actual GitHub API
+// call for resolve / reopen stays in the parent because it depends on the
 // `client` + the per-thread comments map.
 
 import { useState } from "react";
