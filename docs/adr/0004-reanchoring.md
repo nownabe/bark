@@ -27,13 +27,13 @@ type FileContent = {
 };
 ```
 
-with `(sha, path)` as identity. The current display source is `FileContent` at `(headSha, currentPath)`; older sha values exist to back re-anchoring.
+with `(sha, path)` as identity. Re-anchoring's current source is `FileContent` at `(headSha, comment.path)`, which the fetcher guarantees for every anchored path ([ADR 0005 §2](0005-refresh-policy.md)); older sha values are the other end of the line map. The editor's display source for the _viewed_ path is loaded by the UI layer through the same `fetchFileContent` (see ADR 0005 §2) and is not necessarily present in `RemoteState`.
 
 `FileContent` is read-only and immutable per identity. The Reconciler does not diff it; the Executor fetches it on demand. It lives only in `RemoteState` (in-memory, refetched each session) — there is no `LocalState` counterpart because there is no user intent and no commit content ever changes after creation.
 
 ### 2. Prefetch on session bootstrap
 
-After `LocalState` is hydrated and `RemoteState` is initialised, the Repository computes the set of unique `(anchor.sha, anchor.path)` pairs across all Comments. For any pair not yet in `RemoteState.FileContent`, the Executor fetches the file content from GitHub (`GET /repos/.../contents/{path}?ref={sha}`).
+After `LocalState` is hydrated and `RemoteState` is initialised, the Repository computes the set of unique `(anchor.sha, anchor.path)` pairs across all Comments, plus `(headSha, anchor.path)` for each distinct anchored path. For any pair not yet in `RemoteState.FileContent`, the Executor fetches the file content from GitHub (`GET /repos/.../contents/{path}?ref={sha}`).
 
 This bounds the bootstrap cost to `O(distinct anchor.sha × paths)` per session. A persistent `FileContent` cache layer (across sessions) is an optional future optimisation; for now `RemoteState` is in-memory only, consistent with [ADR 0001 §2](0001-pr-data-layer-architecture.md).
 
@@ -91,7 +91,7 @@ displayPositions(file) = memoize(
   compute: () => {
     for each comment, reanchor(
       comment.anchor,
-      source,                                        // = fileContents[(headSha, path)]
+      source,                                        // = fileContents[(headSha, comment.path)] — guaranteed by §2
       headSha,
       fileContents[(comment.anchor.sha, comment.anchor.path)],
     )
@@ -113,7 +113,7 @@ displayPositions(file) = memoize(
 ### Negative
 
 - **`outdated` comments are not pinned to a line in the editor.** They live in the sidebar with a deep link instead. This is a deliberate UX trade-off favouring correctness over completeness; legacy users may notice fewer comments inline.
-- **Every session refetches past-sha file contents.** A PR with N distinct anchor.shas across M paths costs N×M `GET contents` calls on each open. A persistent `FileContent` cache layer is an optional future optimisation.
+- **Every session refetches past-sha file contents.** A PR with N distinct anchor.shas across M paths costs up to (N+1)×M `GET contents` calls on each open (the +1 is the head-sha copy of each anchored path). A persistent `FileContent` cache layer is an optional future optimisation.
 
 ### Deferred
 

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { deriveAppState } from "../../lib/pr/appstate";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { BrowserStorageAPI } from "../../lib/pr/chrome-storage";
 import type { PrRef } from "../../lib/pr/github-transport";
@@ -266,5 +267,70 @@ describe("bootstrap — full happy path", () => {
     // §2: it changes only on re-auth) — but it stays populated.
     expect(secondPhaseCalls.some((c) => c.includes("/user"))).toBe(false);
     expect(repository.getRemoteState().viewer?.login).toBe("alice");
+  });
+});
+
+describe("bootstrap — head-sha content for re-anchoring (issue #267)", () => {
+  test("a comment anchored at an older sha re-anchors as mapped when the file is unchanged at head", async () => {
+    const SOURCE = "line1\nline2\nline3";
+    const barkBody = embedMetadata("hi", {
+      cid: "c1",
+      threadId: "t1",
+      path: "README.md",
+      anchor: {
+        sha: "oldsha",
+        range: { sl: 2, sc: 1, el: 2, ec: 6 },
+        quote: "line2",
+      },
+    });
+    const contentsRefs: string[] = [];
+    const fetch = makeFetch(async (req) => {
+      if (req.url.includes("/contents/")) {
+        contentsRefs.push(new URL(req.url).searchParams.get("ref") ?? "");
+        return jsonResponse({ content: btoa(SOURCE), encoding: "base64" });
+      }
+      if (req.url.endsWith("/pulls/7")) return jsonResponse(PR_JSON);
+      if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
+      if (req.url.includes("/pulls/7/comments"))
+        return jsonResponse([
+          {
+            id: 99,
+            body: barkBody,
+            path: "README.md",
+            line: 2,
+            user: { login: "bob", avatar_url: "" },
+          },
+        ]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      if (req.url.includes("/pulls/7/files"))
+        return jsonResponse([
+          {
+            filename: "README.md",
+            status: "modified",
+            patch: "@@ -1,3 +1,3 @@\n line1\n line2\n line3",
+          },
+        ]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+
+    const { repository } = await bootstrapPullRequest({
+      token: "t",
+      prRef: PR,
+      storage: fakeStorage(),
+      fetch,
+    });
+    const app = deriveAppState(repository.getLocalState(), repository.getRemoteState());
+
+    // Re-anchoring needs both ends of the line map, so the head-sha copy of
+    // the anchored path must be fetched alongside the anchor's own sha.
+    expect(contentsRefs.sort()).toEqual(["headsha", "oldsha"]);
+    expect(app.commentViews.get("c1")?.displayPosition).toEqual({
+      status: "mapped",
+      range: { sl: 2, sc: 1, el: 2, ec: 6 },
+    });
   });
 });
