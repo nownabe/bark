@@ -18,7 +18,7 @@ import type {
   SetIssueThreadResolvedStep,
   UnresolveReviewThreadStep,
 } from "./steps";
-import type { Comment, ErrorInfo, FileContent, FileEdit } from "./types";
+import type { Comment, ErrorInfo, FileContent, FileEdit, PullRequest } from "./types";
 
 /** Inputs the Planner needs that are not in the ReconcileOperation list itself. */
 export type PlannerContext = {
@@ -31,6 +31,10 @@ export type PlannerContext = {
   /** Sources at `(anchor.sha, path)` and `(headSha, path)` for the comments
    *  being planned; drives the re-anchoring of stale drafts to `headSha`. */
   fileContents: FileContent[];
+  /** The PR being synced. Its lifecycle gates the commit: a merged or closed
+   *  PR still accepts a push to its head ref, but the commit would never
+   *  reach the base branch (issue #288). */
+  pullRequest: PullRequest;
 };
 
 export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): ExecutionStep[] {
@@ -132,16 +136,34 @@ export function planExecution(ops: ReconcileOperation[], ctx: PlannerContext): E
   steps.push(...issueResolves);
 
   if (fileEdits.length > 0) {
-    const commit: CommitStep = {
-      kind: "commit",
-      baseSha: ctx.headSha,
-      headRef: ctx.headRef,
-      fileEdits,
-    };
-    steps.push(commit);
+    const closedReason = commitRefusalReason(ctx.pullRequest);
+    if (closedReason) {
+      steps.push({ kind: "reject-commit", fileEdits, error: { message: closedReason } });
+    } else {
+      const commit: CommitStep = {
+        kind: "commit",
+        baseSha: ctx.headSha,
+        headRef: ctx.headRef,
+        fileEdits,
+      };
+      steps.push(commit);
+    }
   }
 
   return steps;
+}
+
+/** Why a commit must not go out, or null when the PR still accepts one.
+ *  Comments are deliberately not gated: commenting on a merged or closed PR
+ *  is a normal thing to do, so only the commit is refused (issue #288). */
+function commitRefusalReason(pr: PullRequest): string | null {
+  if (pr.merged) {
+    return "The pull request is merged, so a commit to its branch would never reach the base branch.";
+  }
+  if (pr.state === "closed") {
+    return "The pull request is closed, so a commit to its branch would never be reviewed or merged.";
+  }
+  return null;
 }
 
 const OUTDATED_ANCHOR: ErrorInfo = {

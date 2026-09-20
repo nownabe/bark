@@ -1790,6 +1790,7 @@ function AppBody() {
           onCancel={() => setShowSubmitConfirm(false)}
           loading={loading}
           submitLabel={role === "author" ? "Submit" : undefined}
+          prStatus={prStatus}
         />
       ) : null}
 

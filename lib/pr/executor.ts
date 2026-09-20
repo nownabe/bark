@@ -36,7 +36,11 @@ export type StepResult =
       step: Extract<ExecutionStep, { kind: "set-issue-thread-resolved" }>;
       outcome: ResolveOutcome;
     }
-  | { step: Extract<ExecutionStep, { kind: "commit" }>; outcome: CommitOutcome };
+  | { step: Extract<ExecutionStep, { kind: "commit" }>; outcome: CommitOutcome }
+  | {
+      step: Extract<ExecutionStep, { kind: "reject-commit" }>;
+      outcome: { ok: false; error: ErrorInfo };
+    };
 
 /** Run all steps sequentially against the transport and collect their outcomes.
  *  Steps within a cycle are independent at the state-machine level, but
@@ -68,5 +72,7 @@ async function runStep(step: ExecutionStep, transport: Transport): Promise<StepR
       return { step, outcome: await transport.setIssueThreadResolved(step) };
     case "commit":
       return { step, outcome: await transport.commit(step) };
+    case "reject-commit":
+      return { step, outcome: { ok: false, error: step.error } };
   }
 }

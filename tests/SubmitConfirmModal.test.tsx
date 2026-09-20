@@ -210,4 +210,20 @@ describe("SubmitConfirmModal", () => {
     expect(summary).toContain("2 files");
     expect(summary).toMatch(/1 accepted suggestion/);
   });
+
+  test("warns when the PR is merged or closed, and stays silent when it is open (#288)", () => {
+    const render1 = (prStatus: "open" | "merged" | "closed") =>
+      render(
+        <SubmitConfirmModal
+          items={pendingEntries()}
+          prStatus={prStatus}
+          onConfirm={() => {}}
+          onCancel={() => {}}
+        />,
+      ).container;
+
+    expect(render1("merged").querySelector(".notice--error")?.textContent ?? "").toMatch(/merged/i);
+    expect(render1("closed").querySelector(".notice--error")?.textContent ?? "").toMatch(/closed/i);
+    expect(render1("open").querySelector(".notice--error")).toBeNull();
+  });
 });

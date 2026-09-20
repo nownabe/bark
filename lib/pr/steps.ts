@@ -71,6 +71,16 @@ export type CommitStep = {
   fileEdits: FileEdit[];
 };
 
+/** The FileEdits the Planner refused to commit because the PR is no longer
+ *  open (issue #288). It never reaches the Transport; the Executor reports it
+ *  as a failed outcome so the state machine parks the FileEdits back as
+ *  `draft` with `lastError` instead of clearing the author's work. */
+export type RejectCommitStep = {
+  kind: "reject-commit";
+  fileEdits: FileEdit[];
+  error: ErrorInfo;
+};
+
 export type ExecutionStep =
   | PostReviewBatchStep
   | RejectCommentStep
@@ -79,4 +89,5 @@ export type ExecutionStep =
   | ResolveReviewThreadStep
   | UnresolveReviewThreadStep
   | SetIssueThreadResolvedStep
-  | CommitStep;
+  | CommitStep
+  | RejectCommitStep;

@@ -445,6 +445,19 @@ describe("state-machine — applyStepResults: Commit", () => {
     const out = applyStepResults(localState({ fileEdits: [f] }), results);
     expect(out.fileEdits[0]).toMatchObject({ state: "draft", lastError: err });
   });
+
+  test("a refused Commit parks its FileEdits as draft + lastError (#288)", () => {
+    const f = fileEdit({ id: "f", state: "syncing" });
+    const err = { message: "The pull request is merged" };
+    const results: StepResult[] = [
+      {
+        step: { kind: "reject-commit", fileEdits: [f], error: err },
+        outcome: { ok: false, error: err },
+      },
+    ];
+    const out = applyStepResults(localState({ fileEdits: [f] }), results);
+    expect(out.fileEdits[0]).toMatchObject({ state: "draft", lastError: err });
+  });
 });
 
 describe("state-machine — applyStepResultsToRemote", () => {

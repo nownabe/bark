@@ -151,6 +151,12 @@ function applyStepResult(local: LocalState, result: StepResult): LocalState {
       const ids = result.step.fileEdits.map((f) => f.id);
       return o.ok ? applyCommitSuccess(local, ids) : applyCommitFailure(local, ids, o.error);
     }
+    case "reject-commit":
+      return applyCommitFailure(
+        local,
+        result.step.fileEdits.map((f) => f.id),
+        result.step.error,
+      );
   }
 }
 
@@ -310,6 +316,7 @@ function applyStepResultToRemote(remote: RemoteState, result: StepResult): Remot
       return o.ok ? applyReviewBatchSuccessToRemote(remote, result.step, o.mappings) : remote;
     }
     case "reject-comment":
+    case "reject-commit":
       return remote;
     case "post-reply":
     case "post-issue-comment": {

@@ -3,6 +3,7 @@
 // posts it (one review for in-diff items, separate PR comments for out-of-diff) —
 // then lists the individual pending items so the reviewer can confirm with full
 // understanding before anything goes out.
+import type { PullStatus } from "../../../lib/github";
 import {
   groupPendingByFile,
   summarizePending,
@@ -20,6 +21,21 @@ interface Props {
   loading?: boolean;
   /** Primary button label. Defaults to "Submit review" (reviewer mode). */
   submitLabel?: string;
+  /** PR lifecycle, so a merged/closed PR is called out before posting (#288). */
+  prStatus?: PullStatus | null;
+}
+
+/** Comments on a merged or closed PR still post — they are just unlikely to be
+ *  read — so this warns rather than blocks. A commit is refused outright by the
+ *  Planner (issue #288). */
+function lifecycleWarning(prStatus: PullStatus | null | undefined): string | null {
+  if (prStatus === "merged") {
+    return "This pull request is merged. Comments still post, but nobody may read them, and file edits will not be committed.";
+  }
+  if (prStatus === "closed") {
+    return "This pull request is closed. Comments still post, but nobody may read them, and file edits will not be committed.";
+  }
+  return null;
 }
 
 function lineLabel(range: { sl: number; el: number }): string {
@@ -45,9 +61,11 @@ export function SubmitConfirmModal({
   onCancel,
   loading,
   submitLabel,
+  prStatus,
 }: Props) {
   const summary = summarizePending(items);
   const buttonLabel = submitLabel ?? "Submit review";
+  const warning = lifecycleWarning(prStatus);
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div
@@ -58,6 +76,11 @@ export function SubmitConfirmModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="modal__title">Submit review</h3>
+        {warning ? (
+          <p className="notice--error" style={{ fontSize: 12 }}>
+            {warning}
+          </p>
+        ) : null}
         {items.length === 0 ? (
           <p className="empty">Nothing to submit.</p>
         ) : (
