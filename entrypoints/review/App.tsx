@@ -50,6 +50,7 @@ import {
   replyAnchor,
   revealSubmittedFacets,
   reviewEntryCounts,
+  suggestionDraftCid,
   threadRangeAt,
   type AcceptedSuggestionInfo,
   type PendingSuggestion,
@@ -1109,18 +1110,27 @@ function AppBody() {
   // time (they are kept "live" in the editor until then; task 4).
   const suggestionsToDrafts = (): PendingDraft[] =>
     allPendingSuggestions.map((s) => {
-      const id = crypto.randomUUID();
+      // The hunk's lines are in the coordinates of the head the edit's base
+      // was fetched at, which for a file not currently open may be older
+      // than headSha (only the open file is rebased on load). The Planner
+      // maps the anchor to the current head at submit (issue #265).
+      const baseSha = s.baseSha ?? headSha ?? "";
+      // Derived, not minted: re-materialising the same hunk after a failed
+      // post must update the parked draft rather than create a second
+      // Comment (issue #308).
+      const id = suggestionDraftCid({
+        path: s.path,
+        baseSha,
+        range: s.range,
+        replacement: s.replacement,
+      });
       return {
         cid: id,
         path: s.path,
         inDiff: s.inDiff,
         range: s.range,
         quote: s.quote,
-        // The hunk's lines are in the coordinates of the head the edit's base
-        // was fetched at, which for a file not currently open may be older
-        // than headSha (only the open file is rebased on load). The Planner
-        // maps the anchor to the current head at submit (issue #265).
-        sha: s.baseSha ?? headSha ?? "",
+        sha: baseSha,
         thread: id,
         body: s.body,
         kind: "suggestion",

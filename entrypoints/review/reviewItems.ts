@@ -14,6 +14,7 @@ import { lineColToOffset } from "../../lib/anchor";
 import type { ExistingComment } from "../../lib/comments";
 import type { PendingDraft, SuggestionEdit } from "../../lib/drafts";
 import type { AnchorRange, CommentMetadata } from "../../lib/metadata";
+import { contentDigest } from "../../lib/pr/metadata";
 import type { DisplayPosition } from "../../lib/pr/reanchor";
 import {
   diffToSuggestions,
@@ -77,6 +78,23 @@ export interface PendingSuggestion {
 /** Stable id for a live suggestion derived from a base→edited line hunk. */
 export function liveSuggestionCid(h: { sl: number; el: number }): string {
   return `live:${h.sl}:${h.el}`;
+}
+
+/** Id of the Comment a hunk materialises into at submit.
+ *
+ *  A hunk identical in `(path, baseSha, range, replacement)` to a Comment
+ *  already in LocalState *is* that Comment: retried if it is a parked draft,
+ *  and not posted again if it is already synced (GitHub has it, with this
+ *  exact content). Deriving the id instead of minting one is what makes that
+ *  true after a failed post (issue #308); `quote` is implied by
+ *  `(baseSha, path, range)` and left out. */
+export function suggestionDraftCid(s: {
+  path: string;
+  baseSha: string;
+  range: AnchorRange;
+  replacement: string;
+}): string {
+  return `suggestion:${s.range.sl}-${s.range.el}:${contentDigest(`${s.path}\0${s.baseSha}\0${s.replacement}`)}`;
 }
 
 /**
