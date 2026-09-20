@@ -449,7 +449,7 @@ export async function fetchChangedFiles(client: GitHubClient, ref: PrRef): Promi
 
 // ---- FileContent -------------------------------------------------------
 
-type RawContents = { content: string; encoding: "base64" };
+type RawContents = { content: string; encoding: string; size?: number };
 
 export async function fetchFileContent(
   client: GitHubClient,
@@ -465,6 +465,14 @@ export async function fetchFileContent(
     "GET",
     `/repos/${ref.owner}/${ref.repo}/contents/${encodedPath}?ref=${encodeURIComponent(sha)}`,
   );
+  // A file of 1-100 MB comes back as `encoding: "none"` with an empty body.
+  // Decoding that would open an empty editor and let a commit from it replace
+  // the whole file with the typed text, so fail loudly instead (issue #292).
+  if (raw.encoding !== "base64") {
+    throw new Error(
+      `${path} is too large for Bark to open (${raw.size ?? "over 1 MB"} bytes; GitHub returns no contents above 1 MB).`,
+    );
+  }
   return {
     sha,
     path,

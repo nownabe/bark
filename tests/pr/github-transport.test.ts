@@ -385,6 +385,11 @@ describe("github-transport — setIssueThreadResolved (issue #270)", () => {
 describe("github-transport — commit", () => {
   test("blobs -> tree -> commit -> updateRef, returns the new head sha", async () => {
     const { fetch, calls } = makeFetch(async (req) => {
+      if (req.url.includes("/git/trees/h0")) {
+        return jsonResponse({
+          tree: [{ path: "a.md", mode: "100644", type: "blob", sha: "blob-old" }],
+        });
+      }
       if (req.url.endsWith("/git/blobs")) return jsonResponse({ sha: "blob-sha" });
       if (req.url.endsWith("/git/trees")) return jsonResponse({ sha: "tree-sha" });
       if (req.url.endsWith("/git/commits")) return jsonResponse({ sha: "commit-sha" });
@@ -407,16 +412,25 @@ describe("github-transport — commit", () => {
       ],
     });
     expect(outcome).toEqual({ ok: true, newHeadSha: "commit-sha" });
-    // Exactly: blob, tree, commit, updateRef — no conflict-check GETs when
-    // every FileEdit's baseSha matches the commit base.
-    expect(calls.map((c) => c.method)).toEqual(["POST", "POST", "POST", "PATCH"]);
+    // The base tree is read once (it carries each path's mode), then:
+    // blob, tree, commit, updateRef. No second tree read when every
+    // FileEdit's baseSha matches the commit base.
+    expect(calls.map((c) => c.method)).toEqual(["GET", "POST", "POST", "POST", "PATCH"]);
   });
 
   test("a stale FileEdit whose file changed since its baseSha fails as a conflict (issue #187)", () => {
     const { fetch, calls } = makeFetch(async (req) => {
       // The file's blob differs between the edit's base and the current head.
-      if (req.url.includes("/contents/a.md?ref=h0")) return jsonResponse({ sha: "blob-old" });
-      if (req.url.includes("/contents/a.md?ref=h1")) return jsonResponse({ sha: "blob-new" });
+      if (req.url.includes("/git/trees/h0")) {
+        return jsonResponse({
+          tree: [{ path: "a.md", mode: "100644", type: "blob", sha: "blob-old" }],
+        });
+      }
+      if (req.url.includes("/git/trees/h1")) {
+        return jsonResponse({
+          tree: [{ path: "a.md", mode: "100644", type: "blob", sha: "blob-new" }],
+        });
+      }
       throw new Error(`unexpected call: ${req.url}`);
     });
     const transport = createGitHubTransport({ token: "t", fetch }, PR);
@@ -432,14 +446,18 @@ describe("github-transport — commit", () => {
       .then((outcome) => {
         expect(outcome.ok).toBe(false);
         if (!outcome.ok) expect(outcome.error.message).toContain("Conflict: a.md changed");
-        // Nothing was committed: only the two contents GETs ran.
+        // Nothing was committed: only the two tree GETs ran.
         expect(calls.map((c) => c.method)).toEqual(["GET", "GET"]);
       });
   });
 
   test("a stale baseSha with an UNCHANGED file commits normally", async () => {
     const { fetch, calls } = makeFetch(async (req) => {
-      if (req.url.includes("/contents/a.md")) return jsonResponse({ sha: "blob-same" });
+      if (req.url.includes("/git/trees/h0") || req.url.includes("/git/trees/h1")) {
+        return jsonResponse({
+          tree: [{ path: "a.md", mode: "100644", type: "blob", sha: "blob-same" }],
+        });
+      }
       if (req.url.endsWith("/git/blobs")) return jsonResponse({ sha: "blob-sha" });
       if (req.url.endsWith("/git/trees")) return jsonResponse({ sha: "tree-sha" });
       if (req.url.endsWith("/git/commits")) return jsonResponse({ sha: "commit-sha" });
@@ -461,9 +479,13 @@ describe("github-transport — commit", () => {
 
   test("a file deleted at the head also fails as a conflict", async () => {
     const { fetch } = makeFetch(async (req) => {
-      if (req.url.includes("/contents/a.md?ref=h0")) return jsonResponse({ sha: "blob-old" });
-      if (req.url.includes("/contents/a.md?ref=h1"))
-        return jsonResponse({ message: "Not Found" }, 404);
+      if (req.url.includes("/git/trees/h0")) {
+        return jsonResponse({
+          tree: [{ path: "a.md", mode: "100644", type: "blob", sha: "blob-old" }],
+        });
+      }
+      // a.md is gone at the head.
+      if (req.url.includes("/git/trees/h1")) return jsonResponse({ tree: [] });
       throw new Error(`unexpected call: ${req.url}`);
     });
     const transport = createGitHubTransport({ token: "t", fetch }, PR);
@@ -476,5 +498,91 @@ describe("github-transport — commit", () => {
       ],
     });
     expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error.message).toContain("Conflict: a.md changed");
+  });
+
+  test("an executable file keeps its 100755 mode in the new tree (issue #292)", async () => {
+    const { fetch, calls } = makeFetch(async (req) => {
+      if (req.url.includes("/git/trees/h0")) {
+        return jsonResponse({
+          tree: [
+            { path: "a.md", mode: "100755", type: "blob", sha: "blob-old" },
+            { path: "b.md", mode: "100644", type: "blob", sha: "blob-b" },
+          ],
+        });
+      }
+      if (req.url.endsWith("/git/blobs")) return jsonResponse({ sha: "blob-sha" });
+      if (req.url.endsWith("/git/trees")) return jsonResponse({ sha: "tree-sha" });
+      if (req.url.endsWith("/git/commits")) return jsonResponse({ sha: "commit-sha" });
+      if (req.url.includes("/git/refs/heads/")) return jsonResponse({});
+      throw new Error(`unexpected call: ${req.url}`);
+    });
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const outcome = await transport.commit({
+      kind: "commit",
+      baseSha: "h0",
+      headRef: "topic",
+      fileEdits: [
+        { id: "f1", state: "syncing", path: "a.md", baseSha: "h0", editedSource: "edited" },
+      ],
+    });
+    expect(outcome).toEqual({ ok: true, newHeadSha: "commit-sha" });
+    const createTree = calls.find((c) => c.method === "POST" && c.url.endsWith("/git/trees"));
+    expect(JSON.parse(createTree?.body ?? "{}").tree).toEqual([
+      { path: "a.md", mode: "100755", type: "blob", sha: "blob-sha" },
+    ]);
+  });
+
+  test("a new file not in the base tree falls back to mode 100644", async () => {
+    const { fetch, calls } = makeFetch(async (req) => {
+      if (req.url.includes("/git/trees/h0")) return jsonResponse({ tree: [] });
+      if (req.url.endsWith("/git/blobs")) return jsonResponse({ sha: "blob-sha" });
+      if (req.url.endsWith("/git/trees")) return jsonResponse({ sha: "tree-sha" });
+      if (req.url.endsWith("/git/commits")) return jsonResponse({ sha: "commit-sha" });
+      if (req.url.includes("/git/refs/heads/")) return jsonResponse({});
+      throw new Error(`unexpected call: ${req.url}`);
+    });
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    await transport.commit({
+      kind: "commit",
+      baseSha: "h0",
+      headRef: "topic",
+      fileEdits: [
+        { id: "f1", state: "syncing", path: "new.md", baseSha: "h0", editedSource: "edited" },
+      ],
+    });
+    const createTree = calls.find((c) => c.method === "POST" && c.url.endsWith("/git/trees"));
+    expect(JSON.parse(createTree?.body ?? "{}").tree[0].mode).toBe("100644");
+  });
+
+  test("the conflict check resolves blob shas for a file over 1 MB (issue #292)", async () => {
+    // `/contents` returns no usable sha for a file this big; the Git Trees API
+    // does. Any call to `/contents` here means the old path is still in use.
+    const { fetch, calls } = makeFetch(async (req) => {
+      if (req.url.includes("/contents/")) {
+        return jsonResponse({ content: "", encoding: "none", size: 2_000_000 });
+      }
+      if (req.url.includes("/git/trees/h0") || req.url.includes("/git/trees/h1")) {
+        return jsonResponse({
+          tree: [{ path: "big.md", mode: "100644", type: "blob", sha: "blob-same" }],
+        });
+      }
+      if (req.url.endsWith("/git/blobs")) return jsonResponse({ sha: "blob-sha" });
+      if (req.url.endsWith("/git/trees")) return jsonResponse({ sha: "tree-sha" });
+      if (req.url.endsWith("/git/commits")) return jsonResponse({ sha: "commit-sha" });
+      if (req.url.includes("/git/refs/heads/")) return jsonResponse({});
+      throw new Error(`unexpected call: ${req.url}`);
+    });
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const outcome = await transport.commit({
+      kind: "commit",
+      baseSha: "h1",
+      headRef: "topic",
+      fileEdits: [
+        { id: "f1", state: "syncing", path: "big.md", baseSha: "h0", editedSource: "edited" },
+      ],
+    });
+    expect(outcome).toEqual({ ok: true, newHeadSha: "commit-sha" });
+    expect(calls.some((c) => c.url.includes("/contents/"))).toBe(false);
   });
 });

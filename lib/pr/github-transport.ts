@@ -247,6 +247,16 @@ async function commit(
   step: CommitStep,
 ): Promise<CommitOutcome> {
   try {
+    const treeCache = new Map<string, Promise<Map<string, TreeBlob>>>();
+    const treeAt = (ref: string): Promise<Map<string, TreeBlob>> => {
+      const cached = treeCache.get(ref);
+      if (cached) return cached;
+      const pending = fetchTreeBlobs(client, prRef, ref);
+      treeCache.set(ref, pending);
+      return pending;
+    };
+    const baseTree = await treeAt(step.baseSha);
+
     // A FileEdit records the head it was edited against (fe.baseSha). When
     // the PR head has advanced since (step.baseSha), committing the full
     // editedSource would silently revert any interim changes to that file
@@ -255,11 +265,9 @@ async function commit(
     // UI can surface. Files whose baseSha matches the head need no check.
     for (const fe of step.fileEdits) {
       if (!fe.baseSha || fe.baseSha === step.baseSha) continue;
-      const [before, after] = await Promise.all([
-        fetchBlobSha(client, prRef, fe.path, fe.baseSha),
-        fetchBlobSha(client, prRef, fe.path, step.baseSha),
-      ]);
-      if (before === null || after === null || before !== after) {
+      const before = (await treeAt(fe.baseSha)).get(fe.path);
+      const after = baseTree.get(fe.path);
+      if (!before || !after || before.sha !== after.sha) {
         return {
           ok: false,
           error: {
@@ -287,7 +295,9 @@ async function commit(
         base_tree: step.baseSha,
         tree: blobs.map((b) => ({
           path: b.path,
-          mode: "100644",
+          // Reuse the file's existing mode so an executable file does not lose
+          // its bit; 100644 is only the mode for a path the tree doesn't have.
+          mode: baseTree.get(b.path)?.mode ?? "100644",
           type: "blob",
           sha: b.sha,
         })),
@@ -322,26 +332,36 @@ function commitMessage(step: CommitStep): string {
   return `Apply edits to ${paths}`;
 }
 
-/** The blob sha of `path` at `ref`, or null when unreadable (deleted /
- *  moved) — the caller treats null as a conflict. Blob shas are
- *  content-addressed, so equality means the file is byte-identical. */
-async function fetchBlobSha(
+type TreeBlob = { sha: string; mode: string };
+
+/** Every blob in the tree at `ref`, keyed by path. Read from the Git Trees
+ *  API rather than `/contents`, which answers a file over 1 MB with no usable
+ *  sha and so turned a large file into a spurious conflict (issue #292).
+ *  It also carries each entry's mode, which the new tree reuses.
+ *
+ *  A path absent from the map was deleted or moved — the caller treats that
+ *  as a conflict, as it did when `/contents` 404'd.
+ *
+ *  simplify: a repository with more than ~100k entries comes back `truncated`,
+ *  and every path past the cut then reads as deleted. Upgrade path: walk the
+ *  tree one path segment at a time (non-recursive) for the edited paths only. */
+async function fetchTreeBlobs(
   client: GitHubClient,
   prRef: PrRef,
-  path: string,
   ref: string,
-): Promise<string | null> {
-  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-  try {
-    const res = await ghRequest<{ sha: string }>(
-      client,
-      "GET",
-      `/repos/${prRef.owner}/${prRef.repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
-    );
-    return res.sha;
-  } catch {
-    return null;
+): Promise<Map<string, TreeBlob>> {
+  const res = await ghRequest<{
+    tree: { path: string; mode: string; type: string; sha: string }[];
+  }>(
+    client,
+    "GET",
+    `/repos/${prRef.owner}/${prRef.repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
+  );
+  const blobs = new Map<string, TreeBlob>();
+  for (const entry of res.tree) {
+    if (entry.type === "blob") blobs.set(entry.path, { sha: entry.sha, mode: entry.mode });
   }
+  return blobs;
 }
 
 // ---- Identity matching -------------------------------------------------

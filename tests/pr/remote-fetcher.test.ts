@@ -788,6 +788,50 @@ describe("remote-fetcher — fetchFileContent URL encoding", () => {
   });
 });
 
+describe("remote-fetcher — fetchFileContent oversized files (issue #292)", () => {
+  // GitHub's contents endpoint answers a 1-100 MB file with an empty body and
+  // `encoding: "none"`. Decoding that yields "", which would open an empty
+  // editor and let a commit replace the file with whatever was typed there.
+  const oversized = { content: "", encoding: "none", size: 2_000_000 };
+
+  test("throws instead of decoding to an empty document", async () => {
+    const { fetch } = makeFetch(async () => jsonResponse(oversized));
+    const promise = fetchFileContent({ token: "t", fetch }, PR, "abc", "big.md");
+    await expect(promise).rejects.toThrow(/big\.md/);
+    await expect(promise).rejects.toThrow(/too large/i);
+  });
+
+  test("fetchRemoteState stores no FileContent for the oversized path", async () => {
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.includes("/contents/")) return jsonResponse(oversized);
+      if (req.url.endsWith("/pulls/7")) {
+        return jsonResponse({
+          number: 7,
+          title: "T",
+          body: "B",
+          state: "open",
+          draft: false,
+          merged: false,
+          head: { sha: "h0", ref: "topic" },
+          base: { ref: "main" },
+          user: { login: "alice", avatar_url: "" },
+        });
+      }
+      if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.endsWith("/graphql")) {
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      }
+      return jsonResponse([]);
+    });
+    const out = await fetchRemoteState({ token: "t", fetch }, PR, {
+      fileContentTargets: [{ sha: "h0", path: "big.md" }],
+    });
+    expect(out.fileContents).toEqual([]);
+  });
+});
+
 describe("remote-fetcher — fetchRemoteState", () => {
   test("builds a complete RemoteState in one orchestrated round", async () => {
     let prCalled = false;
