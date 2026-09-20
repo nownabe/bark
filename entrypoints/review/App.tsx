@@ -77,13 +77,7 @@ import { GitHubApiError } from "../../lib/pr/github-api";
 import { fetchFileContent } from "../../lib/pr/remote-fetcher";
 import { canResolveThread, type FileEdit, type PrRef } from "../../lib/pr/types";
 import { type ChangedFile, isRangeInDiff, parseRightRanges } from "../../lib/pr/diff";
-import {
-  clearAcceptedDecisions,
-  listSuggestionEdits,
-  saveSuggestionEdits,
-  type PendingDraft,
-  type SuggestionDecision,
-} from "../../lib/drafts";
+import { listSuggestionEdits, type PendingDraft } from "../../lib/drafts";
 import type { AnchorRange, CommentMetadata } from "../../lib/metadata";
 import {
   BODY_LIMIT,
@@ -286,7 +280,7 @@ function AppBody() {
   const [bubblePos, setBubblePos] = useState<BubblePos | null>(null);
   const [commentBody, setCommentBody] = useState("");
   const dismissedApi = useDismissedSuggestions(ref, productionDismissedDeps);
-  const { dismissed, setDismissed, setDecision, reset: resetDismissed } = dismissedApi;
+  const { dismissed, setDecision, clearAccepted, reset: resetDismissed } = dismissedApi;
   const threadActions = useThreadActions();
   const {
     replyTo,
@@ -585,8 +579,6 @@ function AppBody() {
   // The FileEdits a commit should carry: one per path whose editor content
   // diverges from its base, each listing the Threads of the suggestions
   // accepted into it so a *successful* commit resolves them (issue #278).
-  // Both the mirror effect below and submitAuthor build them here, or the
-  // two could persist the same path with and without resolveOnCommit.
   const fileEditsFromEdits = useCallback((): Map<string, FileEdit> => {
     const wanted = new Map<string, FileEdit>();
     if (!headSha) return wanted;
@@ -618,6 +610,30 @@ function AppBody() {
     }
     return wanted;
   }, [acceptedSuggestionInfos, commentViewByRemoteId, headSha, prRepository, suggestionEdits]);
+  // Mirror those FileEdits into LocalState and discard the drafts they no
+  // longer represent, returning what was written (submitAuthor needs the map
+  // to tell "commit will resolve it" from "resolve it now"). Writes only what
+  // actually differs: every write notifies subscribers, which rebuilds the
+  // mirror effect's inputs, which would re-run it forever.
+  const syncFileEditsToRepository = useCallback(async (): Promise<Map<string, FileEdit>> => {
+    const wanted = fileEditsFromEdits();
+    if (!prRepository) return wanted;
+    const existing = new Map(prRepository.getLocalState().fileEdits.map((fe) => [fe.id, fe]));
+    for (const fe of wanted.values()) {
+      const current = existing.get(fe.id);
+      // Only the draft mirror is ours to rewrite. A FileEdit already flipped
+      // past "draft" belongs to an in-flight submit, and writing it back as a
+      // draft would cancel the very commit it is part of.
+      if (current && current.state !== "draft") continue;
+      if (!sameFileEdit(current, fe)) await prRepository.upsertFileEdit(fe);
+    }
+    for (const fe of prRepository.getLocalState().fileEdits) {
+      if (fe.state === "draft" && !wanted.has(fe.id)) {
+        await prRepository.discardFileEdit(fe.id);
+      }
+    }
+    return wanted;
+  }, [fileEditsFromEdits, prRepository]);
   // The active pending-items list for the topbar count + Submit confirm modal —
   // author mode shows author-shaped items, reviewer keeps the existing flow.
   const activePendingItems = role === "author" ? pendingAuthorItems : pendingItems;
@@ -698,25 +714,11 @@ function AppBody() {
   // LocalState as FileEdits so a future repository.submitDrafts() (L6d-3)
   // can emit one Commit step for all pending edits. Reviewer doesn't need
   // this — their edits become suggestion-block Comments at submit time
-  // (L6c). Effect upserts every (path, source) pair that diverges from
-  // base; drafts no longer represented get discarded.
+  // (L6c).
   useEffect(() => {
     if (!prRepository || !headSha || role !== "author") return;
-    void (async () => {
-      const wanted = fileEditsFromEdits();
-      // Only write what actually differs: every write notifies subscribers,
-      // which rebuilds this effect's inputs, which would re-run it forever.
-      const existing = new Map(prRepository.getLocalState().fileEdits.map((fe) => [fe.id, fe]));
-      for (const fe of wanted.values()) {
-        if (!sameFileEdit(existing.get(fe.id), fe)) await prRepository.upsertFileEdit(fe);
-      }
-      for (const fe of prRepository.getLocalState().fileEdits) {
-        if (fe.state === "draft" && !wanted.has(fe.id)) {
-          await prRepository.discardFileEdit(fe.id);
-        }
-      }
-    })();
-  }, [fileEditsFromEdits, prRepository, headSha, role]);
+    void syncFileEditsToRepository();
+  }, [syncFileEditsToRepository, prRepository, headSha, role]);
 
   // Per-file content load now lives in useSelectedFileContent.
   // Re-anchoring file content (per createdAtSha) is fetched by the new
@@ -978,6 +980,15 @@ function AppBody() {
     };
   }, [selection, refreshBubble]);
 
+  // A reply's target inside Repository.LocalState:
+  //  - reply to a submitted thread → root Comment's LocalId via remoteId
+  //  - reply to a still-draft thread → the root draft's cid (== its
+  //    LocalState Comment.id)
+  const parentLocalIdFor = (thread: ReviewThread | undefined): string | undefined =>
+    thread?.rootComment
+      ? commentViewByRemoteId.get(thread.rootComment.id)?.comment.id
+      : (thread?.rootDraft?.cid ?? undefined);
+
   // Thread reply: inherit the thread's anchor (see replyAnchor) and add a
   // draft with the same thread id — which equals the data layer's Thread id
   // (issue #183).
@@ -999,13 +1010,7 @@ function AppBody() {
       kind: "comment",
     };
     if (!prRepository) return;
-    // parentLocalId resolves the reply's target inside Repository.LocalState:
-    //  - reply to a submitted thread → root Comment's LocalId via remoteId
-    //  - reply to a still-draft thread → the root draft's cid (== its
-    //    LocalState Comment.id)
-    const parentLocalId = thread.rootComment
-      ? commentViewByRemoteId.get(thread.rootComment.id)?.comment.id
-      : (thread.rootDraft?.cid ?? undefined);
+    const parentLocalId = parentLocalIdFor(thread);
     if (!parentLocalId) return;
     await prRepository.upsertComment(
       pendingDraftToComment(draft, viewerLogin ?? "you", parentLocalId),
@@ -1183,17 +1188,9 @@ function AppBody() {
       for (const d of toSubmit) {
         if (inRepo.has(d.cid)) continue; // already double-written by L4/L6a
         const body = composeDraftBody(d);
-        // parentLocalId: top-level (d.cid === d.thread) → undefined;
-        // reply to a submitted thread → root comment's LocalId via
-        // commentViewByRemoteId; reply to a still-draft thread →
-        // rootDraft.cid (same as draft.thread).
-        const thread = threads.find((t) => t.id === d.thread);
+        // A top-level draft (d.cid === d.thread) has no parent to resolve.
         const parentLocalId =
-          d.cid === d.thread
-            ? undefined
-            : thread?.rootComment
-              ? commentViewByRemoteId.get(thread.rootComment.id)?.comment.id
-              : (thread?.rootDraft?.cid ?? undefined);
+          d.cid === d.thread ? undefined : parentLocalIdFor(threads.find((t) => t.id === d.thread));
         await prRepository.upsertComment(
           pendingDraftToComment({ ...d, body }, viewerLogin ?? "you", parentLocalId),
         );
@@ -1256,18 +1253,10 @@ function AppBody() {
       // (out-of-diff), and the Executor composes the out-of-diff quote and
       // permalink (issue #282).
 
-      // 1. Re-sync FileEdits authoritatively (the L6d-1 effect is best-
-      //    effort; this is the source of truth for the impending commit).
+      // 1. Re-run the FileEdit mirror: the L6d-1 effect only runs after a
+      //    render, so the impending commit must re-read the edits itself.
       //    Each carries the accepted suggestions' threads in resolveOnCommit.
-      const wantedFileEdits = fileEditsFromEdits();
-      for (const fe of wantedFileEdits.values()) {
-        await prRepository.upsertFileEdit(fe);
-      }
-      for (const fe of prRepository.getLocalState().fileEdits) {
-        if (fe.state === "draft" && !wantedFileEdits.has(fe.id)) {
-          await prRepository.discardFileEdit(fe.id);
-        }
-      }
+      const wantedFileEdits = await syncFileEditsToRepository();
 
       // 2. Accepted suggestions whose replacement is already in the file
       //    produce no FileEdit, so there is no commit to wait for: resolve
@@ -1314,18 +1303,7 @@ function AppBody() {
         // files re-base when opened. Nothing to poke here.
       } else {
         await discardAllPersistedEdits();
-        if (acceptedResolvedRemoteIds.length > 0) {
-          await clearAcceptedDecisions(ref, acceptedResolvedRemoteIds);
-          setDismissed((prev) => {
-            const drop = new Set(acceptedResolvedRemoteIds.map((id) => String(id)));
-            const next: Record<string, SuggestionDecision> = {};
-            for (const [k, v] of Object.entries(prev)) {
-              if (v === "accepted" && drop.has(k)) continue;
-              next[k] = v;
-            }
-            return next;
-          });
-        }
+        if (acceptedResolvedRemoteIds.length > 0) await clearAccepted(acceptedResolvedRemoteIds);
       }
 
       // 6. New head SHA → reload the open file. (headSha itself advanced
@@ -1413,10 +1391,9 @@ function AppBody() {
     setShowDiscardConfirm(false);
     setSource(baseSource);
     setSuggestionComments({});
-    resetSuggestionEdits();
-    // Clear the persisted suggestion-edits key for this PR (drafts are
-    // owned by Repository now and discarded individually below).
-    if (ref) await saveSuggestionEdits(ref, {});
+    // Drops the in-memory edits, the persisted key for this PR, and any
+    // debounced write (drafts are owned by Repository and go individually).
+    await discardAllPersistedEdits();
     if (prRepository) {
       const localCids = drafts.map((d) => d.cid);
       for (const cid of localCids) await prRepository.discardComment(cid);
@@ -1427,14 +1404,7 @@ function AppBody() {
       const acceptedIds = Object.entries(dismissed)
         .filter(([, v]) => v === "accepted")
         .map(([k]) => Number(k));
-      if (acceptedIds.length > 0) {
-        setDismissed((prev) => {
-          const next: Record<string, SuggestionDecision> = {};
-          for (const [k, v] of Object.entries(prev)) if (v !== "accepted") next[k] = v;
-          return next;
-        });
-        if (ref) await clearAcceptedDecisions(ref, acceptedIds);
-      }
+      if (acceptedIds.length > 0) await clearAccepted(acceptedIds);
     }
   };
 
