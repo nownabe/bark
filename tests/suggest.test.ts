@@ -159,6 +159,21 @@ describe("suggestion block helpers", () => {
     expect(stripSuggestionBlock("hi\n\n````suggestion\n" + inner + "\n````")).toBe("hi");
   });
 
+  // Issue #290: CommonMark lets a hand-written block close with a fence longer
+  // than the one it opened. The close must swallow those extra backticks
+  // instead of leaving one on the replacement, which Accept would commit.
+  test("extractSuggestionBlock ignores extra backticks on a longer closing fence", () => {
+    expect(extractSuggestionBlock("```suggestion\nfoo\n````")).toBe("foo");
+  });
+
+  test("stripSuggestionBlock removes a block closed by a longer fence", () => {
+    expect(stripSuggestionBlock("hi\n\n```suggestion\nfoo\n````")).toBe("hi");
+  });
+
+  test("extractSuggestionBlock tolerates trailing spaces after the closing fence", () => {
+    expect(extractSuggestionBlock("```suggestion\nfoo\n```  \n\nrest")).toBe("foo");
+  });
+
   // GitHub's API returns comment bodies with CRLF endings; the helpers must
   // trim the outer \r so the extracted replacement matches \n-normalised source.
   test("extractSuggestionBlock tolerates CRLF fence lines", () => {

@@ -8,19 +8,23 @@ import type { CommentMetadata } from "./metadata";
 import { buildLineMap } from "./pr/linemap";
 import { type DisplayPosition, locateLine } from "./pr/reanchor";
 
-/** Extract the replacement text of a ```suggestion block from a comment body (null if absent).
+/** A ```suggestion block: group 1 is the opening fence, group 2 the replacement.
  *
  * Accepts variable-length fences (≥3 backticks) so a suggestion whose content
  * contains an inner code fence — wrapped by `buildSuggestionBlock` with a
- * longer outer fence — round-trips intact. The closing fence is matched at
- * the same length via the backreference; trailing backticks (CommonMark
- * allows a longer close) are tolerated by `[^\`]` lookahead/end-of-string.
+ * longer outer fence — round-trips intact. The backreference pins the close to
+ * at least the opening length; CommonMark also allows a *longer* close, so the
+ * extra backticks and any trailing whitespace are consumed up to the end of
+ * that line rather than left on the replacement (issue #290).
  *
  * `\r?\n` around the fence lines tolerates CRLF bodies (GitHub's API returns
  * comment bodies with `\r\n` endings) so the outer `\r` is trimmed off the
  * extracted replacement, matching the `\n`-normalised source. */
+const SUGGESTION_BLOCK_RE = /(`{3,})suggestion\r?\n?([\s\S]*?)\r?\n?\1`*[ \t]*(?:\r?\n|$)/;
+
+/** Extract the replacement text of a ```suggestion block from a comment body (null if absent). */
 export function extractSuggestionBlock(body: string): string | null {
-  const m = body.match(/(`{3,})suggestion\r?\n?([\s\S]*?)\r?\n?\1(?!`)/);
+  const m = body.match(SUGGESTION_BLOCK_RE);
   return m ? m[2] : null;
 }
 
@@ -159,7 +163,7 @@ function replaceLine(source: string, line: number, text: string, deleteLine: boo
 
 /** The visible text of a comment body with the suggestion block removed. */
 export function stripSuggestionBlock(body: string): string {
-  return body.replace(/(`{3,})suggestion\r?\n?[\s\S]*?\r?\n?\1(?!`)/g, "").trim();
+  return body.replace(new RegExp(SUGGESTION_BLOCK_RE.source, "g"), "").trim();
 }
 
 /**
