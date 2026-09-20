@@ -39,7 +39,8 @@ jobs:
     if: ${{ fromJSON(needs.filter.outputs.changes).check == 'true' }}
     permissions:
       contents: read
-    uses: ./.github/workflows/reusable-check.yaml
+    # zizmor prefers the `$/` self-repository syntax, but actionlint (1.7.12) rejects it.
+    uses: ./.github/workflows/reusable-check.yaml # zizmor: ignore[self-repository]
 
   result:
     name: Pull Request Checks
