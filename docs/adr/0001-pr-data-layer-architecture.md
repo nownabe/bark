@@ -74,7 +74,7 @@ Two paths into `syncing`:
 - **`draft → syncing`** — the normal path for newly-created entities (Comment, FileEdit) that the user composes and then submits.
 - **`synced → syncing`** — a mutable field on an already-synced entity changes. In practice the only such case is **`Thread.resolved` toggling** (resolve / unresolve), which is an immediate action with no separate compose step. Comments are immutable post-sync, and `FileEdit` has no synced state, so no other entity reaches this transition.
 
-On failure, the entity returns to `draft` with `lastError` set. There is no automatic retry; the user re-submits explicitly. This keeps the Reconciler stateless about retry policy.
+On failure, a newly-created entity (the `draft → syncing` path) returns to `draft` with `lastError` set. An entity that was already synced (the `synced → syncing` path) returns to `synced` with `lastError` set and its mutable field reverted to the last-known remote value — a `draft` never carries a remote identifier ([ADR 0002 §2](0002-data-model.md)). There is no automatic retry; the user re-triggers the action explicitly. This keeps the Reconciler stateless about retry policy.
 
 ### 4. Conflict policy
 
@@ -159,7 +159,8 @@ stateDiagram-v2
     draft --> syncing: user submits / immediate action
     synced --> syncing: Thread.resolved toggled
     syncing --> synced: Executor succeeds
-    syncing --> draft: Executor fails (lastError recorded)
+    syncing --> draft: Executor fails on a new entity (lastError recorded)
+    syncing --> synced: Executor fails on an already-synced entity (field reverted, lastError recorded)
     synced --> [*]: removed by RemoteState refresh
     draft --> [*]: user discards
 ```
@@ -224,7 +225,7 @@ sequenceDiagram
 
 ### Failure handling
 
-- An `ExecutionStep` that fails returns each affected item to `draft` with `lastError` set. User work is never lost.
+- An `ExecutionStep` that fails returns each affected new item to `draft`, and each affected already-synced item to `synced` with its mutable field reverted, in both cases with `lastError` set. User work is never lost.
 - There is no automatic retry. The user sees the error and triggers the same action again, which moves the item `draft → syncing`. Keeping retry policy out of the Reconciler avoids a class of "phantom in-flight" bugs.
 - Steps with partial-success semantics (e.g. one `PostReviewBatch` whose embedded comment posts split into successful and failed) report per-item results so each item lands in the correct state independently.
 - User-facing error surfacing follows the global Snackbar policy from [ADR 0005 §4](0005-refresh-policy.md). Individual components may additionally reflect errors inline (e.g. a retry affordance near a failed draft Comment) per component judgement.

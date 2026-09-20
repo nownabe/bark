@@ -10,7 +10,12 @@
 // and docs/adr/0003-operations-and-execution.md §6.
 
 import type { StepResult } from "./executor";
-import type { PostReviewBatchStep } from "./steps";
+import type {
+  PostReviewBatchStep,
+  ResolveReviewThreadStep,
+  SetIssueThreadResolvedStep,
+  UnresolveReviewThreadStep,
+} from "./steps";
 import type {
   CommentRemoteMapping,
   CommitOutcome,
@@ -47,11 +52,15 @@ export function flipDraftsToSyncing(local: LocalState): LocalState {
   };
 }
 
-/** Revert every `syncing` entity to draft. For a freshly-hydrated state:
- *  no step is in flight, so nothing would ever advance them, and the UI
- *  shows neither pending nor submitted items in that state (issue #266
- *  path C). An item that did reach GitHub is adopted back by cid on the
- *  next refresh (see mergeBy). */
+/** Revert every `syncing` entity that no step will ever advance. For a
+ *  freshly-hydrated state: no step is in flight, so nothing would ever
+ *  advance them, and the UI shows neither pending nor submitted items in
+ *  that state (issue #266 path C). An item that did reach GitHub is adopted
+ *  back by cid on the next refresh (see mergeBy).
+ *
+ *  A Thread that exists on GitHub goes back to `synced`, not `draft`: a
+ *  draft never carries a remote identifier (ADR 0002 §2, issue #275). The
+ *  next refresh overwrites it with GitHub's value. */
 export function revertOrphanedSyncing(local: LocalState): LocalState {
   const isSyncing = (x: { state: string }) => x.state === "syncing";
   if (![...local.comments, ...local.threads, ...local.fileEdits].some(isSyncing)) return local;
@@ -60,17 +69,20 @@ export function revertOrphanedSyncing(local: LocalState): LocalState {
   return {
     ...local,
     comments: local.comments.map(toDraft),
-    threads: local.threads.map(toDraft),
+    threads: local.threads.map((t) =>
+      isSyncing(t) && hasRemoteIdentity(t)
+        ? { ...t, state: "synced", lastError: UNCONFIRMED_POST }
+        : toDraft(t),
+    ),
     fileEdits: local.fileEdits.map(toDraft),
   };
 }
 
-/** Set a Thread's `resolved` field. If the Thread is currently `synced` —
- *  or `draft` with a remote identity, i.e. it exists on GitHub but a prior
- *  sync failed — also transition it to `syncing` so the change is pushed;
- *  without the draft case a failed resolve could never be retried (issue
- *  #188). A true draft (not on GitHub yet) just updates the field: it syncs
- *  with the next submit. */
+/** Set a Thread's `resolved` field. A `synced` Thread also transitions to
+ *  `syncing` so the change is pushed — including the retry after a failed
+ *  toggle, which parks the Thread back in `synced` with `lastError` (issue
+ *  #275). A draft (not on GitHub yet) just updates the field: it syncs with
+ *  the next submit. */
 export function setThreadResolvedToSyncing(
   local: LocalState,
   id: LocalId,
@@ -80,7 +92,7 @@ export function setThreadResolvedToSyncing(
     ...local,
     threads: local.threads.map((t) => {
       if (t.id !== id) return t;
-      if (t.state === "synced" || (t.state === "draft" && hasRemoteIdentity(t))) {
+      if (t.state === "synced") {
         return { ...t, state: "syncing", resolved, lastError: undefined };
       }
       return { ...t, resolved };
@@ -144,7 +156,12 @@ function applyStepResult(local: LocalState, result: StepResult): LocalState {
       const o = result.outcome as ResolveOutcome;
       return o.ok
         ? applyThreadSyncSuccess(local, result.step.threadId)
-        : applyThreadSyncFailure(local, result.step.threadId, o.error);
+        : applyThreadSyncFailure(
+            local,
+            result.step.threadId,
+            o.error,
+            desiredResolvedOf(result.step),
+          );
     }
     case "commit": {
       const o = result.outcome as CommitOutcome;
@@ -258,15 +275,29 @@ function applyThreadSyncSuccess(local: LocalState, threadId: LocalId): LocalStat
   };
 }
 
+type ResolveStep = ResolveReviewThreadStep | UnresolveReviewThreadStep | SetIssueThreadResolvedStep;
+
+/** The `resolved` value a resolve step is trying to write. */
+function desiredResolvedOf(step: ResolveStep): boolean {
+  return step.kind === "set-issue-thread-resolved"
+    ? step.resolved
+    : step.kind === "resolve-review-thread";
+}
+
+/** A failed toggle on an already-synced Thread returns to `synced` with the
+ *  field rolled back to the remote value — a draft never carries a remote
+ *  identifier (ADR 0001 §3, issue #275). The Reconciler emits the step only
+ *  when local differs from remote, so the remote value is `!desired`. */
 function applyThreadSyncFailure(
   local: LocalState,
   threadId: LocalId,
   error: ErrorInfo,
+  desired: boolean,
 ): LocalState {
   return {
     ...local,
     threads: local.threads.map((t) =>
-      t.id === threadId ? { ...t, state: "draft", lastError: error } : t,
+      t.id === threadId ? { ...t, state: "synced", resolved: !desired, lastError: error } : t,
     ),
   };
 }
@@ -336,10 +367,7 @@ function applyStepResultToRemote(remote: RemoteState, result: StepResult): Remot
       const o = result.outcome as ResolveOutcome;
       if (!o.ok) return remote;
       const threadId = result.step.threadId;
-      const resolved =
-        result.step.kind === "set-issue-thread-resolved"
-          ? result.step.resolved
-          : result.step.kind === "resolve-review-thread";
+      const resolved = desiredResolvedOf(result.step);
       return {
         ...remote,
         threads: remote.threads.map((t) => (t.id === threadId ? { ...t, resolved } : t)),

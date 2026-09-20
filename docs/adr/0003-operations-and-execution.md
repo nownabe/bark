@@ -76,7 +76,7 @@ In-diff vs out-of-diff routing for `CreateComment` is computed at planning time 
 
 Each `ExecutionStep` returns per-item results:
 
-- A 1:1 Step succeeds or fails as a whole; the single affected item lands in `synced` or `draft + lastError`.
+- A 1:1 Step succeeds or fails as a whole; the single affected item lands in `synced`, or on failure in `draft + lastError` (new items) / `synced + lastError` with the field reverted (resolve toggles, [ADR 0001 §3](0001-pr-data-layer-architecture.md)).
 - `PostReviewBatch` is atomic at GitHub — all-or-nothing — so the POST result is uniform across the bundled comments. Confirmation (§7) is per-comment: a comment the identity round-trip could not map lands in `draft + lastError` ("posted but not confirmed"), never stays `syncing`, and is adopted by `cid` on the next refresh (§7). The Transport distinguishes "POST failed" (`ok: false`, nothing on GitHub) from "POST ok, confirmation failed" (`ok: true` with a `confirmError` and no mappings): the latter must not look like a plain failure, or a retry would post the review twice.
 - `Commit` is atomic from the Executor's perspective; intermediate failures (e.g. `updateRef` rejects with non-fast-forward) return every bundled `FileEdit` to `draft + lastError`.
 - `RejectComment` always fails: the `Comment` (and its not-yet-created `Thread`) returns to `draft + lastError` with a "could not map to the current head" message. The user re-creates the comment on the current text.
@@ -85,7 +85,7 @@ The Reconciler is not responsible for retry. The user observes the error in the 
 
 **`syncing` never survives its sync invocation.** Every entity that enters `syncing` ends the invocation in `synced` or `draft + lastError`. Two safety nets close the paths where a step result cannot deliver that (issue #266):
 
-- **Hydrate** reverts any persisted `syncing` entity to `draft + lastError`. A fresh session has no step in flight, so nothing else would ever advance it, and the UI shows neither pending nor submitted items in that state.
+- **Hydrate** reverts any persisted `syncing` entity: to `synced + lastError` when it has a remote identity (the bootstrap refresh then restores GitHub's value), otherwise to `draft + lastError`. A fresh session has no step in flight, so nothing else would ever advance it, and the UI shows neither pending nor submitted items in that state.
 - **Refresh adopts by `cid`.** `draft`/`syncing` items are normally protected from refresh, but a remote item whose id equals a local item that has no `remoteId` / `remoteThreadId` yet can only be that item's own post (the id was minted locally). The merge adopts the remote copy instead of discarding it, so an unconfirmed or interrupted post heals on the next refresh rather than being posted again.
 
 ### 7. Identity matching at the wire
