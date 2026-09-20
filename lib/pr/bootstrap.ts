@@ -5,16 +5,8 @@
 // entrypoint calls on bootstrap and on the refresh triggers from ADR 0005
 // (visibility-change, debug button, post-mutation).
 //
-// Once App.tsx is rewritten in phase 6c, the entrypoint code path becomes:
-//
-//   const { repository, refresh } = await bootstrapPullRequest(opts);
-//   return (
-//     <RepositoryProvider repo={repository}>
-//       <SnackbarProvider>
-//         <App refresh={refresh} />
-//       </SnackbarProvider>
-//     </RepositoryProvider>
-//   );
+// The review surface keeps both as its own state and reads AppState via
+// `useAppStateFromRepository(repository)`.
 
 import { BrowserStorageAdapter, type BrowserStorageAPI, prStorageKey } from "./chrome-storage";
 import { buildIsInDiff } from "./diff";

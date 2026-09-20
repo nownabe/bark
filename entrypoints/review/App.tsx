@@ -90,7 +90,7 @@ import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/
 import { browser } from "wxt/browser";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { PullRequestRepository } from "../../lib/pr/repository";
-import { RepositoryProvider, useAppStateFromRepository } from "../../lib/pr/react";
+import { useAppStateFromRepository } from "../../lib/pr/react";
 import type { CommentView } from "../../lib/pr/appstate";
 import { commentViewsToExisting } from "./adapters/commentViewsToExisting";
 import {
@@ -1692,7 +1692,7 @@ function AppBody() {
     );
   };
 
-  const reviewTree = (
+  return (
     <div className="app">
       <Topbar
         prRef={ref}
@@ -1810,15 +1810,5 @@ function AppBody() {
       {/* Development-only role switch (bottom-right); see BARK_DEV_ROLE_SWITCH. */}
       {DEV_ROLE_SWITCH ? <RoleFab role={role} onChangeRole={setRole} /> : null}
     </div>
-  );
-
-  // Phase L1: when the new-data-layer Repository is ready, wrap the tree
-  // so descendants can call useAppState / useRepository. Before bootstrap
-  // completes the tree still renders — it just doesn't have the provider
-  // yet, which is fine because nothing inside reads from it today.
-  return prRepository ? (
-    <RepositoryProvider repo={prRepository}>{reviewTree}</RepositoryProvider>
-  ) : (
-    reviewTree
   );
 }

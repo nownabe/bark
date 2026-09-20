@@ -4,13 +4,7 @@ if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
 
 import { describe, expect, test } from "bun:test";
 import { act, render, renderHook } from "@testing-library/react";
-import type { ReactNode } from "react";
-import {
-  RepositoryProvider,
-  useAppState,
-  useAppStateFromRepository,
-  useRepository,
-} from "../../lib/pr/react";
+import { useAppStateFromRepository } from "../../lib/pr/react";
 import { PullRequestRepository } from "../../lib/pr/repository";
 import { InMemoryStorageAdapter } from "../../lib/pr/storage";
 import type { Transport } from "../../lib/pr/transport";
@@ -88,49 +82,6 @@ function pr(overrides: Partial<PullRequest> = {}): PullRequest {
   };
 }
 
-function wrap(repo: PullRequestRepository) {
-  return ({ children }: { children: ReactNode }) => (
-    <RepositoryProvider repo={repo}>{children}</RepositoryProvider>
-  );
-}
-
-describe("react — useRepository", () => {
-  test("throws when no provider is present", () => {
-    expect(() => renderHook(() => useRepository())).toThrow(/RepositoryProvider/);
-  });
-
-  test("returns the provided Repository", () => {
-    const repo = makeRepo();
-    const { result } = renderHook(() => useRepository(), { wrapper: wrap(repo) });
-    expect(result.current).toBe(repo);
-  });
-});
-
-describe("react — useAppState", () => {
-  test("derives AppState from LocalState + RemoteState", async () => {
-    const repo = makeRepo();
-    const { result } = renderHook(() => useAppState(), { wrapper: wrap(repo) });
-
-    expect(result.current.role).toBeNull();
-    expect(result.current.commentViews.size).toBe(0);
-
-    await act(async () => {
-      await repo.setRemoteState({
-        ...repo.getRemoteState(),
-        pullRequest: pr(),
-        viewer: { login: "bob" },
-      });
-    });
-    expect(result.current.role).toBe("reviewer");
-
-    await act(async () => {
-      await repo.upsertComment(comment());
-    });
-    expect(result.current.commentViews.size).toBe(1);
-    expect(result.current.commentViews.get("c1")?.isMyDraft).toBe(true);
-  });
-});
-
 describe("react — useAppStateFromRepository", () => {
   test("returns null while repo is null", () => {
     const { result } = renderHook(() => useAppStateFromRepository(null));
@@ -160,7 +111,7 @@ describe("react — useAppStateFromRepository", () => {
     expect(result.current?.commentViews.get("c1")?.isMyDraft).toBe(true);
   });
 
-  test("works without a <RepositoryProvider /> ancestor (Provider-free use)", async () => {
+  test("renders in a component tree of its own", async () => {
     const repo = makeRepo();
     function Inner() {
       const state = useAppStateFromRepository(repo);
@@ -168,22 +119,5 @@ describe("react — useAppStateFromRepository", () => {
     }
     const { container } = render(<Inner />);
     expect(container.querySelector("div")?.getAttribute("data-count")).toBe("0");
-  });
-});
-
-describe("react — RepositoryProvider integration", () => {
-  test("children rendered with the Repository can subscribe via useAppState", () => {
-    const repo = makeRepo();
-    function Inner() {
-      const state = useAppState();
-      return <div data-count={state.commentViews.size} />;
-    }
-    const { container } = render(
-      <RepositoryProvider repo={repo}>
-        <Inner />
-      </RepositoryProvider>,
-    );
-    const div = container.querySelector("div");
-    expect(div?.getAttribute("data-count")).toBe("0");
   });
 });
