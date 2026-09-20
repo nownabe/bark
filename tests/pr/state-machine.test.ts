@@ -224,6 +224,37 @@ describe("state-machine — applyStepResults: PostReviewBatch", () => {
     });
   });
 
+  test("success with a missing mapping reverts that Comment (and its new Thread) to draft + lastError instead of leaving it syncing (issue #266 path A)", () => {
+    const c1 = comment({ id: "c1", state: "syncing", threadId: "t1" });
+    const c2 = comment({ id: "c2", state: "syncing", threadId: "t2" });
+    const t2 = thread({ id: "t2", state: "syncing" });
+    const results: StepResult[] = [
+      {
+        step: { kind: "post-review-batch", commitId: "h", comments: [c1, c2] },
+        // Read-after-write lag: the identity listing did not contain c2 yet.
+        outcome: { ok: true, mappings: [{ cid: "c1", remoteId: 11 }] },
+      },
+    ];
+    const out = applyStepResults(localState({ comments: [c1, c2], threads: [t2] }), results);
+    expect(out.comments[0]).toMatchObject({ state: "synced", remoteId: 11 });
+    expect(out.comments[1]?.state).toBe("draft");
+    expect(out.comments[1]?.lastError?.message).toBeString();
+    expect(out.threads[0]?.state).toBe("draft");
+  });
+
+  test("success with confirmError surfaces it as lastError on the unmapped Comments (issue #266 path B)", () => {
+    const c = comment({ id: "c1", state: "syncing" });
+    const confirmError = { message: "listing failed after post" };
+    const results: StepResult[] = [
+      {
+        step: { kind: "post-review-batch", commitId: "h", comments: [c] },
+        outcome: { ok: true, mappings: [], confirmError },
+      },
+    ];
+    const out = applyStepResults(localState({ comments: [c] }), results);
+    expect(out.comments[0]).toMatchObject({ state: "draft", lastError: confirmError });
+  });
+
   test("failure reverts every batched Comment to draft + lastError", () => {
     const c1 = comment({ id: "c1", state: "syncing" });
     const c2 = comment({ id: "c2", state: "syncing", threadId: "t2" });
@@ -522,6 +553,40 @@ describe("state-machine — mergeRemoteIntoLocal", () => {
     expect(out.threads.find((t) => t.id === "dt")).toEqual(draftT);
     expect(out.threads.find((t) => t.id === "st")?.resolved).toBe(true);
     expect(out.threads.find((t) => t.id === "newt")).toEqual(newRemoteT);
+  });
+
+  test("adopts a remote Comment whose id matches a protected local item that has no remoteId (issue #266)", () => {
+    // The post reached GitHub but the local item never learned its remoteId
+    // (unconfirmed post, or a crash before the mapping was persisted).
+    const stuckSyncing = comment({ id: "s", state: "syncing" });
+    const revertedDraft = comment({ id: "d", state: "draft", lastError: { message: "x" } });
+    const remoteS = comment({ id: "s", state: "synced", remoteId: 1 });
+    const remoteD = comment({ id: "d", state: "synced", remoteId: 2 });
+    const out = mergeRemoteIntoLocal(
+      localState({ comments: [stuckSyncing, revertedDraft] }),
+      remoteState({ comments: [remoteS, remoteD] }),
+    );
+    expect(out.comments).toEqual([remoteS, remoteD]);
+  });
+
+  test("adopts a remote Thread whose id matches a protected local Thread that has no remoteThreadId (issue #266)", () => {
+    const stuck = thread({ id: "t", state: "syncing" });
+    const remoteT = thread({ id: "t", state: "synced", remoteThreadId: "PRT_t" });
+    const out = mergeRemoteIntoLocal(
+      localState({ threads: [stuck] }),
+      remoteState({ threads: [remoteT] }),
+    );
+    expect(out.threads).toEqual([remoteT]);
+  });
+
+  test("keeps a protected local Thread that already has a remoteThreadId (pending resolve toggle wins)", () => {
+    const pending = thread({ id: "t", state: "syncing", remoteThreadId: "PRT_t", resolved: true });
+    const remoteT = thread({ id: "t", state: "synced", remoteThreadId: "PRT_t", resolved: false });
+    const out = mergeRemoteIntoLocal(
+      localState({ threads: [pending] }),
+      remoteState({ threads: [remoteT] }),
+    );
+    expect(out.threads).toEqual([pending]);
   });
 
   test("FileEdits are not touched by refresh", () => {

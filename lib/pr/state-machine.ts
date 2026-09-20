@@ -38,6 +38,24 @@ export function flipDraftsToSyncing(local: LocalState): LocalState {
   };
 }
 
+/** Revert every `syncing` entity to draft. For a freshly-hydrated state:
+ *  no step is in flight, so nothing would ever advance them, and the UI
+ *  shows neither pending nor submitted items in that state (issue #266
+ *  path C). An item that did reach GitHub is adopted back by cid on the
+ *  next refresh (see mergeBy). */
+export function revertOrphanedSyncing(local: LocalState): LocalState {
+  const isSyncing = (x: { state: string }) => x.state === "syncing";
+  if (![...local.comments, ...local.threads, ...local.fileEdits].some(isSyncing)) return local;
+  const toDraft = <T extends { state: string }>(x: T): T =>
+    isSyncing(x) ? { ...x, state: "draft", lastError: UNCONFIRMED_POST } : x;
+  return {
+    ...local,
+    comments: local.comments.map(toDraft),
+    threads: local.threads.map(toDraft),
+    fileEdits: local.fileEdits.map(toDraft),
+  };
+}
+
 /** Set a Thread's `resolved` field. If the Thread is currently `synced` —
  *  or `draft` with a remoteThreadId, i.e. it exists on GitHub but a prior
  *  sync failed — also transition it to `syncing` so the change is pushed;
@@ -100,7 +118,7 @@ function applyStepResult(local: LocalState, result: StepResult): LocalState {
     case "post-review-batch": {
       const o = result.outcome as PostReviewBatchOutcome;
       return o.ok
-        ? applyReviewBatchSuccess(local, result.step, o.mappings)
+        ? applyReviewBatchSuccess(local, result.step, o.mappings, o.confirmError)
         : applyUnpostedCommentsFailure(local, result.step.comments, o.error);
     }
     case "reject-comment":
@@ -127,10 +145,19 @@ function applyStepResult(local: LocalState, result: StepResult): LocalState {
   }
 }
 
+/** Comments the identity listing did not confirm are on GitHub but have no
+ *  remoteId, so they cannot stay `syncing` (nothing would ever advance them,
+ *  and the UI hides that state). Revert them to draft with an error; the
+ *  next refresh adopts the remote copy by cid (see mergeBy). */
+const UNCONFIRMED_POST: ErrorInfo = {
+  message: "Posted to GitHub, but the new comment could not be confirmed yet. Refresh to sync.",
+};
+
 function applyReviewBatchSuccess(
   local: LocalState,
   step: PostReviewBatchStep,
   mappings: CommentRemoteMapping[],
+  confirmError?: ErrorInfo,
 ): LocalState {
   const byCid = new Map(mappings.map((m) => [m.cid, m]));
   const threadRemotes = new Map<LocalId, string>();
@@ -139,6 +166,10 @@ function applyReviewBatchSuccess(
       const c = step.comments.find((x) => x.id === m.cid);
       if (c) threadRemotes.set(c.threadId, m.remoteThreadId);
     }
+  }
+  const unconfirmed = step.comments.filter((c) => !byCid.has(c.id));
+  if (unconfirmed.length > 0) {
+    local = applyUnpostedCommentsFailure(local, unconfirmed, confirmError ?? UNCONFIRMED_POST);
   }
   return {
     ...local,
@@ -351,11 +382,13 @@ export function mergeRemoteIntoLocal(local: LocalState, remote: RemoteState): Lo
     local.comments,
     remote.comments,
     (c) => c.state === "draft" || c.state === "syncing",
+    (c) => c.remoteId === undefined,
   );
   const newThreads = mergeBy<Thread>(
     local.threads,
     remote.threads,
     (t) => t.state === "draft" || t.state === "syncing",
+    (t) => t.remoteThreadId === undefined,
   );
   return {
     ...local,
@@ -364,20 +397,27 @@ export function mergeRemoteIntoLocal(local: LocalState, remote: RemoteState): Lo
   };
 }
 
+/** Protected (draft/syncing) local items win over remote — except when the
+ *  local item has no remote identity yet and remote carries the same id:
+ *  that id was minted locally, so the item did reach GitHub and the local
+ *  copy just never learned it (unconfirmed post or crash mid-sync, issue
+ *  #266). Adopt the remote copy; otherwise the next submit posts it again. */
 function mergeBy<T extends { id: LocalId }>(
   localItems: T[],
   remoteItems: T[],
   isProtected: (item: T) => boolean,
+  lacksRemoteIdentity: (item: T) => boolean,
 ): T[] {
+  const remoteById = new Map(remoteItems.map((x) => [x.id, x]));
   const localById = new Map(localItems.map((x) => [x.id, x]));
   const result: T[] = [];
   for (const x of localItems) {
-    if (isProtected(x)) result.push(x);
+    if (isProtected(x) && !(lacksRemoteIdentity(x) && remoteById.has(x.id))) result.push(x);
     // synced local items: drop here, the remote version (if any) is added below
   }
   for (const r of remoteItems) {
     const local = localById.get(r.id);
-    if (!local || !isProtected(local)) {
+    if (!local || !isProtected(local) || lacksRemoteIdentity(local)) {
       result.push(r);
     }
   }

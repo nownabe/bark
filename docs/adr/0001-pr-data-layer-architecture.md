@@ -78,7 +78,7 @@ On failure, the entity returns to `draft` with `lastError` set. There is no auto
 `RemoteState` always wins for non-`draft` items.
 
 - After each refresh, `synced` items in `LocalState` are overwritten by their remote counterparts; items absent from remote are removed.
-- `draft` and `syncing` items are protected from refresh.
+- `draft` and `syncing` items are protected from refresh — except that a remote item with the same locally-minted id as a local item that has no remote identity yet is adopted, since it can only be that item's own post ([ADR 0003 §6](0003-operations-and-execution.md)).
 - No conflict-resolution UI is required. Edge cases (e.g. a `draft` reply to a remotely-deleted comment) are handled by treating the parent's removal as the trigger to orphan or discard the reply.
 
 ### 5. Wire-format encapsulation

@@ -1114,6 +1114,11 @@ function AppBody() {
     return `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
   };
 
+  const reportFirstCommentError = () => {
+    const err = prRepository?.getLocalState().comments.find((c) => c.lastError)?.lastError;
+    if (err) reportError(err.message);
+  };
+
   const submitReview = async () => {
     if (!client || !ref) return;
     if (!prRepository) {
@@ -1158,7 +1163,10 @@ function AppBody() {
       await prRepository.submitDrafts();
       // No explicit draft clear is needed — submitDrafts flips each draft
       // Comment from "draft" → "syncing" → "synced", so they fall out of
-      // the drafts useMemo automatically.
+      // the drafts useMemo automatically. A failed or unconfirmed post
+      // parks the comment back as draft + lastError; step outcomes don't
+      // throw, so surface that here (issue #266).
+      reportFirstCommentError();
       setSource(baseSource); // live suggestion edits are now submitted
       setSuggestionComments({});
       // All files' suggestions just went out, so drop every persisted edit
@@ -1256,6 +1264,7 @@ function AppBody() {
       // 4. Submit — Reconciler emits PostReviewBatch / PostIssueComment /
       //    PostReply + one Commit step for the FileEdits.
       await prRepository.submitDrafts();
+      reportFirstCommentError();
       const newHeadSha = prRepository.getRemoteState().pullRequest?.headSha ?? headSha;
 
       // A failed Commit (e.g. the #187 conflict check, or a network error)

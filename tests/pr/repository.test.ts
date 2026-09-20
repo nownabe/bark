@@ -10,6 +10,7 @@ import type {
   Transport,
 } from "../../lib/pr/transport";
 import type { PostReviewBatchStep } from "../../lib/pr/steps";
+import { emptyState } from "../../lib/pr/types";
 import type { Comment, FileEdit, PullRequest, Range, Thread } from "../../lib/pr/types";
 
 const author = { login: "alice" };
@@ -149,6 +150,29 @@ describe("repository — persistence", () => {
     expect(r2.getLocalState().comments.map((c) => c.id)).toEqual(["c1", "c2"]);
   });
 
+  test("hydrate downgrades items left syncing by a previous session to draft (issue #266 path C)", async () => {
+    const storage = new InMemoryStorageAdapter();
+    await storage.save({
+      ...emptyState(),
+      comments: [comment({ id: "c1", state: "syncing", threadId: "t1" })],
+      threads: [thread({ id: "t1", state: "syncing" })],
+      fileEdits: [fileEdit({ id: "f1", state: "syncing" })],
+    });
+    const r = new PullRequestRepository({
+      storage,
+      transport: happyTransport().transport,
+      isInDiff: () => true,
+    });
+
+    await r.hydrate();
+
+    // No step is in flight in a fresh session, so nothing would ever advance
+    // these; as drafts they at least show up in the UI again.
+    expect(r.getLocalState().comments[0]?.state).toBe("draft");
+    expect(r.getLocalState().threads[0]?.state).toBe("draft");
+    expect(r.getLocalState().fileEdits[0]?.state).toBe("draft");
+  });
+
   test("hydrate on an empty store keeps state empty", async () => {
     const r = makeRepo(happyTransport().transport);
     await r.hydrate();
@@ -256,6 +280,41 @@ describe("repository — submitDrafts pipeline", () => {
 
     expect(r.getLocalState().comments[0]?.state).toBe("draft");
     expect(r.getLocalState().comments[0]?.lastError?.message).toBe("422 Unprocessable");
+  });
+
+  test("a posted-but-unconfirmed comment is adopted from the next refresh instead of being posted twice (issue #266 path A)", async () => {
+    const calls: string[] = [];
+    const unconfirmingTransport: Transport = {
+      ...happyTransport().transport,
+      async postReviewBatch(): Promise<PostReviewBatchOutcome> {
+        calls.push("post-review-batch");
+        // POST succeeded; the identity listing lagged and returned nothing.
+        return { ok: true, mappings: [] };
+      },
+    };
+    const r = makeRepo(unconfirmingTransport);
+    await r.setRemoteState({ ...r.getRemoteState(), pullRequest: pr() });
+    await r.upsertThread(thread({ id: "t1", state: "draft" }));
+    await r.upsertComment(comment({ id: "c1", state: "draft", threadId: "t1" }));
+
+    await r.submitDrafts();
+    expect(r.getLocalState().comments[0]?.state).toBe("draft");
+    expect(r.getLocalState().comments[0]?.lastError).toBeDefined();
+
+    // The next refresh sees the comment on GitHub, carrying our cid.
+    await r.setRemoteState({
+      ...r.getRemoteState(),
+      comments: [comment({ id: "c1", state: "synced", remoteId: 100, threadId: "t1" })],
+      threads: [thread({ id: "t1", state: "synced", remoteThreadId: "PRT_new" })],
+    });
+    expect(r.getLocalState().comments[0]).toMatchObject({ state: "synced", remoteId: 100 });
+    expect(r.getLocalState().threads[0]).toMatchObject({
+      state: "synced",
+      remoteThreadId: "PRT_new",
+    });
+
+    await r.submitDrafts();
+    expect(calls).toEqual(["post-review-batch"]);
   });
 
   test("Commit success removes the FileEdit", async () => {

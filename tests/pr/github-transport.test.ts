@@ -103,6 +103,89 @@ describe("github-transport — postReviewBatch", () => {
     expect(reviewCall?.body).toContain("bark:v2");
   });
 
+  test("re-lists with backoff while a posted cid is still missing (read-after-write lag, issue #266 path A)", async () => {
+    const c = comment();
+    const postedBody = embedMetadata(c.body, {
+      cid: c.id,
+      threadId: c.threadId,
+      path: c.path,
+      anchor: c.anchor,
+    });
+    const threadsResponse = (nodes: unknown[]) =>
+      jsonResponse({ data: { repository: { pullRequest: { reviewThreads: { nodes } } } } });
+    let listings = 0;
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7/reviews")) return jsonResponse({ id: 999 });
+      listings++;
+      if (listings < 3) return threadsResponse([]);
+      return threadsResponse([
+        {
+          id: "PRT_late",
+          isResolved: false,
+          comments: { nodes: [{ databaseId: 5, body: postedBody }] },
+        },
+      ]);
+    });
+    const delays: number[] = [];
+    const transport = createGitHubTransport(
+      { token: "t", fetch, delay: async (ms) => void delays.push(ms) },
+      PR,
+    );
+    const outcome = await transport.postReviewBatch({
+      kind: "post-review-batch",
+      commitId: "h0",
+      comments: [c],
+    });
+    expect(outcome).toEqual({
+      ok: true,
+      mappings: [{ cid: "c1", remoteId: 5, remoteThreadId: "PRT_late" }],
+    });
+    expect(listings).toBe(3);
+    expect(delays).toHaveLength(2);
+  });
+
+  test("gives up re-listing after a bound and reports the cid as unmapped", async () => {
+    const threadsResponse = jsonResponse({
+      data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+    });
+    let listings = 0;
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7/reviews")) return jsonResponse({ id: 999 });
+      listings++;
+      return threadsResponse;
+    });
+    const transport = createGitHubTransport({ token: "t", fetch, delay: async () => {} }, PR);
+    const outcome = await transport.postReviewBatch({
+      kind: "post-review-batch",
+      commitId: "h0",
+      comments: [comment()],
+    });
+    expect(outcome).toEqual({ ok: true, mappings: [] });
+    expect(listings).toBeLessThanOrEqual(5);
+  });
+
+  test("reports ok: true with confirmError when the listing fails after a successful POST (issue #266 path B)", async () => {
+    const { fetch, calls } = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7/reviews")) return jsonResponse({ id: 999 });
+      throw new TypeError("network down");
+    });
+    // Zero backoff so the listing's transient-error retries don't slow the test.
+    const transport = createGitHubTransport({ token: "t", fetch, delay: async () => {} }, PR);
+    const outcome = await transport.postReviewBatch({
+      kind: "post-review-batch",
+      commitId: "h0",
+      comments: [comment()],
+    });
+    // The review was created; reporting ok: false would make the Executor
+    // revert to plain draft and the next submit would post it again.
+    expect(calls.filter((c) => c.url.endsWith("/pulls/7/reviews"))).toHaveLength(1);
+    expect(outcome).toEqual({
+      ok: true,
+      mappings: [],
+      confirmError: expect.objectContaining({ message: "network down" }),
+    });
+  });
+
   test("returns ok: false on 422 from the review POST", async () => {
     const { fetch } = makeFetch(async () => {
       const resp = {
