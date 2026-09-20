@@ -44,7 +44,7 @@ The _viewed_ path is ephemeral UI state ([ADR 0002 §1](0002-data-model.md)) tha
 
 - **`RemoteState` is replaced wholesale** by the new snapshot. It is always a current GitHub mirror.
 - **`LocalState` is merged** per the [ADR 0001 §4](0001-pr-data-layer-architecture.md) conflict policy: `synced` items are overwritten by remote; `draft` and `syncing` items are protected (except that a remote item carrying the same locally-minted id as a local item with no remote identity is adopted — [ADR 0003 §6](0003-operations-and-execution.md)); remote-deleted `synced` items are removed from `LocalState`.
-- **Refreshes are serialised** at the Repository. If a refresh is in flight, additional triggers coalesce: at most one queued refresh waits for the running one. A later trigger does not stack, it replaces the queued one.
+- **Refreshes are serialised** at the Repository, with sync execution: fetch-and-apply and the reconcile/execute loop share one Repository-level lock, so a snapshot fetched before a write landed can never overwrite that write (issue #281). If a refresh is in flight, additional triggers coalesce: at most one queued refresh waits for the running one; further triggers share that queued refresh.
 
 ### 4. Snackbar as global error surface
 

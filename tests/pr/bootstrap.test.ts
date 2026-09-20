@@ -371,6 +371,40 @@ describe("bootstrap — storage eviction and persist failures (issue #289)", () 
   });
 });
 
+describe("bootstrap — refresh goes through the Repository lock (issue #281)", () => {
+  test("concurrent refresh triggers coalesce into a single extra fetch", async () => {
+    let prFetches = 0;
+    const fetch = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7")) {
+        prFetches++;
+        return jsonResponse(PR_JSON);
+      }
+      if (req.url.endsWith("/user")) return jsonResponse(VIEWER_JSON);
+      if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      if (req.url.includes("/pulls/7/files")) return jsonResponse([]);
+      throw new Error(`unexpected: ${req.url}`);
+    });
+
+    const { refresh } = await bootstrapPullRequest({
+      token: "t",
+      prRef: PR,
+      storage: fakeStorage(),
+      fetch,
+    });
+
+    await Promise.all([refresh(), refresh(), refresh()]);
+
+    // Bootstrap's own refresh, plus the running one, plus the single queued
+    // one the second and third triggers share (ADR 0005 §3).
+    expect(prFetches).toBe(3);
+  });
+});
+
 describe("bootstrap — head-sha content for re-anchoring (issue #267)", () => {
   test("a comment anchored at an older sha re-anchors as mapped when the file is unchanged at head", async () => {
     const SOURCE = "line1\nline2\nline3";

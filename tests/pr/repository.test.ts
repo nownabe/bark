@@ -12,7 +12,15 @@ import type {
 } from "../../lib/pr/transport";
 import type { PostReviewBatchStep, SetIssueThreadResolvedStep } from "../../lib/pr/steps";
 import { emptyState } from "../../lib/pr/types";
-import type { Comment, FileEdit, LocalState, PullRequest, Range, Thread } from "../../lib/pr/types";
+import type {
+  Comment,
+  FileEdit,
+  LocalState,
+  PullRequest,
+  Range,
+  RemoteState,
+  Thread,
+} from "../../lib/pr/types";
 
 const author = { login: "alice" };
 // Anchored at pr()'s head sha; drafts at an older sha are exercised by the
@@ -826,6 +834,79 @@ describe("repository — drafts created at an older head (issue #265)", () => {
     expect(r.getLocalState().threads.find((t) => t.id === "t2")).toMatchObject({
       state: "draft",
     });
+  });
+});
+
+describe("repository — refresh serialisation (issue #281)", () => {
+  /** A promise whose settlement the test controls. */
+  function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  test("a refresh fetched before a commit cannot regress headSha after it", async () => {
+    const { transport, commitBaseShas } = happyTransport();
+    const r = makeRepo(transport);
+    await r.setRemoteState({ ...emptyState(), pullRequest: pr() });
+    await r.upsertFileEdit(fileEdit());
+
+    // The fetch started before the commit and returns the pre-commit head.
+    const fetched = deferred<RemoteState>();
+    const refreshing = r.refresh(() => fetched.promise);
+    const submitting = r.submitDrafts();
+    fetched.resolve({ ...emptyState(), pullRequest: pr({ headSha: "h" }) });
+    await Promise.all([refreshing, submitting]);
+
+    expect(commitBaseShas).toEqual(["h"]);
+    expect(r.getRemoteState().pullRequest?.headSha).toBe("h2");
+  });
+
+  test("a submit started during a refresh waits for it and commits on the refreshed head", async () => {
+    const { transport, commitBaseShas } = happyTransport();
+    const r = makeRepo(transport);
+    await r.setRemoteState({ ...emptyState(), pullRequest: pr() });
+    await r.upsertFileEdit(fileEdit());
+
+    const fetched = deferred<RemoteState>();
+    const refreshing = r.refresh(() => fetched.promise);
+    const submitting = r.submitDrafts();
+    fetched.resolve({ ...emptyState(), pullRequest: pr({ headSha: "h9" }) });
+    await Promise.all([refreshing, submitting]);
+
+    expect(commitBaseShas).toEqual(["h9"]);
+  });
+
+  test("concurrent refresh triggers coalesce to one running plus one queued", async () => {
+    const r = makeRepo(happyTransport().transport);
+    const first = deferred<RemoteState>();
+    let fetchCount = 0;
+    const fetchRemote = () => {
+      fetchCount++;
+      return fetchCount === 1 ? first.promise : Promise.resolve({ ...emptyState() });
+    };
+
+    const p1 = r.refresh(fetchRemote);
+    const p2 = r.refresh(fetchRemote);
+    const p3 = r.refresh(fetchRemote);
+    expect(p2).toBe(p3);
+    first.resolve({ ...emptyState(), pullRequest: pr() });
+    await Promise.all([p1, p2, p3]);
+
+    expect(fetchCount).toBe(2);
+  });
+
+  test("a failing fetch rejects that refresh, leaves RemoteState untouched, and does not poison the lock", async () => {
+    const r = makeRepo(happyTransport().transport);
+    await r.setRemoteState({ ...emptyState(), pullRequest: pr() });
+
+    await expect(r.refresh(() => Promise.reject(new Error("offline")))).rejects.toThrow("offline");
+    expect(r.getRemoteState().pullRequest?.headSha).toBe("h");
+
+    await r.refresh(() => Promise.resolve({ ...emptyState(), pullRequest: pr({ headSha: "hX" }) }));
+    expect(r.getRemoteState().pullRequest?.headSha).toBe("hX");
   });
 });
 
