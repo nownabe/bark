@@ -73,12 +73,12 @@ Notes:
 
 ### 4. Status taxonomy
 
-| Status     | When                                                 | UI presentation                                                            |
-| ---------- | ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| `current`  | `anchor.sha === headSha` — no work to do             | normal inline                                                              |
-| `mapped`   | line-map or region search succeeded + quote verifies | normal inline                                                              |
-| `shifted`  | line located, quote differs                          | inline + "position shifted" badge                                          |
-| `outdated` | FileContent missing, or line not locatable           | grayed-out in sidebar, "view at original sha" link; not anchored in editor |
+| Status     | When                                                 | UI presentation                                                                        |
+| ---------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `current`  | `anchor.sha === headSha` — no work to do             | normal inline                                                                          |
+| `mapped`   | line-map or region search succeeded + quote verifies | normal inline                                                                          |
+| `shifted`  | line located, quote differs                          | inline + "position shifted" badge; refused at submit while still a draft (ADR 0003 §5) |
+| `outdated` | FileContent missing, or line not locatable           | grayed-out in sidebar, "view at original sha" link; not anchored in editor             |
 
 `current` and `mapped` are presentationally identical; the distinction is for debugging / telemetry only.
 

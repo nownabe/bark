@@ -171,6 +171,72 @@ describe("planner — CreateComment routing", () => {
   });
 });
 
+// Issue #313: the submit path already routes every draft through the same
+// `reanchor` as display; what it owed was a policy for `shifted`. Posting a
+// draft whose quoted text changed upstream would attach the reviewer's words
+// (and an applicable suggestion) to text they never saw — ADR 0003 §5 refuses.
+describe("planner — submit-time re-anchoring policy (issue #313)", () => {
+  const staleContext = (headSource: string, oldSource: string) =>
+    context({
+      fileContents: [
+        { sha: "old", path: "README.md", source: oldSource },
+        { sha: "current-head", path: "README.md", source: headSource },
+      ],
+    });
+
+  test("a draft whose quoted text changed upstream (shifted) is refused", () => {
+    const c = comment({
+      anchor: { sha: "old", range: { sl: 2, sc: 1, el: 2, ec: 12 }, quote: "hello world" },
+    });
+    const steps = planExecution(
+      [{ kind: "create-comment", comment: c }],
+      staleContext("a\nhello WORLD\nb", "a\nhello world\nb"),
+    );
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ kind: "reject-comment", comment: c });
+    expect((steps[0] as { error: { message: string } }).error.message).toContain(
+      "position shifted",
+    );
+  });
+
+  test("a draft whose paragraph changed elsewhere (mapped by the region search) posts at the located columns", () => {
+    const c = comment({
+      anchor: { sha: "old", range: { sl: 2, sc: 6, el: 2, ec: 10 }, quote: "Two." },
+    });
+    const steps = planExecution(
+      [{ kind: "create-comment", comment: c }],
+      staleContext("a\nOne. Two. THREE.\nb", "a\nOne. Two.\nb"),
+    );
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({
+      kind: "post-review-batch",
+      comments: [
+        {
+          anchor: {
+            sha: "current-head",
+            range: { sl: 2, sc: 6, el: 2, ec: 10 },
+            quote: "Two.",
+          },
+        },
+      ],
+    });
+  });
+
+  test("a draft whose line is gone is refused with the outdated message, not the shifted one", () => {
+    const c = comment({
+      anchor: { sha: "old", range: { sl: 2, sc: 1, el: 2, ec: 12 }, quote: "doomed line" },
+    });
+    const steps = planExecution(
+      [{ kind: "create-comment", comment: c }],
+      staleContext("a\nb", "a\ndoomed line\nb"),
+    );
+    expect(steps).toHaveLength(1);
+    const error = (steps[0] as { error: { message: string } }).error.message;
+    expect(error).toContain("Could not map the commented lines");
+    expect(error).not.toContain("position shifted");
+  });
+});
+
 describe("planner — CreateReply", () => {
   test("a reply to a review-comment parent maps 1:1 to PostReply (never batched)", () => {
     const parent = comment({ id: "p", state: "synced", remoteId: 10, remoteKind: "review" });
