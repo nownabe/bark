@@ -12,7 +12,11 @@ if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
 import { describe, expect, test } from "bun:test";
 import { EditorState } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
-import { handleSelectionUpdate, bubbleAnchorPoint } from "../entrypoints/review/cmAnchor";
+import {
+  handleSelectionUpdate,
+  bubbleAnchorPoint,
+  cmSelectionToAnchor,
+} from "../entrypoints/review/cmAnchor";
 import type { SourceAnchor } from "../lib/anchor";
 
 describe("handleSelectionUpdate", () => {
@@ -51,6 +55,34 @@ describe("handleSelectionUpdate", () => {
     handleSelectionUpdate(fakeUpdate(view, false), (a) => sel.push(a));
     expect(sel.length).toBe(0);
     view.destroy();
+  });
+});
+
+// Issue #291: dragging through a line's newline (or triple-clicking it) ends
+// the selection on the NEXT line's first offset. Reporting that line spans a
+// line the reviewer never selected, and past the file's trailing newline it
+// names a line GitHub does not have — a 422 for the whole batch.
+describe("cmSelectionToAnchor on a whole-line selection", () => {
+  test("ends on the selected line, not the one the newline leads into", () => {
+    const state = EditorState.create({ doc: "line1\nline2", selection: { anchor: 0, head: 6 } });
+    const a = cmSelectionToAnchor(state)!;
+    expect(a.startLine).toBe(1);
+    expect(a.endLine).toBe(1);
+    expect(a.endCol).toBe("line1".length + 1);
+  });
+
+  test("stays on the last line when the selection ends past the trailing newline", () => {
+    const state = EditorState.create({ doc: "line1\n", selection: { anchor: 0, head: 6 } });
+    const a = cmSelectionToAnchor(state)!;
+    expect(a.endLine).toBe(1);
+    expect(a.endCol).toBe("line1".length + 1);
+  });
+
+  test("leaves a selection ending mid-line alone", () => {
+    const state = EditorState.create({ doc: "line1\nline2", selection: { anchor: 0, head: 9 } });
+    const a = cmSelectionToAnchor(state)!;
+    expect(a.endLine).toBe(2);
+    expect(a.endCol).toBe(4);
   });
 });
 
