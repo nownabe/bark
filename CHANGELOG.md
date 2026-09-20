@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.4.0](https://github.com/nownabe/bark/compare/bark-v0.3.0...bark-v0.4.0) (2026-09-20)
+
+
+### Features
+
+* **pr:** accept .markdown and .mdx as Markdown ([#322](https://github.com/nownabe/bark/issues/322)) ([e22ee68](https://github.com/nownabe/bark/commit/e22ee683a3d218f5fe1ff483a4c1b5cc69df5dfe)), closes [#293](https://github.com/nownabe/bark/issues/293)
+* **pr:** commit fork pull requests to the fork's repository ([#342](https://github.com/nownabe/bark/issues/342)) ([4e2adef](https://github.com/nownabe/bark/commit/4e2adef2a26b408bfacbbb153684e0eb05a7c344)), closes [#273](https://github.com/nownabe/bark/issues/273)
+* **pr:** create a top-level draft Comment's Thread with it ([#323](https://github.com/nownabe/bark/issues/323)) ([6e192f3](https://github.com/nownabe/bark/commit/6e192f38b9bb2156d9c707b4c336359c8aa1e319)), closes [#272](https://github.com/nownabe/bark/issues/272)
+* **pr:** resolve out-of-diff threads via the root comment fence ([#310](https://github.com/nownabe/bark/issues/310)) ([7e0ecb9](https://github.com/nownabe/bark/commit/7e0ecb94510b217d470d50630d706eef89465e3a)), closes [#270](https://github.com/nownabe/bark/issues/270)
+* **reanchor:** bounded region search for single-line anchors and line-local suggestion merge ([#309](https://github.com/nownabe/bark/issues/309)) ([0f735da](https://github.com/nownabe/bark/commit/0f735dab98d44ca338a4f3ed18990f9a5a022cc3)), closes [#269](https://github.com/nownabe/bark/issues/269)
+* **reanchor:** locate multi-line anchors per endpoint in the region search ([#347](https://github.com/nownabe/bark/issues/347)) ([f4fd457](https://github.com/nownabe/bark/commit/f4fd457056302a1dab7c4552669b0603c3e0e812)), closes [#311](https://github.com/nownabe/bark/issues/311)
+* **review:** preview the merge for shifted suggestions in the editor ([#354](https://github.com/nownabe/bark/issues/354)) ([f822f41](https://github.com/nownabe/bark/commit/f822f411aff7a3b56cde8edd6b59b85b8d595fc1)), closes [#312](https://github.com/nownabe/bark/issues/312)
+
+
+### Bug Fixes
+
+* **anchor:** define anchor.quote as the source text at anchor.range ([#327](https://github.com/nownabe/bark/issues/327)) ([11a935d](https://github.com/nownabe/bark/commit/11a935d4da1e77968783155c9accd9d8c8a7a927)), closes [#276](https://github.com/nownabe/bark/issues/276)
+* **background:** focus an existing review tab instead of opening a second one ([#325](https://github.com/nownabe/bark/issues/325)) ([58efa63](https://github.com/nownabe/bark/commit/58efa6386ab38054ac7beb671401db08018c4d68)), closes [#277](https://github.com/nownabe/bark/issues/277)
+* **pr:** compose the quote and permalink for every out-of-diff post ([#351](https://github.com/nownabe/bark/issues/351)) ([f85b99b](https://github.com/nownabe/bark/commit/f85b99b0194876d82041202586a68dd583931fff)), closes [#282](https://github.com/nownabe/bark/issues/282)
+* **pr:** count patch lines starting with ++ or -- in parseRightRanges ([#314](https://github.com/nownabe/bark/issues/314)) ([9dfbd46](https://github.com/nownabe/bark/commit/9dfbd46f9bd1441ce50f8bef9c52ff06df442c90)), closes [#284](https://github.com/nownabe/bark/issues/284)
+* **pr:** keep the rel=next link in the ETag cache so 304 pages still paginate ([#318](https://github.com/nownabe/bark/issues/318)) ([6472de2](https://github.com/nownabe/bark/commit/6472de24a689b78fde65a439ca3b64f800cfab1d)), closes [#286](https://github.com/nownabe/bark/issues/286)
+* **pr:** offer Resolve only when GitHub would accept it ([#335](https://github.com/nownabe/bark/issues/335)) ([b05fdcc](https://github.com/nownabe/bark/commit/b05fdcc612b34c9009b607f2e06b419d445e771f)), closes [#274](https://github.com/nownabe/bark/issues/274)
+* **pr:** park a failed resolve toggle in synced, not draft ([#320](https://github.com/nownabe/bark/issues/320)) ([56e815b](https://github.com/nownabe/bark/commit/56e815b91d643fc25147e427475818493416a460)), closes [#275](https://github.com/nownabe/bark/issues/275)
+* **pr:** post drafts in the current head's coordinates ([#303](https://github.com/nownabe/bark/issues/303)) ([28ef345](https://github.com/nownabe/bark/commit/28ef3454d6d68946c9dd7e6af593db2bff8ac3a0))
+* **pr:** recover comments stuck in syncing instead of re-posting them ([#305](https://github.com/nownabe/bark/issues/305)) ([3548086](https://github.com/nownabe/bark/commit/35480860fb8bde06320dff0a6182d172e8d39f44))
+* **pr:** refuse commits to a merged or closed PR ([#330](https://github.com/nownabe/bark/issues/330)) ([2a239ff](https://github.com/nownabe/bark/commit/2a239ffb50669e77c3ba6978102c3eca336f0206)), closes [#288](https://github.com/nownabe/bark/issues/288)
+* **pr:** refuse to submit a draft whose quoted text changed upstream ([#346](https://github.com/nownabe/bark/issues/346)) ([d4118a4](https://github.com/nownabe/bark/commit/d4118a4a565f1bc04c23f547179e45d91d6a6405)), closes [#313](https://github.com/nownabe/bark/issues/313)
+* **pr:** route replies on the parent's GitHub object kind ([#326](https://github.com/nownabe/bark/issues/326)) ([1df6462](https://github.com/nownabe/bark/commit/1df64628e1c3bcf7b4f8b7a982f5cb4f2b8d60ca)), closes [#285](https://github.com/nownabe/bark/issues/285)
+* **pr:** serialise refresh and execution under one Repository lock ([#336](https://github.com/nownabe/bark/issues/336)) ([1864488](https://github.com/nownabe/bark/commit/18644889c00cb1e4c5f83bc7f6e4ed4c536057c0)), closes [#281](https://github.com/nownabe/bark/issues/281)
+* **pr:** sweep entities left syncing at the end of a submit ([#331](https://github.com/nownabe/bark/issues/331)) ([108caa9](https://github.com/nownabe/bark/commit/108caa9cf657cd1bec7261ba804c91c2bf9e6a6a)), closes [#271](https://github.com/nownabe/bark/issues/271)
+* **release:** pin publish-browser-extension to ^4.0.5 ([#263](https://github.com/nownabe/bark/issues/263)) ([b77104f](https://github.com/nownabe/bark/commit/b77104faa91f64ba43200b8565c9794011a00fd6))
+* **review:** derive a suggestion draft's cid from the hunk it materialises ([#337](https://github.com/nownabe/bark/issues/337)) ([963339d](https://github.com/nownabe/bark/commit/963339d9ba947bffeab5974455490088a4e95419)), closes [#308](https://github.com/nownabe/bark/issues/308)
+* **review:** end a whole-line selection on the line it actually covers ([#319](https://github.com/nownabe/bark/issues/319)) ([3364d18](https://github.com/nownabe/bark/commit/3364d1826b68030fd01cce79b461a193a88683bb)), closes [#291](https://github.com/nownabe/bark/issues/291)
+* **review:** map comment positions between head and edited coordinates ([#348](https://github.com/nownabe/bark/issues/348)) ([9465718](https://github.com/nownabe/bark/commit/9465718d6199fd92f508283ec7d0fb96419d3d0b)), closes [#283](https://github.com/nownabe/bark/issues/283)
+* **review:** reject a suggestion by resolving its thread on GitHub ([#340](https://github.com/nownabe/bark/issues/340)) ([d088a8d](https://github.com/nownabe/bark/commit/d088a8d9e419a3ceb84606601d2cacb2483ee383)), closes [#287](https://github.com/nownabe/bark/issues/287)
+* **review:** resolve accepted-suggestion threads only after the commit lands ([#341](https://github.com/nownabe/bark/issues/341)) ([770f901](https://github.com/nownabe/bark/commit/770f901026a1d0c70c5ccd6ea688f4e8686626d4)), closes [#278](https://github.com/nownabe/bark/issues/278)
+* **review:** surface failed comment posts and keep the reviewer's edits ([#307](https://github.com/nownabe/bark/issues/307)) ([48cb675](https://github.com/nownabe/bark/commit/48cb675e1d7c94f9f100a00c310509b6c4414f31))
+* **review:** validate the PR number from the review URL ([#321](https://github.com/nownabe/bark/issues/321)) ([457a942](https://github.com/nownabe/bark/commit/457a942ac81fcc9c7c8095c1b9461e165782bc32)), closes [#295](https://github.com/nownabe/bark/issues/295)
+* **storage:** bound chrome.storage.local growth and stop quota errors losing drafts ([#332](https://github.com/nownabe/bark/issues/332)) ([1f96120](https://github.com/nownabe/bark/commit/1f9612063d569a25ccd49484421937bf87c5e075)), closes [#289](https://github.com/nownabe/bark/issues/289)
+* **suggest:** consume a longer closing fence instead of leaking a backtick ([#316](https://github.com/nownabe/bark/issues/316)) ([d2e0683](https://github.com/nownabe/bark/commit/d2e06836e41121e3b0c127189ddda31216726392)), closes [#290](https://github.com/nownabe/bark/issues/290)
+
+
+### Performance Improvements
+
+* **reanchor:** replace the LCS table with a memoised line-level Myers diff ([#344](https://github.com/nownabe/bark/issues/344)) ([8caebdd](https://github.com/nownabe/bark/commit/8caebdd3abf58014d5f3d303fdbe24ddd748888b)), closes [#280](https://github.com/nownabe/bark/issues/280)
+
 ## [0.3.0](https://github.com/nownabe/bark/compare/bark-v0.2.1...bark-v0.3.0) (2026-08-08)
 
 
