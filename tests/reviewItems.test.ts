@@ -256,6 +256,46 @@ describe("buildSuggestionMarks", () => {
     });
     expect(marks).toHaveLength(1);
   });
+
+  // Issue #283: positions are head coordinates, but the editor may show a
+  // locally edited copy. `headToEdited` bridges the two; a suggestion on a
+  // line with local edits has no stable position and is not drawn at all.
+  describe("head → edited mapping (issue #283)", () => {
+    const edited = "X\nY\na\nb\n";
+    const editedLineStarts = buildLineIndex(edited);
+
+    test("a suggestion below two locally inserted lines is drawn at its mapped line", () => {
+      const comments = [suggestionComment({ range: { sl: 2, sc: 1, el: 2, ec: 2 }, quote: "b" })];
+      const marks = buildSuggestionMarks({
+        comments,
+        source: edited,
+        lineStarts: editedLineStarts,
+        currentPath: "a.md",
+        dismissed: {},
+        displayPositionFor: dpFromAnchor(comments),
+        headToEdited: new Map([
+          [1, 3],
+          [2, 4],
+        ]),
+      });
+      expect(marks).toHaveLength(1);
+      expect(marks[0].from).toBe(6);
+    });
+
+    test("a suggestion on a locally edited line is not drawn", () => {
+      const comments = [suggestionComment({ range: { sl: 2, sc: 1, el: 2, ec: 2 }, quote: "Y" })];
+      const marks = buildSuggestionMarks({
+        comments,
+        source: edited,
+        lineStarts: editedLineStarts,
+        currentPath: "a.md",
+        dismissed: {},
+        displayPositionFor: dpFromAnchor(comments),
+        headToEdited: new Map(),
+      });
+      expect(marks).toHaveLength(0);
+    });
+  });
 });
 
 describe("canReplyToThread", () => {

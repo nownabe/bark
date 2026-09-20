@@ -62,12 +62,15 @@ import {
 import {
   applyAcceptedSuggestion,
   diffToSuggestions,
+  editedSpanToHead,
   extractSuggestionBlock,
+  headRangeToEditedOffsets,
   isMeaningfulEdit,
   rebaseLoadedEdit,
   suggestionEditRanges,
 } from "../../lib/suggest";
-import { buildLineIndex, lineColToOffset, type SourceAnchor } from "../../lib/anchor";
+import { buildLineMap, invertLineMap } from "../../lib/pr/linemap";
+import { buildLineIndex, type SourceAnchor } from "../../lib/anchor";
 import type { ExistingComment } from "../../lib/comments";
 import {
   buildBlobPermalink,
@@ -87,7 +90,12 @@ import {
   type PendingDraft,
   type SuggestionDecision,
 } from "../../lib/drafts";
-import { embedMetadata, extractMetadata, type CommentMetadata } from "../../lib/metadata";
+import {
+  embedMetadata,
+  extractMetadata,
+  type AnchorRange,
+  type CommentMetadata,
+} from "../../lib/metadata";
 import { BODY_LIMIT, envelopeOf, wireBodyLength } from "../../lib/pr/metadata";
 import { browser } from "wxt/browser";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
@@ -462,6 +470,16 @@ function AppBody() {
   }, [prRepository, repositoryAppState]);
 
   const lineStarts = useMemo(() => buildLineIndex(source), [source]);
+  // Comment positions are head coordinates; the editor may show a locally
+  // edited copy. One map bridges the two, and its inverse takes a selection
+  // back (issue #283, ADR 0004 §8). Null when there are no local edits.
+  const headToEdited = useMemo(
+    () => (source === baseSource ? null : buildLineMap(baseSource, source)),
+    [source, baseSource],
+  );
+  const editedToHead = useMemo(() => headToEdited && invertLineMap(headToEdited), [headToEdited]);
+  const toEditedOffsets = (range: AnchorRange) =>
+    headRangeToEditedOffsets(range, headToEdited, lineStarts);
   const diffRanges = useMemo(
     () => parseRightRanges(files.find((f) => f.path === selectedPath)?.patch),
     [files, selectedPath],
@@ -653,25 +671,20 @@ function AppBody() {
       // Only threads visible in the sidebar (per the active filter) are clickable
       // in the document — resolved threads become clickable when Resolved is on.
       if (!visibleThreadIds.has(t.id)) continue;
-      let from: number;
-      let to: number;
-      if (t.rootComment?.meta) {
-        // L7e-1: read the reanchored position from the new layer's
-        // CommentView instead of running legacy reanchorComment inline.
-        const dp = commentViewByCid.get(t.rootComment.meta.cid)?.displayPosition;
-        if (!dp || dp.status === "outdated") continue;
-        from = lineColToOffset(dp.range.sl, dp.range.sc, lineStarts);
-        to = lineColToOffset(dp.range.el, dp.range.ec, lineStarts);
-      } else if (t.rootDraft) {
-        from = lineColToOffset(t.rootDraft.range.sl, t.rootDraft.range.sc, lineStarts);
-        to = lineColToOffset(t.rootDraft.range.el, t.rootDraft.range.ec, lineStarts);
-      } else {
-        continue;
-      }
+      // L7e-1: read the reanchored position from the new layer's CommentView
+      // instead of running legacy reanchorComment inline — for drafts too,
+      // whose stored range is head-coordinate and may sit at an older sha.
+      const cid = t.rootComment?.meta?.cid ?? t.rootDraft?.cid;
+      if (!cid) continue;
+      const dp = commentViewByCid.get(cid)?.displayPosition;
+      if (!dp || dp.status === "outdated") continue;
+      const o = toEditedOffsets(dp.range);
+      if (!o) continue;
+      const { from, to } = o;
       if (from >= 0 && to <= docLen && from < to) res.push({ id: t.id, from, to });
     }
     return res;
-  }, [threads, visibleThreadIds, source, lineStarts, curPath, commentViewByCid]);
+  }, [threads, visibleThreadIds, source, lineStarts, headToEdited, curPath, commentViewByCid]);
 
   // The current-doc char span of each pending suggestion's edited text, so a
   // click on the suggested text in the editor maps back to its review item. The
@@ -774,24 +787,32 @@ function AppBody() {
       .flatMap((c) => {
         const dp = commentViewByCid.get((c.meta as CommentMetadata).cid)?.displayPosition;
         if (!dp || dp.status === "outdated") return [];
-        return [
-          {
-            from: lineColToOffset(dp.range.sl, dp.range.sc, lineStarts),
-            to: lineColToOffset(dp.range.el, dp.range.ec, lineStarts),
-          },
-        ];
+        const o = toEditedOffsets(dp.range);
+        return o ? [o] : [];
       })
       .filter(clip);
+    // A draft's own range is head-coordinate too, and may sit at an older sha,
+    // so it goes through its CommentView like a synced comment does.
     const pending = drafts
       .filter((d) => d.path === curPath && visibleThreadIds.has(d.thread))
-      .map((d) => ({
-        from: lineColToOffset(d.range.sl, d.range.sc, lineStarts),
-        to: lineColToOffset(d.range.el, d.range.ec, lineStarts),
-        pending: true,
-      }))
+      .flatMap((d) => {
+        const dp = commentViewByCid.get(d.cid)?.displayPosition;
+        if (!dp || dp.status === "outdated") return [];
+        const o = toEditedOffsets(dp.range);
+        return o ? [{ ...o, pending: true }] : [];
+      })
       .filter(clip);
     view.dispatch({ effects: setCommentHighlights.of([...existing, ...pending]) });
-  }, [comments, drafts, visibleThreadIds, source, lineStarts, selectedPath, commentViewByCid]);
+  }, [
+    comments,
+    drafts,
+    visibleThreadIds,
+    source,
+    lineStarts,
+    headToEdited,
+    selectedPath,
+    commentViewByCid,
+  ]);
 
   // Render submitted suggestions in the body as tracked changes (old = strikethrough / new = green block).
   useEffect(() => {
@@ -805,9 +826,19 @@ function AppBody() {
       dismissed,
       displayPositionFor: (cid) => commentViewByCid.get(cid)?.displayPosition ?? null,
       resolvedKeys: resolvedThreadKeys,
+      headToEdited,
     });
     view.dispatch({ effects: setSuggestionMarks.of(marks) });
-  }, [comments, source, lineStarts, selectedPath, dismissed, commentViewByCid, resolvedThreadKeys]);
+  }, [
+    comments,
+    source,
+    lineStarts,
+    headToEdited,
+    selectedPath,
+    dismissed,
+    commentViewByCid,
+    resolvedThreadKeys,
+  ]);
 
   // Scroll the emphasized item (e.g. after clicking its highlighted text in the
   // body) into view in the sidebar. The id is a thread id or a live-suggestion
@@ -835,23 +866,21 @@ function AppBody() {
   }, [pendingSuggestions]);
 
   const jumpTo = (c: ExistingComment) => {
-    const view = cmRef.current?.view;
-    if (!view || !c.meta) return;
+    if (!c.meta) return;
     if (c.meta.path !== (selectedPath ?? "sample")) {
       setSelectedPath(c.meta.path);
       return;
     }
-    const dp = commentViewByCid.get(c.meta.cid)?.displayPosition;
+    jumpToCid(c.meta.cid);
+  };
+
+  /** Select a comment's (or draft's) reanchored span in the editor, mapped
+   *  onto the edited document. */
+  const jumpToCid = (cid: string) => {
+    const dp = commentViewByCid.get(cid)?.displayPosition;
     if (!dp || dp.status === "outdated") return;
-    const from = lineColToOffset(dp.range.sl, dp.range.sc, lineStarts);
-    const to = lineColToOffset(dp.range.el, dp.range.ec, lineStarts);
-    suppressNextAnchor.current = true;
-    view.dispatch({
-      selection: { anchor: from, head: to },
-      scrollIntoView: true,
-    });
-    suppressNextAnchor.current = false; // update listener already ran synchronously
-    view.focus();
+    const o = toEditedOffsets(dp.range);
+    if (o) jumpToOffsets(o.from, o.to);
   };
 
   const meta: CommentMetadata | null = anchor
@@ -878,23 +907,32 @@ function AppBody() {
 
   const addDraft = async () => {
     if (!anchor || !ref || !prRepository) return;
-    const inDiff = isRangeInDiff(diffRanges, anchor.startLine, anchor.endLine);
+    // The selection is in editor coordinates but the anchor is stamped with the
+    // head sha, so it must be recorded in head coordinates (issue #283). A
+    // selection touching a locally edited line exists in no revision GitHub
+    // has, so it is refused rather than anchored to text that is not there.
+    const span = editedSpanToHead(anchor.startLine, anchor.endLine, editedToHead);
+    if (!span) {
+      reportError(
+        "Can't comment on lines with unsubmitted edits. Submit or discard your edits, or select unedited text.",
+      );
+      return;
+    }
+    const inDiff = isRangeInDiff(diffRanges, span.sl, span.el);
     const path = selectedPath ?? "sample";
     const id = crypto.randomUUID();
     const draft: PendingDraft = {
       cid: id,
       path,
       inDiff,
-      range: { sl: anchor.startLine, sc: anchor.startCol, el: anchor.endLine, ec: anchor.endCol },
+      range: { sl: span.sl, sc: anchor.startCol, el: span.el, ec: anchor.endCol },
       quote: anchor.quotedText,
       sha: headSha ?? "",
       thread: id,
       body: commentBody.trim() || "(no comment)",
       kind: "comment",
       permalink:
-        !inDiff && headSha
-          ? buildBlobPermalink(ref, path, headSha, anchor.startLine, anchor.endLine)
-          : undefined,
+        !inDiff && headSha ? buildBlobPermalink(ref, path, headSha, span.sl, span.el) : undefined,
     };
     const comment = pendingDraftToComment(draft, viewerLogin ?? "you");
     // GitHub refuses a body over 65,536 characters, and a review batch is
@@ -1086,6 +1124,7 @@ function AppBody() {
       replacement: extractSuggestionBlock(c.body) ?? "",
       displayPosition: view.displayPosition,
       anchorSource,
+      headToEdited,
     });
     if (newSource === null) {
       // The target text moved or changed since the suggestion was written
@@ -1495,10 +1534,7 @@ function AppBody() {
       setSelectedPath(d.path);
       return;
     }
-    jumpToOffsets(
-      lineColToOffset(d.range.sl, d.range.sc, lineStarts),
-      lineColToOffset(d.range.el, d.range.ec, lineStarts),
-    );
+    jumpToCid(d.cid);
   };
 
   // Scroll the sidebar so the given item's card sits at the same viewport height

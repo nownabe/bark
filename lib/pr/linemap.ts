@@ -84,6 +84,13 @@ export function buildLineMap(oldSource: string, newSource: string): Map<number, 
   return map;
 }
 
+/** The same correspondence read the other way: new line → old line. */
+export function invertLineMap(map: Map<number, number>): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const [from, to] of map) out.set(to, from);
+  return out;
+}
+
 type MemoEntry = { oldSource: string; newSource: string; map: Map<number, number> };
 
 /** simplify: 64-entry LRU; beyond it maps are rebuilt on rotation. The upgrade

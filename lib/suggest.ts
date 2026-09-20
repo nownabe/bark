@@ -4,7 +4,7 @@
 import { diff_match_patch } from "diff-match-patch";
 import { lineColToOffset } from "./anchor";
 import type { SuggestionEdit } from "./drafts";
-import type { CommentMetadata } from "./metadata";
+import type { AnchorRange, CommentMetadata } from "./metadata";
 import { buildLineMap, lineDiff } from "./pr/linemap";
 import { type DisplayPosition, locateSpan } from "./pr/reanchor";
 
@@ -47,8 +47,8 @@ export function extractSuggestionBlock(body: string): string | null {
  * but the accept applies to the author's locally edited `source`. When the
  * two differ — an earlier accept or manual edit changed the line count —
  * the head-space line number is translated to its edited-space position via
- * the LCS line map before applying; an unmapped line (deleted or modified
- * locally) fails the fast path (issue #177).
+ * the head → edited line map before applying; an unmapped line (deleted or
+ * modified locally) fails the fast path (issue #177).
  *
  * When the fast path fails, the target gets a second chance (issues #269,
  * #311): its span — one line or several — is re-located directly in `source`
@@ -73,6 +73,9 @@ export function applyAcceptedSuggestion(args: {
    *  was taken from. `null` when it is not available, which disables the
    *  line-local merge and leaves only the exact-quote fast path. */
   anchorSource: string | null;
+  /** `buildLineMap(baseSource, source)`, null when the two are equal. The UI
+   *  already memoises it per keystroke (issue #283); omit it to rebuild here. */
+  headToEdited?: Map<number, number> | null;
 }): string | null {
   const { source, baseSource, lineStarts, meta, replacement, displayPosition, anchorSource } = args;
   if (displayPosition.status === "outdated") return null;
@@ -80,11 +83,11 @@ export function applyAcceptedSuggestion(args: {
 
   const exact = applyExactQuote(
     source,
-    baseSource,
     lineStarts,
     displayPosition,
     quote,
     replacement,
+    args.headToEdited ?? (source === baseSource ? null : buildLineMap(baseSource, source)),
   );
   if (exact !== null) return exact;
 
@@ -106,19 +109,15 @@ export function applyAcceptedSuggestion(args: {
  *  quote. Null means "not applicable here", not "refused". */
 function applyExactQuote(
   source: string,
-  baseSource: string,
   lineStarts: number[],
   displayPosition: Exclude<DisplayPosition, { status: "outdated" }>,
   quote: string,
   replacement: string,
+  headToEdited: Map<number, number> | null,
 ): string | null {
-  let targetLine = displayPosition.range.sl;
-  if (source !== baseSource) {
-    const mapped = buildLineMap(baseSource, source).get(targetLine);
-    if (mapped === undefined) return null;
-    targetLine = mapped;
-  }
-  const from = lineColToOffset(targetLine, displayPosition.range.sc, lineStarts);
+  const offsets = headRangeToEditedOffsets(displayPosition.range, headToEdited, lineStarts);
+  if (offsets === null) return null;
+  const from = offsets.from;
   let to = from + quote.length;
   if (source.slice(from, to) !== quote) return null;
   // Issue #191: a line-deletion suggestion (empty replacement) whose span
@@ -155,6 +154,48 @@ function replaceLines(
   if (deleteLines && text === "") lines.splice(sl - 1, el - sl + 1);
   else lines.splice(sl - 1, el - sl + 1, text);
   return lines.join("\n");
+}
+
+// ---- Head ↔ edited coordinates (issue #283) ------------------------------
+//
+// `DisplayPosition` and `Comment.anchor` are expressed in the coordinates of
+// the head-sha file; the editor may show a locally edited copy of it. One line
+// map, head → edited, bridges the two. A line with local edits has no stable
+// position in the other space, so it maps to nothing in either direction —
+// the same rule `applyExactQuote` has used since issue #177.
+
+/** Char offsets in the edited source of a head-coordinate range. `headToEdited`
+ *  is `buildLineMap(headSource, editedSource)`, or null when the two are equal.
+ *  Null when either endpoint's line has local edits (no map entry). */
+export function headRangeToEditedOffsets(
+  range: AnchorRange,
+  headToEdited: Map<number, number> | null,
+  lineStarts: number[],
+): { from: number; to: number } | null {
+  const sl = headToEdited ? headToEdited.get(range.sl) : range.sl;
+  const el = headToEdited ? headToEdited.get(range.el) : range.el;
+  if (sl === undefined || el === undefined) return null;
+  return {
+    from: lineColToOffset(sl, range.sc, lineStarts),
+    to: lineColToOffset(el, range.ec, lineStarts),
+  };
+}
+
+/** Head-coordinate line span of an edited-source selection, or null when a
+ *  selected line has local edits or the lines are not contiguous in head.
+ *  `editedToHead` is `invertLineMap(headToEdited)`, or null when equal. */
+export function editedSpanToHead(
+  sl: number,
+  el: number,
+  editedToHead: Map<number, number> | null,
+): { sl: number; el: number } | null {
+  if (!editedToHead) return { sl, el };
+  const head = editedToHead.get(sl);
+  if (head === undefined) return null;
+  for (let k = sl + 1; k <= el; k++) {
+    if (editedToHead.get(k) !== head + (k - sl)) return null;
+  }
+  return { sl: head, el: head + (el - sl) };
 }
 
 /** The visible text of a comment body with the suggestion block removed. */
