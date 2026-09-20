@@ -1,7 +1,7 @@
 // ExecutionStep catalog — the API-level units the Executor runs.
 // See docs/adr/0003-operations-and-execution.md §5.
 
-import type { Comment, FileEdit, LocalId } from "./types";
+import type { Comment, ErrorInfo, FileEdit, LocalId } from "./types";
 
 /** Atomic submission of N in-diff Comments via the GitHub review API. */
 export type PostReviewBatchStep = {
@@ -10,6 +10,16 @@ export type PostReviewBatchStep = {
   commitId: string;
   /** All in-diff Comments that became `syncing` in this cycle. */
   comments: Comment[];
+};
+
+/** A Comment the Planner refused to post because its anchor cannot be mapped
+ *  into the current head (issue #265). It never reaches the Transport; the
+ *  Executor reports it as a failed outcome so the state machine returns the
+ *  Comment (and its unposted Thread) to `draft` with `lastError`. */
+export type RejectCommentStep = {
+  kind: "reject-comment";
+  comment: Comment;
+  error: ErrorInfo;
 };
 
 /** Reply to a synced Comment via the review-comments endpoint. */
@@ -52,6 +62,7 @@ export type CommitStep = {
 
 export type ExecutionStep =
   | PostReviewBatchStep
+  | RejectCommentStep
   | PostReplyStep
   | PostIssueCommentStep
   | ResolveReviewThreadStep

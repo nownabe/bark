@@ -58,6 +58,7 @@ That's the complete set. No `AcceptSuggestionOp`, no `AuthorSubmitOp`, no `Delet
 | Step                    | Inputs                             | Bundles                                           | GitHub API                                                                                               |
 | ----------------------- | ---------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `PostReviewBatch`       | in-diff `CreateComment[]`          | many `CreateComment`s sharing the same submission | `POST /repos/.../pulls/{n}/reviews` (one call, atomic)                                                   |
+| `RejectComment`         | one unmappable `CreateComment`     | 1:1                                               | none — fails locally (see below)                                                                         |
 | `PostReply`             | one `CreateReply`                  | 1:1                                               | `POST /repos/.../pulls/{n}/comments` with `in_reply_to`                                                  |
 | `PostIssueComment`      | one out-of-diff `CreateComment`    | 1:1                                               | `POST /repos/.../issues/{n}/comments` (body includes quote + permalink)                                  |
 | `ResolveReviewThread`   | one `UpdateThreadResolved(true)`   | 1:1                                               | GraphQL `resolveReviewThread`                                                                            |
@@ -66,6 +67,8 @@ That's the complete set. No `AcceptSuggestionOp`, no `AuthorSubmitOp`, no `Delet
 
 In-diff vs out-of-diff routing for `CreateComment` is computed at planning time from the current diff (which the Executor fetches as part of `RemoteState`), not from any field on the Op. This was an explicit deviation from the legacy model where `inDiff` was frozen at draft creation.
 
+**Posted coordinates are the current head's.** A review has a single `commit_id`, and Bark always posts against `RemoteState.pullRequest.headSha`, so the `line` / `start_line` it sends must be in that commit's coordinates. `Comment.anchor` is immutable (ADR 0002 §2) and may carry an older sha, so at planning time each `CreateComment` is re-anchored `anchor.sha → headSha` with the same line map ADR 0004 uses for display (`RemoteState.fileContents` therefore holds every anchored path at both shas). The in-diff routing and the posted copy (including the embedded metadata `anchor`) use the mapped range; `LocalState` keeps the original anchor. A `CreateComment` whose mapping is `outdated` becomes a `RejectComment` Step instead: it never reaches GitHub and fails locally, so the rest of the submission proceeds and the batch cannot 422 on stale lines (issue #265).
+
 ### 6. Failure semantics
 
 Each `ExecutionStep` returns per-item results:
@@ -73,6 +76,7 @@ Each `ExecutionStep` returns per-item results:
 - A 1:1 Step succeeds or fails as a whole; the single affected item lands in `synced` or `draft + lastError`.
 - `PostReviewBatch` is atomic at GitHub — all-or-nothing — so its result is uniform across the bundled comments. (A protocol-level partial success is not possible; a network failure mid-call is treated as full failure pending re-fetch confirmation.)
 - `Commit` is atomic from the Executor's perspective; intermediate failures (e.g. `updateRef` rejects with non-fast-forward) return every bundled `FileEdit` to `draft + lastError`.
+- `RejectComment` always fails: the `Comment` (and its not-yet-created `Thread`) returns to `draft + lastError` with a "could not map to the current head" message. The user re-creates the comment on the current text.
 
 The Reconciler is not responsible for retry. The user observes the error in the UI and re-triggers the action, which re-enters `draft → syncing`.
 

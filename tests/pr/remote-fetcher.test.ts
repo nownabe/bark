@@ -975,6 +975,9 @@ describe("remote-fetcher — fetchRemoteState", () => {
     expect(out.fileContents.map((f) => `${f.sha}:${f.path}:${f.source}`)).toEqual([
       "h0:a.md:hello",
       "h1:b.md:hello",
+      // plus each anchored path at the head, for the re-anchoring map
+      "h:a.md:hello",
+      "h:b.md:hello",
     ]);
   });
 
@@ -1031,12 +1034,55 @@ describe("remote-fetcher — fetchRemoteState", () => {
 
     // No explicit fileContentTargets — the orchestrator should have
     // pulled the old source for the bark comment's `(anchor.sha, path)`
-    // entirely on its own.
-    expect(out.fileContents).toHaveLength(1);
-    expect(out.fileContents[0]?.sha).toBe("old-sha");
-    expect(out.fileContents[0]?.path).toBe("src/x.md");
-    expect(out.fileContents[0]?.source).toBe("hello world");
-    expect(contentsCalls).toHaveLength(1);
+    // entirely on its own (plus the head version of that path).
+    expect(out.fileContents.map((f) => `${f.sha}:${f.path}:${f.source}`)).toEqual([
+      "old-sha:src/x.md:hello world",
+      "head:src/x.md:hello world",
+    ]);
+    expect(contentsCalls).toHaveLength(2);
+  });
+
+  test("the head-sha version of every anchored path is fetched too (issue #265)", async () => {
+    // Re-anchoring (display and posting) maps anchor.sha → headSha, which
+    // needs the head-sha source as well as the anchor-sha one; nothing
+    // else fetches it, so the orchestrator must.
+    const contentsRefs: string[] = [];
+    const { fetch } = makeFetch(async (req) => {
+      if (req.url.endsWith("/pulls/7"))
+        return jsonResponse({
+          number: 7,
+          title: "T",
+          body: "B",
+          state: "open",
+          draft: false,
+          merged: false,
+          head: { sha: "head", ref: "topic" },
+          base: { ref: "main" },
+          user: { login: "alice", avatar_url: "" },
+        });
+      if (req.url.endsWith("/user")) return jsonResponse({ login: "alice", avatar_url: "" });
+      if (req.url.includes("/pulls/7/comments")) return jsonResponse([]);
+      if (req.url.includes("/issues/7/comments")) return jsonResponse([]);
+      if (req.url.endsWith("/graphql"))
+        return jsonResponse({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        });
+      if (req.url.includes("/contents/")) {
+        contentsRefs.push(new URL(req.url).searchParams.get("ref") ?? "");
+        return jsonResponse({ content: btoa("x"), encoding: "base64" });
+      }
+      throw new Error(`unexpected: ${req.url}`);
+    });
+
+    const out = await fetchRemoteState({ token: "t", fetch }, PR, {
+      fileContentTargets: [{ sha: "old", path: "x.md" }],
+    });
+
+    expect(contentsRefs.sort()).toEqual(["head", "old"]);
+    expect(out.fileContents.map((f) => `${f.sha}:${f.path}`).sort()).toEqual([
+      "head:x.md",
+      "old:x.md",
+    ]);
   });
 
   test("auto-collect dedups against caller-provided fileContentTargets", async () => {
@@ -1091,8 +1137,9 @@ describe("remote-fetcher — fetchRemoteState", () => {
     const out = await fetchRemoteState({ token: "t", fetch }, PR, {
       fileContentTargets: [{ sha: "old", path: "x.md" }],
     });
-    expect(out.fileContents).toHaveLength(1);
-    expect(contentsCalls).toHaveLength(1);
+    // old:x.md once (deduped) + head:x.md
+    expect(out.fileContents).toHaveLength(2);
+    expect(contentsCalls).toHaveLength(2);
   });
 
   test("a 404 on one file is non-fatal — surviving fetches still land in fileContents", async () => {
@@ -1146,8 +1193,11 @@ describe("remote-fetcher — fetchRemoteState", () => {
     });
 
     const out = await fetchRemoteState({ token: "t", fetch }, PR);
-    // good.md survives; missing.md silently drops out — its comment will
-    // re-anchor to 'outdated' downstream.
-    expect(out.fileContents.map((f) => f.path)).toEqual(["good.md"]);
+    // good.md survives (anchor sha + head); missing.md silently drops out —
+    // its comment will re-anchor to 'outdated' downstream.
+    expect(out.fileContents.map((f) => `${f.sha}:${f.path}`)).toEqual([
+      "good-sha:good.md",
+      "head:good.md",
+    ]);
   });
 });

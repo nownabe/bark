@@ -9,6 +9,7 @@
 // See docs/adr/0003-operations-and-execution.md §3.
 
 import type { ExecutionStep } from "./steps";
+import type { ErrorInfo } from "./types";
 import type {
   CommitOutcome,
   PostIssueCommentOutcome,
@@ -20,6 +21,10 @@ import type {
 
 export type StepResult =
   | { step: Extract<ExecutionStep, { kind: "post-review-batch" }>; outcome: PostReviewBatchOutcome }
+  | {
+      step: Extract<ExecutionStep, { kind: "reject-comment" }>;
+      outcome: { ok: false; error: ErrorInfo };
+    }
   | { step: Extract<ExecutionStep, { kind: "post-reply" }>; outcome: PostReplyOutcome }
   | {
       step: Extract<ExecutionStep, { kind: "post-issue-comment" }>;
@@ -45,6 +50,8 @@ async function runStep(step: ExecutionStep, transport: Transport): Promise<StepR
   switch (step.kind) {
     case "post-review-batch":
       return { step, outcome: await transport.postReviewBatch(step) };
+    case "reject-comment":
+      return { step, outcome: { ok: false, error: step.error } };
     case "post-reply":
       return { step, outcome: await transport.postReply(step) };
     case "post-issue-comment":

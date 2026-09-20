@@ -69,6 +69,9 @@ export interface PendingSuggestion {
   quote: string;
   replacement: string;
   body: string;
+  /** Head sha the edit's `base` was fetched at (SuggestionEdit.baseSha); the
+   *  hunk's lines are in that sha's coordinates. Absent for legacy edits. */
+  baseSha?: string;
 }
 
 /** Stable id for a live suggestion derived from a base→edited line hunk. */
@@ -87,6 +90,7 @@ export function buildPendingSuggestions(
     path: string;
     isInDiff: (sl: number, el: number) => boolean;
     commentFor: (cid: string) => string;
+    baseSha?: string;
   },
 ): PendingSuggestion[] {
   return hunks.map((h) => {
@@ -99,6 +103,7 @@ export function buildPendingSuggestions(
       quote: h.quote,
       replacement: h.replacement,
       body: opts.commentFor(cid),
+      ...(opts.baseSha ? { baseSha: opts.baseSha } : {}),
     };
   });
 }
@@ -125,6 +130,7 @@ export function buildAllPendingSuggestions(
         path,
         isInDiff: (sl, el) => isInDiff(path, sl, el),
         commentFor: (cid) => edit.comments[cid] ?? "",
+        baseSha: edit.baseSha,
       });
     });
 }
@@ -371,24 +377,20 @@ export function buildReviewEntries(args: {
   const entries: ReviewEntry[] = [
     ...threads
       .filter((thread) => thread.path === currentPath)
-      .map(
-        (thread): ReviewEntry => ({
-          kind: "thread",
-          sortPath: thread.path ?? "",
-          sortPos: thread.pos,
-          thread,
-        }),
-      ),
+      .map((thread): ReviewEntry => ({
+        kind: "thread",
+        sortPath: thread.path ?? "",
+        sortPos: thread.pos,
+        thread,
+      })),
     ...pendingSuggestions
       .filter((suggestion) => suggestion.path === currentPath)
-      .map(
-        (suggestion): ReviewEntry => ({
-          kind: "liveSuggestion",
-          sortPath: suggestion.path,
-          sortPos: posOf(suggestion.range),
-          suggestion,
-        }),
-      ),
+      .map((suggestion): ReviewEntry => ({
+        kind: "liveSuggestion",
+        sortPath: suggestion.path,
+        sortPos: posOf(suggestion.range),
+        suggestion,
+      })),
   ];
   entries.sort((a, b) => comparePos(a.sortPos, b.sortPos));
   return entries;
@@ -462,16 +464,14 @@ export function buildAuthorPendingItems(
       );
     })
     .map((path): PendingItem => ({ kind: "edit", path }));
-  const acceptedItems: PendingItem[] = accepted.map(
-    (a): PendingItem => ({
-      kind: "acceptedSuggestion",
-      commentId: a.commentId,
-      path: a.path,
-      quote: a.quote,
-      replacement: a.replacement,
-      line: a.line,
-    }),
-  );
+  const acceptedItems: PendingItem[] = accepted.map((a): PendingItem => ({
+    kind: "acceptedSuggestion",
+    commentId: a.commentId,
+    path: a.path,
+    quote: a.quote,
+    replacement: a.replacement,
+    line: a.line,
+  }));
   return [
     ...drafts.map((draft): PendingItem => ({ kind: "comment", draft })),
     ...acceptedItems,

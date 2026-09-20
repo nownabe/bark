@@ -183,6 +183,7 @@ export class PullRequestRepository {
       isInDiff: this.isInDiff,
       headSha: pr.headSha,
       headRef: pr.headRef,
+      fileContents: this.remoteState.fileContents,
     };
   }
 

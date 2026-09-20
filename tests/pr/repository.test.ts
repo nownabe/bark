@@ -9,11 +9,14 @@ import type {
   ResolveOutcome,
   Transport,
 } from "../../lib/pr/transport";
-import type { Comment, FileEdit, PullRequest, Thread } from "../../lib/pr/types";
+import type { PostReviewBatchStep } from "../../lib/pr/steps";
+import type { Comment, FileEdit, PullRequest, Range, Thread } from "../../lib/pr/types";
 
 const author = { login: "alice" };
+// Anchored at pr()'s head sha; drafts at an older sha are exercised by the
+// issue #265 tests below.
 const anchor = {
-  sha: "deadbeef",
+  sha: "h",
   range: { sl: 1, sc: 1, el: 1, ec: 10 },
   quote: "hello",
 };
@@ -441,6 +444,121 @@ describe("repository — setThreadResolved", () => {
 
     expect(calls).toEqual(["resolve-review-thread(fail)", "resolve-review-thread"]);
     expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: true });
+  });
+});
+
+describe("repository — drafts created at an older head (issue #265)", () => {
+  test("submit posts a draft at its line in the current head, not its creation-sha line", async () => {
+    // Head A: the draft quotes "target line" at line 3. Head B inserts two
+    // lines above it, so the same sentence now sits at line 5. A review is
+    // posted against one commit_id, so the line numbers sent with it must
+    // be in that commit's coordinates.
+    const sourceA = ["intro", "more", "target line", "outro"].join("\n");
+    const sourceB = ["intro", "new 1", "new 2", "more", "target line", "outro"].join("\n");
+    const draft = comment({
+      id: "c1",
+      state: "draft",
+      threadId: "t1",
+      path: "README.md",
+      anchor: { sha: "A", range: { sl: 3, sc: 1, el: 3, ec: 12 }, quote: "target line" },
+    });
+
+    const posted: PostReviewBatchStep[] = [];
+    const routed: Range[] = [];
+    const { transport } = happyTransport();
+    const recording: Transport = {
+      ...transport,
+      async postReviewBatch(step) {
+        posted.push(step);
+        return transport.postReviewBatch(step);
+      },
+    };
+    const r = makeRepo(recording, (c) => {
+      routed.push(c.anchor.range);
+      return true;
+    });
+    await r.setRemoteState({
+      ...r.getRemoteState(),
+      pullRequest: pr({ headSha: "B" }),
+      fileContents: [
+        { sha: "A", path: "README.md", source: sourceA },
+        { sha: "B", path: "README.md", source: sourceB },
+      ],
+    });
+    await r.upsertThread(thread({ id: "t1", state: "draft" }));
+    await r.upsertComment(draft);
+
+    await r.submitDrafts();
+
+    const mapped: Range = { sl: 5, sc: 1, el: 5, ec: 12 };
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.commitId).toBe("B");
+    expect(posted[0]?.comments[0]?.anchor).toEqual({
+      sha: "B",
+      range: mapped,
+      quote: "target line",
+    });
+    // In-diff routing is decided against the current diff, so it must see
+    // the mapped range as well, not the creation-sha one.
+    expect(routed).toEqual([mapped]);
+  });
+
+  test("a draft whose lines no longer exist in the head is refused, not posted with stale lines", async () => {
+    // Head B deletes the line that c2 quoted, so its anchor cannot be
+    // mapped. Posting it with sha-A lines would land it on unrelated text
+    // or 422 the whole review; instead it goes back to draft with an error
+    // while the mappable c1 still gets posted.
+    const sourceA = ["intro", "kept line", "doomed line", "outro"].join("\n");
+    const sourceB = ["intro", "new 1", "kept line", "outro"].join("\n");
+    const posted: PostReviewBatchStep[] = [];
+    const { transport } = happyTransport({ remoteThreadIdForBatch: "PRT_1" });
+    const recording: Transport = {
+      ...transport,
+      async postReviewBatch(step) {
+        posted.push(step);
+        return transport.postReviewBatch(step);
+      },
+    };
+    const r = makeRepo(recording);
+    await r.setRemoteState({
+      ...r.getRemoteState(),
+      pullRequest: pr({ headSha: "B" }),
+      fileContents: [
+        { sha: "A", path: "README.md", source: sourceA },
+        { sha: "B", path: "README.md", source: sourceB },
+      ],
+    });
+    await r.upsertThread(thread({ id: "t1", state: "draft" }));
+    await r.upsertThread(thread({ id: "t2", state: "draft" }));
+    await r.upsertComment(
+      comment({
+        id: "c1",
+        state: "draft",
+        threadId: "t1",
+        anchor: { sha: "A", range: { sl: 2, sc: 1, el: 2, ec: 10 }, quote: "kept line" },
+      }),
+    );
+    await r.upsertComment(
+      comment({
+        id: "c2",
+        state: "draft",
+        threadId: "t2",
+        anchor: { sha: "A", range: { sl: 3, sc: 1, el: 3, ec: 12 }, quote: "doomed line" },
+      }),
+    );
+
+    await r.submitDrafts();
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.comments.map((c) => c.id)).toEqual(["c1"]);
+    const byId = new Map(r.getLocalState().comments.map((c) => [c.id, c]));
+    expect(byId.get("c1")).toMatchObject({ state: "synced", remoteId: 100 });
+    expect(byId.get("c2")).toMatchObject({ state: "draft" });
+    expect(byId.get("c2")?.lastError?.message).toMatch(/current head/);
+    // The never-posted thread must not stay stuck in syncing.
+    expect(r.getLocalState().threads.find((t) => t.id === "t2")).toMatchObject({
+      state: "draft",
+    });
   });
 });
 

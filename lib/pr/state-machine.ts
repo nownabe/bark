@@ -101,8 +101,10 @@ function applyStepResult(local: LocalState, result: StepResult): LocalState {
       const o = result.outcome as PostReviewBatchOutcome;
       return o.ok
         ? applyReviewBatchSuccess(local, result.step, o.mappings)
-        : applyReviewBatchFailure(local, result.step, o.error);
+        : applyUnpostedCommentsFailure(local, result.step.comments, o.error);
     }
+    case "reject-comment":
+      return applyUnpostedCommentsFailure(local, [result.step.comment], result.step.error);
     case "post-reply":
     case "post-issue-comment": {
       const o = result.outcome as PostReplyOutcome | PostIssueCommentOutcome;
@@ -160,13 +162,16 @@ function applyReviewBatchSuccess(
   };
 }
 
-function applyReviewBatchFailure(
+/** Comments that never landed on GitHub go back to draft, together with the
+ *  Threads they were meant to create (a Thread that already exists remotely
+ *  keeps its state). */
+function applyUnpostedCommentsFailure(
   local: LocalState,
-  step: PostReviewBatchStep,
+  comments: Comment[],
   error: ErrorInfo,
 ): LocalState {
-  const commentIds = new Set(step.comments.map((c) => c.id));
-  const threadIds = new Set(step.comments.map((c) => c.threadId));
+  const commentIds = new Set(comments.map((c) => c.id));
+  const threadIds = new Set(comments.map((c) => c.threadId));
   return {
     ...local,
     comments: local.comments.map((c) =>
@@ -264,6 +269,8 @@ function applyStepResultToRemote(remote: RemoteState, result: StepResult): Remot
       const o = result.outcome as PostReviewBatchOutcome;
       return o.ok ? applyReviewBatchSuccessToRemote(remote, result.step, o.mappings) : remote;
     }
+    case "reject-comment":
+      return remote;
     case "post-reply":
     case "post-issue-comment": {
       const o = result.outcome as PostReplyOutcome | PostIssueCommentOutcome;

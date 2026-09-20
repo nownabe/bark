@@ -513,6 +513,11 @@ export async function fetchRemoteState(
       targetSet.set(`${t.sha}\0${t.path}`, t);
     }
   }
+  // Re-anchoring maps anchor.sha → headSha, so every anchored path is also
+  // needed at the head (issue #265).
+  for (const t of Array.from(targetSet.values())) {
+    targetSet.set(`${pullRequest.headSha}\0${t.path}`, { sha: pullRequest.headSha, path: t.path });
+  }
   const targets = Array.from(targetSet.values());
 
   // A 404 on one file (the sha + path no longer exists at GitHub) is
