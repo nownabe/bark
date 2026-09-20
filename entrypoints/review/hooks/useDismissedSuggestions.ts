@@ -1,13 +1,13 @@
 // Author's accept / reject decisions on submitted suggestions
 // (Pack B / R8c).
 //
-// Mirrors the useDrafts shape: a plain map + a restore effect + a single
-// "set + persist" action. The id → SuggestionDecision mapping is keyed
+// Mirrors the useDrafts shape: a plain map + a restore effect + the
+// "set + persist" actions. The id → SuggestionDecision mapping is keyed
 // by the submitted comment's REST id (stringified) and is used by the
 // review list to hide accepted/rejected suggestions and by submit flows
 // to materialise accepted ones into actual commits.
 
-import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { SuggestionDecision } from "../../../lib/drafts";
 import type { PrRef } from "../../../lib/pr/types";
 
@@ -17,16 +17,16 @@ export type DismissedDeps = {
     ref: PrRef,
     dismissed: Record<string, SuggestionDecision>,
   ) => Promise<void>;
+  clearAcceptedDecisions: (ref: PrRef, commentIds: number[]) => Promise<void>;
 };
 
 export type DismissedSuggestions = {
   dismissed: Record<string, SuggestionDecision>;
-  /** Lower-level escape hatch (used by submit flows that filter accepted
-   *  decisions in bulk). Local-only — the parent persists separately via
-   *  clearAcceptedDecisions. */
-  setDismissed: Dispatch<SetStateAction<Record<string, SuggestionDecision>>>;
   /** Set + persist a single decision atomically. */
   setDecision: (id: number, decision: SuggestionDecision) => Promise<void>;
+  /** Drop the given comment ids' accepted decisions from state and storage —
+   *  the bulk purge a Submit (committed + resolved) or a Discard all performs. */
+  clearAccepted: (commentIds: number[]) => Promise<void>;
   /** Clear local state without touching storage (used on logout). */
   reset: () => void;
 };
@@ -58,7 +58,17 @@ export function useDismissedSuggestions(
     if (ref) await deps.saveDismissedSuggestions(ref, next);
   };
 
+  const clearAccepted = async (commentIds: number[]) => {
+    const drop = new Set(commentIds.map(String));
+    setDismissed((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).filter(([id, decision]) => !(decision === "accepted" && drop.has(id))),
+      ),
+    );
+    if (ref) await deps.clearAcceptedDecisions(ref, commentIds);
+  };
+
   const reset = () => setDismissed({});
 
-  return { dismissed, setDismissed, setDecision, reset };
+  return { dismissed, setDecision, clearAccepted, reset };
 }

@@ -21,6 +21,7 @@ function makeDeps(overrides: Partial<DismissedDeps> = {}): DismissedDeps {
   return {
     listDismissedSuggestions: mock(async () => ({})),
     saveDismissedSuggestions: mock(async () => {}),
+    clearAcceptedDecisions: mock(async () => {}),
     ...overrides,
   };
 }
@@ -74,6 +75,42 @@ describe("useDismissedSuggestions — setDecision", () => {
     });
     expect(result.current.dismissed["7"]).toBe("accepted");
     expect(saveDismissedSuggestions).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDismissedSuggestions — clearAccepted", () => {
+  test("drops only the named ids and purges them from storage", async () => {
+    const clearAcceptedDecisions = mock(async (_r: PrRef, _ids: number[]) => {});
+    const deps = makeDeps({
+      listDismissedSuggestions: mock(async (): Promise<Record<string, SuggestionDecision>> => ({
+        "1": "accepted",
+        "2": "accepted",
+      })),
+      clearAcceptedDecisions,
+    });
+    const { result } = renderHook(() => useDismissedSuggestions(PR, deps));
+    await waitFor(() => expect(result.current.dismissed["1"]).toBe("accepted"));
+
+    await act(async () => {
+      await result.current.clearAccepted([1]);
+    });
+    expect(result.current.dismissed).toEqual({ "2": "accepted" });
+    expect(clearAcceptedDecisions).toHaveBeenCalledWith(PR, [1]);
+  });
+
+  test("without a ref: updates state, does NOT touch storage", async () => {
+    const clearAcceptedDecisions = mock(async () => {});
+    const deps = makeDeps({ clearAcceptedDecisions });
+    const { result } = renderHook(() => useDismissedSuggestions(null, deps));
+
+    await act(async () => {
+      await result.current.setDecision(9, "accepted");
+    });
+    await act(async () => {
+      await result.current.clearAccepted([9]);
+    });
+    expect(result.current.dismissed).toEqual({});
+    expect(clearAcceptedDecisions).not.toHaveBeenCalled();
   });
 });
 
