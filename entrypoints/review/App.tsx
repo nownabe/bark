@@ -472,6 +472,7 @@ function AppBody() {
         thread: c.threadId,
         body: c.body,
         kind: "comment",
+        lastError: c.lastError?.message,
         permalink:
           !inDiff && c.anchor.sha
             ? buildBlobPermalink(ref, c.path, c.anchor.sha, c.anchor.range.sl, c.anchor.range.el)
@@ -1114,9 +1115,24 @@ function AppBody() {
     return `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
   };
 
-  const reportFirstCommentError = () => {
-    const err = prRepository?.getLocalState().comments.find((c) => c.lastError)?.lastError;
-    if (err) reportError(err.message);
+  // Submit steps never throw: a failed post parks the Comment (and the Thread
+  // it would have created) back as draft + lastError, and a failed resolve
+  // parks the Thread. Announce the first one — with a count when several
+  // comments failed — and hand back the failed comment ids so the caller can
+  // keep the local work they were built from (issues #266, #268).
+  const reportSubmitErrors = (): Set<string> => {
+    const local = prRepository?.getLocalState();
+    if (!local) return new Set();
+    const failed = local.comments.filter((c) => c.lastError);
+    const first = failed[0]?.lastError ?? local.threads.find((t) => t.lastError)?.lastError;
+    if (first) {
+      reportError(
+        failed.length > 1
+          ? `${first.message} (${failed.length} comments failed to post)`
+          : first.message,
+      );
+    }
+    return new Set(failed.map((c) => c.id));
   };
 
   const submitReview = async () => {
@@ -1125,7 +1141,8 @@ function AppBody() {
       reportError("Data layer is not ready yet. Try again in a moment.");
       return;
     }
-    const toSubmit = [...drafts, ...suggestionsToDrafts()];
+    const suggestionDrafts = suggestionsToDrafts();
+    const toSubmit = [...drafts, ...suggestionDrafts];
     if (toSubmit.length === 0) return;
     setLoading(true);
     setError(null);
@@ -1166,13 +1183,18 @@ function AppBody() {
       // the drafts useMemo automatically. A failed or unconfirmed post
       // parks the comment back as draft + lastError; step outcomes don't
       // throw, so surface that here (issue #266).
-      reportFirstCommentError();
-      setSource(baseSource); // live suggestion edits are now submitted
-      setSuggestionComments({});
-      // All files' suggestions just went out, so drop every persisted edit
-      // (not only the open file's) and cancel any debounced write that would
-      // revive them.
-      await discardAllPersistedEdits();
+      const failedCids = reportSubmitErrors();
+      // The reviewer's editor edits leave the browser only as these comments,
+      // so dropping them after a comment that never reached GitHub would lose
+      // work nothing else holds (issue #268). Keep them for the retry.
+      if (!suggestionDrafts.some((d) => failedCids.has(d.cid))) {
+        setSource(baseSource); // live suggestion edits are now submitted
+        setSuggestionComments({});
+        // All files' suggestions just went out, so drop every persisted edit
+        // (not only the open file's) and cancel any debounced write that would
+        // revive them.
+        await discardAllPersistedEdits();
+      }
       // Repository.submitDrafts already updated LocalState with the synced
       // comments (via Reconciler / apply), so commentViews reflects the
       // just-submitted items without an extra fetch.
@@ -1264,7 +1286,7 @@ function AppBody() {
       // 4. Submit — Reconciler emits PostReviewBatch / PostIssueComment /
       //    PostReply + one Commit step for the FileEdits.
       await prRepository.submitDrafts();
-      reportFirstCommentError();
+      reportSubmitErrors();
       const newHeadSha = prRepository.getRemoteState().pullRequest?.headSha ?? headSha;
 
       // A failed Commit (e.g. the #187 conflict check, or a network error)
