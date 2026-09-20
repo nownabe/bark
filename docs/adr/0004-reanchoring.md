@@ -10,6 +10,7 @@
 - Amended: 2026-09 (#283) — §8, the head ↔ edited-document coordinate bridge.
 - Amended: 2026-09 (#267) — §1/§2/§6, head-sha `FileContent` is prefetched for every anchored path.
 - Amended: 2026-09 (#294) — §5, force-pushed shas stay fetchable; §4, `shifted` vs R9's `addressed`.
+- Amended: 2026-09 (#312) — §7, the editor previews the span-local merge for `shifted` suggestions.
 
 ## Context
 
@@ -121,6 +122,8 @@ The line map inside `reanchor` is the memoised `lineMapFor(anchor.sha, path, hea
 
 Accepting a suggestion first tries the exact path: the located line (head coordinates mapped to the author's edited source) must contain the quote byte-for-byte, which is replaced. When it does not (the paragraph already changed locally or upstream), the target span (one or more lines) is located from the anchor-sha file directly in the edited source with the §3 region search, and the suggestion is applied as a span-local three-way merge: `patch_make(quote → replacement)` applied to those lines only; every hunk must apply, otherwise the accept is refused. The merge never touches any line outside the span, and the result is staged as tracked changes for the author to review before commit.
 
+The editor previews that merge before Accept: a `shifted` suggestion is overlaid with the merged span text — struck-through located span, merged text beside it, plus the §4 "position shifted" badge — and a span whose merge would be refused gets no overlay at all, so the preview never shows an accept that cannot happen.
+
 ### 8. Editor coordinates
 
 `DisplayPosition` is expressed in the coordinates of `FileContent(headSha, path)`. The editor may show a locally edited copy of that file (the author's staged accepts and edits, the reviewer's live suggestions). The UI bridges the two with one line map, head → edited, built from the head text and the editor text: a comment is drawn or jumped to at its mapped line, and not drawn at all when the line it sits on has local edits — a line being rewritten has no stable position, and `applyAcceptedSuggestion` refuses the same way. A new comment's anchor is recorded in head coordinates by mapping the selection back through the same map; a selection that touches a locally edited line, or whose lines are not contiguous in the head text, is refused with a message rather than anchored to text GitHub does not have.
@@ -141,7 +144,6 @@ Accepting a suggestion first tries the exact path: the located line (head coordi
 
 ### Deferred
 
-- Editor overlay for `shifted` suggestions (merge preview).
 - Cross-file content move tracking (renamed file → no FileContent match).
 - Persistent `FileContent` cache for faster reopens.
 

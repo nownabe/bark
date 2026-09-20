@@ -19,7 +19,9 @@ import type { DisplayPosition } from "../../lib/pr/reanchor";
 import {
   diffToSuggestions,
   extractSuggestionBlock,
+  headRangeToEditedOffsets,
   isMeaningfulEdit,
+  mergeSuggestionSpan,
   type SuggestionHunk,
 } from "../../lib/suggest";
 
@@ -599,6 +601,9 @@ export interface SuggestionRender {
   from: number;
   to: number;
   replacement: string;
+  /** The target drifted from the quote, so `replacement` is a merge preview
+   *  rather than the reviewer's literal text — the view badges it. */
+  shifted?: boolean;
 }
 
 /**
@@ -607,6 +612,11 @@ export interface SuggestionRender {
  * The span is sized by the quoted old text rather than by the anchor's end
  * column: the quote is the source text at the range (ADR 0002 §3), so the two
  * agree, and the quote stays right after re-anchoring moved the position.
+ *
+ * A `shifted` target is the exception: its quote no longer verifies, so the
+ * span itself sizes the mark and the replacement is the merge preview the
+ * accept would stage (ADR 0004 §7, issue #312). A merge the accept would
+ * refuse is not drawn at all.
  *
  * Positions are head coordinates; `headToEdited` maps them onto the edited
  * document. A suggestion whose line carries local edits has no stable position
@@ -648,16 +658,30 @@ export function buildSuggestionMarks(args: {
     const meta = c.meta as CommentMetadata;
     const dp = displayPositionFor(meta.cid);
     if (!dp || dp.status === "outdated") continue;
+    const quote = meta.quote ?? "";
+    const replacement = extractSuggestionBlock(c.body) ?? "";
+    if (dp.status === "shifted") {
+      // The quote no longer verifies here, so the located span — not
+      // quote.length characters of it (issue #176) — sizes the mark, and the
+      // preview is what the accept's span-local merge would stage. A merge
+      // the accept would refuse draws nothing, so the overlay never promises
+      // an Accept that cannot happen.
+      const span = headRangeToEditedOffsets(dp.range, headToEdited ?? null, lineStarts);
+      if (!span || span.from < 0 || span.to > docLen || span.from >= span.to) continue;
+      const merged = mergeSuggestionSpan(quote, replacement, source.slice(span.from, span.to));
+      if (merged === null) continue;
+      out.push({ from: span.from, to: span.to, replacement: merged, shifted: true });
+      continue;
+    }
     const line = headToEdited ? headToEdited.get(dp.range.sl) : dp.range.sl;
     if (line === undefined) continue;
     const from = lineColToOffset(line, dp.range.sc, lineStarts);
-    const to = from + (meta.quote?.length ?? 0);
+    const to = from + quote.length;
     if (from < 0 || to > docLen || from >= to) continue;
-    // Overlay only a target that is still byte-identical to the quoted
-    // text — a "shifted" target would strike through the wrong characters
-    // (issue #176).
-    if (source.slice(from, to) !== meta.quote) continue;
-    out.push({ from, to, replacement: extractSuggestionBlock(c.body) ?? "" });
+    // A verified status still has to agree with the document in hand: drawing
+    // over text that is not the quote would strike the wrong characters.
+    if (source.slice(from, to) !== quote) continue;
+    out.push({ from, to, replacement });
   }
   return out;
 }

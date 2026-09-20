@@ -7,6 +7,7 @@ import {
   extractSuggestionBlock,
   headRangeToEditedOffsets,
   isMeaningfulEdit,
+  mergeSuggestionSpan,
   rebaseEdit,
   rebaseLoadedEdit,
   stripSuggestionBlock,
@@ -792,6 +793,24 @@ describe("head ↔ edited coordinates (issue #283)", () => {
     test("a span that is not contiguous in head coordinates is refused", () => {
       expect(editedSpanToHead(3, 5, editedToHead)).toBeNull();
     });
+  });
+});
+
+// Issue #312: the same span-local merge the accept runs also feeds the editor's
+// merge preview, so it is reachable on its own.
+describe("mergeSuggestionSpan", () => {
+  test("carries the quote → replacement delta into a span that drifted", () => {
+    expect(
+      mergeSuggestionSpan("the quick brown fox", "the quick red fox", "the quick brown fox jumps"),
+    ).toBe("the quick red fox jumps");
+  });
+
+  test("an unchanged span merges to the replacement itself", () => {
+    expect(mergeSuggestionSpan("line two", "LINE TWO", "line two")).toBe("LINE TWO");
+  });
+
+  test("refuses a span the delta no longer applies to", () => {
+    expect(mergeSuggestionSpan("alpha beta gamma", "alpha BETA gamma", "zzz zzz zzz")).toBeNull();
   });
 });
 
