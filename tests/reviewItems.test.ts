@@ -174,37 +174,18 @@ describe("buildSuggestionMarks", () => {
     expect(marks).toHaveLength(0);
   });
 
-  test("skips suggestions whose thread has a 'resolve' event (regression)", () => {
-    // After Submit, the local dismissed map is cleared but the resolve-event
-    // metadata comment is persisted on GitHub. The overlay must also consult
-    // that event — otherwise the strikethrough + replacement keep showing in
-    // the editor even though the sidebar treats the thread as resolved.
-    const resolveEvent: ExistingComment = {
-      id: 2,
-      source: "review",
-      author: "x",
-      body: "Resolved via Bark.",
-      meta: {
-        cid: "e2",
-        path: "a.md",
-        range: { sl: 2, sc: 1, el: 2, ec: 9 },
-        quote: "line two",
-        sha: "HEAD",
-        thread: "t1",
-        kind: "comment",
-        event: "resolve",
-      },
-    };
-    const comments = [suggestionComment(), resolveEvent];
-    const marks = buildSuggestionMarks({
+  test("resolvedKeys is the only source of thread resolution", () => {
+    const comments = [suggestionComment()];
+    const args = {
       comments,
       source,
       lineStarts,
       currentPath: "a.md",
       dismissed: {},
       displayPositionFor: dpFromAnchor(comments),
-    });
-    expect(marks).toHaveLength(0);
+    };
+    expect(buildSuggestionMarks(args)).toHaveLength(1);
+    expect(buildSuggestionMarks({ ...args, resolvedKeys: new Set(["t1"]) })).toHaveLength(0);
   });
 
   test("skips the mark when the target text no longer matches the quote (issue #176)", () => {
@@ -225,36 +206,6 @@ describe("buildSuggestionMarks", () => {
       }),
     });
     expect(marks).toHaveLength(0);
-  });
-
-  test("restores the overlay when the latest event is 'unresolve'", () => {
-    const ev = (id: number, event: "resolve" | "unresolve"): ExistingComment => ({
-      id,
-      source: "review",
-      author: "x",
-      body: event === "resolve" ? "Resolved." : "Reopened.",
-      meta: {
-        cid: `e${id}`,
-        path: "a.md",
-        range: { sl: 2, sc: 1, el: 2, ec: 9 },
-        quote: "line two",
-        sha: "HEAD",
-        thread: "t1",
-        kind: "comment",
-        event,
-      },
-    });
-    // Latest event (highest id) wins: resolve(id=2) then unresolve(id=3) → reopened
-    const comments = [suggestionComment(), ev(2, "resolve"), ev(3, "unresolve")];
-    const marks = buildSuggestionMarks({
-      comments,
-      source,
-      lineStarts,
-      currentPath: "a.md",
-      dismissed: {},
-      displayPositionFor: dpFromAnchor(comments),
-    });
-    expect(marks).toHaveLength(1);
   });
 
   // Issue #283: positions are head coordinates, but the editor may show a
@@ -503,12 +454,9 @@ describe("filterReviewEntries — pending reply on a resolved thread (#193)", ()
   // A resolved thread that carries an unsubmitted reply draft. Its pending
   // content is part of the Submit count, so the sidebar must surface it too —
   // otherwise Pending says (0) while Submit says (1) and the draft is invisible.
-  const comments = [
-    comment({ id: 1, meta: meta(5, "a.md", "t1") }),
-    comment({ id: 2, meta: { ...meta(5, "a.md", "t1"), cid: "e2", event: "resolve" } }),
-  ];
+  const comments = [comment({ id: 1, meta: meta(5, "a.md", "t1") })];
   const drafts = [draft({ cid: "d1", thread: "t1", range: { sl: 5, sc: 1, el: 5, ec: 5 } })];
-  const threads = buildThreads(comments, drafts, "a.md");
+  const threads = buildThreads(comments, drafts, "a.md", { resolvedKeys: new Set(["t1"]) });
   const entries = buildReviewEntries({ threads, pendingSuggestions: [], currentPath: "a.md" });
 
   test("the resolved thread's pending reply shows under the pending facet", () => {
@@ -571,11 +519,8 @@ describe("reviewEntryCounts", () => {
   });
 
   test("resolved threads count under resolved and drop out of pending/submitted", () => {
-    const comments = [
-      comment({ id: 1, meta: meta(5, "a.md", "t1") }),
-      comment({ id: 2, meta: { ...meta(5, "a.md", "t1"), cid: "e2", event: "resolve" } }),
-    ];
-    const threads = buildThreads(comments, [], "a.md");
+    const comments = [comment({ id: 1, meta: meta(5, "a.md", "t1") })];
+    const threads = buildThreads(comments, [], "a.md", { resolvedKeys: new Set(["t1"]) });
     const entries = buildReviewEntries({ threads, pendingSuggestions: [], currentPath: "a.md" });
     const counts = reviewEntryCounts(entries);
     expect(counts.submitted).toBe(0);
@@ -704,30 +649,11 @@ describe("buildAllPendingSuggestions", () => {
 });
 
 describe("buildThreads resolved state", () => {
-  const evt = (id: number, thread: string, event: "resolve" | "unresolve") =>
-    comment({ id, meta: { ...meta(5, "a.md", thread), cid: `e${id}`, event } });
-
-  test("a resolve event marks the thread resolved and is not shown as a message", () => {
-    const [t] = buildThreads(
-      [comment({ id: 1, meta: meta(5, "a.md", "t1") }), evt(2, "t1", "resolve")],
-      [],
-      "a.md",
-    );
+  test("a thread key in resolvedKeys marks the thread resolved", () => {
+    const [t] = buildThreads([comment({ id: 1, meta: meta(5, "a.md", "t1") })], [], "a.md", {
+      resolvedKeys: new Set(["t1"]),
+    });
     expect(t.resolved).toBe(true);
-    expect(t.messages).toHaveLength(1); // only the root, not the event
-  });
-
-  test("latest event wins: unresolve after resolve re-opens", () => {
-    const [t] = buildThreads(
-      [
-        comment({ id: 1, meta: meta(5, "a.md", "t1") }),
-        evt(2, "t1", "resolve"),
-        evt(3, "t1", "unresolve"),
-      ],
-      [],
-      "a.md",
-    );
-    expect(t.resolved).toBe(false);
   });
 
   test("an accepted suggestion thread is resolved", () => {

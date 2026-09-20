@@ -57,7 +57,7 @@ export interface ReviewThread {
   quote: string | undefined;
   hasPending: boolean;
   hasSubmitted: boolean;
-  /** Resolved via a resolution event, or root is an accepted suggestion. */
+  /** Resolved on GitHub, or root is an accepted suggestion. */
   resolved: boolean;
 }
 
@@ -315,36 +315,6 @@ function threadPos(rootComment: ExistingComment | null, rootDraft: PendingDraft 
 }
 
 /**
- * Compute the set of thread ids whose resolved state should be reflected in
- * the sidebar. Two sources are unioned:
- *
- *   1. The caller-provided `resolvedKeys` (the new data layer's
- *      `Thread.resolved`, mapped to reviewItems thread keys). This is the
- *      source of truth for current data — both Bark-authored and foreign.
- *   2. Legacy event-marker comments (`meta.event === "resolve" | "unresolve"`,
- *      highest GitHub id wins per thread). Only old PRs predating the
- *      data-layer rewrite still carry these; the new fetcher drops `event`
- *      because v2 represents resolved state on Thread directly.
- *
- * `buildSuggestionMarks` consults this so the in-editor overlay matches
- * the sidebar's resolved-state view.
- */
-export function resolvedThreadIds(
-  comments: ExistingComment[],
-  opts?: { resolvedKeys?: ReadonlySet<string> },
-): Set<string> {
-  const latest = new Map<string, { id: number; event: "resolve" | "unresolve" }>();
-  for (const c of comments) {
-    if (!c.meta?.event) continue;
-    const prev = latest.get(c.meta.thread);
-    if (!prev || c.id > prev.id) latest.set(c.meta.thread, { id: c.id, event: c.meta.event });
-  }
-  const resolved = new Set<string>(opts?.resolvedKeys ?? []);
-  for (const [thread, e] of latest) if (e.event === "resolve") resolved.add(thread);
-  return resolved;
-}
-
-/**
  * Group submitted comments and pending drafts into threads by thread id, sorted
  * current-path-first then by position. Submitted comments come before pending
  * ones within a thread; submitted comments are ordered by GitHub id.
@@ -355,8 +325,7 @@ export function buildThreads(
   currentPath: string,
   opts?: {
     accepted?: (commentId: number) => boolean;
-    /** Thread keys reported resolved by the new data layer. Unioned with
-     *  the legacy event-marker derivation. */
+    /** Thread keys reported resolved by the new data layer. */
     resolvedKeys?: ReadonlySet<string>;
   },
 ): ReviewThread[] {
@@ -371,16 +340,7 @@ export function buildThreads(
     }
     return g;
   };
-  // Resolution events are hidden markers: collect the latest per thread, but keep
-  // them out of the visible messages/root.
-  const latestEvent = new Map<string, { id: number; event: "resolve" | "unresolve" }>();
   for (const c of comments) {
-    if (c.meta?.event) {
-      const t = c.meta.thread;
-      const prev = latestEvent.get(t);
-      if (!prev || c.id > prev.id) latestEvent.set(t, { id: c.id, event: c.meta.event });
-      continue;
-    }
     // Key by the Bark metadata threadId, else by the data layer's threadKey
     // (== Thread entity id), so foreign comments group by their real GitHub
     // thread — and a reply draft keyed to the same thread id nests with
@@ -399,7 +359,6 @@ export function buildThreads(
       ...submitted.map((comment): ThreadMessage => ({ kind: "submitted", comment })),
       ...pending.map((draft): ThreadMessage => ({ kind: "pending", draft })),
     ];
-    const resolvedByEvent = latestEvent.get(id)?.event === "resolve";
     const resolvedByRepository = opts?.resolvedKeys?.has(id) ?? false;
     const acceptedSuggestion =
       rootComment?.meta?.kind === "suggestion" && (opts?.accepted?.(rootComment.id) ?? false);
@@ -413,7 +372,7 @@ export function buildThreads(
       quote: rootComment?.meta?.quote ?? rootDraft?.quote,
       hasPending: pending.length > 0,
       hasSubmitted: submitted.length > 0,
-      resolved: resolvedByRepository || resolvedByEvent || acceptedSuggestion,
+      resolved: resolvedByRepository || acceptedSuggestion,
     };
   });
   list.sort(
@@ -694,13 +653,12 @@ export function buildSuggestionMarks(args: {
     headToEdited,
   } = args;
   const docLen = source.length;
-  const resolved = resolvedThreadIds(comments, { resolvedKeys });
   const out: SuggestionRender[] = [];
   for (const c of comments) {
     if (c.meta?.kind !== "suggestion") continue;
     if (c.meta.path !== currentPath) continue;
     if (dismissed[c.id]) continue;
-    if (resolved.has(c.meta.thread)) continue;
+    if (resolvedKeys?.has(c.meta.thread)) continue;
     const meta = c.meta as CommentMetadata;
     const dp = displayPositionFor(meta.cid);
     if (!dp || dp.status === "outdated") continue;
