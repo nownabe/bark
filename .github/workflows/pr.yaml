@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    uses: nownabe/workflows/.github/workflows/pr.yaml@09e7d2e1ee8607990cc643434a3ddee9e6e689bb # main
+    uses: nownabe/workflows/.github/workflows/pr.yaml@943b5489bf8baa6ad9b3bd4c85e68f81f0ae022d # main
 
   filter:
     name: Filter

@@ -1499,8 +1499,7 @@ function AppBody() {
       return;
     }
     const sHit = suggestionRanges.find((r) => r.from <= pos && pos <= r.to);
-    if (sHit)
-      emphasizeSuggestion(sHit.cid, false); // text already clicked; just emphasize the item
+    if (sHit) emphasizeSuggestion(sHit.cid, false); // text already clicked; just emphasize the item
     else setEmphasizedThreadId(null); // clicked away from any comment → drop emphasis
   };
 
