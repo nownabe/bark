@@ -21,7 +21,11 @@ export type RightRange = {
 
 /** Parse a unified-diff patch into commentable RIGHT-side line ranges.
  *  Added (`+`) and context (` `) lines are commentable; deleted (`-`) lines
- *  do not advance the new-file line counter. */
+ *  do not advance the new-file line counter.
+ *
+ *  `+++`/`---` file headers are not filtered out: GitHub's `patch` field starts
+ *  at the first `@@`, so such a line is always content (TOML front matter, a
+ *  Markdown thematic break) and must advance the counters. */
 export function parseRightRanges(patch: string | undefined): RightRange[] {
   if (!patch) return [];
   const ranges: RightRange[] = [];
@@ -41,11 +45,11 @@ export function parseRightRanges(patch: string | undefined): RightRange[] {
       flush();
       const m = /@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
       newLine = m ? Number(m[1]) : 0;
-    } else if (line.startsWith("+") && !line.startsWith("+++")) {
+    } else if (line[0] === "+") {
       if (start === -1) start = newLine;
       end = newLine;
       newLine++;
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
+    } else if (line[0] === "-") {
       // Deleted line: LEFT only. Do not advance newLine; do not flush.
     } else if (line.startsWith(" ")) {
       if (start === -1) start = newLine;

@@ -42,6 +42,16 @@ describe("diff — parseRightRanges", () => {
     ]);
   });
 
+  test("counts added lines that start with +++ (TOML front matter)", () => {
+    const patch = ["@@ -0,0 +1,4 @@", "++++", '+title = "Hello"', "++++", "+Body text"].join("\n");
+    expect(parseRightRanges(patch)).toEqual([{ newStart: 1, newEnd: 4 }]);
+  });
+
+  test("a removed --- line does not stop the counters for the added lines after it", () => {
+    const patch = ["@@ -1,3 +1,4 @@", " intro", "----", "++++", "+normal", " outro"].join("\n");
+    expect(parseRightRanges(patch)).toEqual([{ newStart: 1, newEnd: 4 }]);
+  });
+
   test("undefined patch returns an empty range list", () => {
     expect(parseRightRanges(undefined)).toEqual([]);
   });
