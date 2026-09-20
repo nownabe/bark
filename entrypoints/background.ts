@@ -28,6 +28,35 @@ async function postForm(url: string, params: Record<string, string>): Promise<un
   return res.json();
 }
 
+// One review tab per PR per browser: LocalState is persisted as one whole-state
+// value, so a second tab on the same PR would clobber the first one's drafts
+// (ADR 0001 §1).
+// simplify: best-effort dedupe — two clicks within the same tick can still race
+// past the query and open two tabs. Upgrade path: keep a per-PR in-flight
+// Promise in worker memory.
+async function openOrFocusReview(url: string, ref: OpenMessage["ref"]): Promise<void> {
+  const reviewTabs = await browser.tabs.query({
+    url: `${browser.runtime.getURL("/review.html")}*`,
+  });
+  const match = reviewTabs.find((tab) => {
+    if (!tab.url) return false;
+    const params = new URL(tab.url).searchParams;
+    return (
+      params.get("owner") === ref.owner &&
+      params.get("repo") === ref.repo &&
+      params.get("pr") === ref.pr
+    );
+  });
+
+  if (match?.id === undefined) {
+    await browser.tabs.create({ url });
+    return;
+  }
+
+  await browser.tabs.update(match.id, { active: true });
+  if (match.windowId !== undefined) await browser.windows.update(match.windowId, { focused: true });
+}
+
 const missingClientId = {
   error: "config_error",
   error_description:
@@ -42,7 +71,7 @@ export default defineBackground(() => {
         const { ref } = msg as OpenMessage;
         const params = new URLSearchParams(ref);
         const url = `${browser.runtime.getURL("/review.html")}?${params.toString()}`;
-        void browser.tabs.create({ url });
+        void openOrFocusReview(url, ref);
         return undefined;
       }
       // Device flow: returning a Promise sends its resolved value as the
