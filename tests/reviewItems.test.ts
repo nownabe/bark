@@ -187,24 +187,65 @@ describe("buildSuggestionMarks", () => {
     expect(buildSuggestionMarks({ ...args, resolvedKeys: new Set(["t1"]) })).toHaveLength(0);
   });
 
-  test("skips the mark when the target text no longer matches the quote (issue #176)", () => {
-    // The target line changed since the suggestion was written ("shifted"
-    // position). Sizing the strikethrough by quote.length there would
-    // overlay the wrong text — the mark must be skipped instead.
-    const altered = "line one\nline 2!!\nline three\n";
-    const comments = [suggestionComment({ sha: "OLD" })]; // quote: "line two"
-    const marks = buildSuggestionMarks({
-      comments,
-      source: altered,
-      lineStarts: buildLineIndex(altered),
-      currentPath: "a.md",
-      dismissed: {},
-      displayPositionFor: () => ({
-        status: "shifted" as const,
-        range: { sl: 2, sc: 1, el: 2, ec: 9 },
-      }),
+  // Issue #312: a "shifted" target — the text under the suggestion changed —
+  // is previewed rather than skipped. The mark covers the located span (never
+  // quote.length chars of it, issue #176) and carries what the accept's
+  // span-local merge would stage (ADR 0004 §7).
+  describe("merge preview for shifted targets (issue #312)", () => {
+    const shiftedAt = (range: { sl: number; sc: number; el: number; ec: number }) => () => ({
+      status: "shifted" as const,
+      range,
     });
-    expect(marks).toHaveLength(0);
+
+    test("previews the merged span", () => {
+      const altered = "line one\nline 2!!\nline three\n";
+      const comments = [suggestionComment({ sha: "OLD" })]; // quote: "line two"
+      const marks = buildSuggestionMarks({
+        comments,
+        source: altered,
+        lineStarts: buildLineIndex(altered),
+        currentPath: "a.md",
+        dismissed: {},
+        displayPositionFor: shiftedAt({ sl: 2, sc: 1, el: 2, ec: 9 }),
+      });
+      expect(marks).toHaveLength(1);
+      expect(altered.slice(marks[0].from, marks[0].to)).toBe("line 2!!");
+      expect(marks[0].replacement).toBe("LINE TWO");
+      expect(marks[0].shifted).toBe(true);
+    });
+
+    test("draws nothing when the merge would be refused", () => {
+      const rewritten = "line one\ncompletely different words\nline three\n";
+      const comments = [suggestionComment({ sha: "OLD" })];
+      const marks = buildSuggestionMarks({
+        comments,
+        source: rewritten,
+        lineStarts: buildLineIndex(rewritten),
+        currentPath: "a.md",
+        dismissed: {},
+        displayPositionFor: shiftedAt({ sl: 2, sc: 1, el: 2, ec: 27 }),
+      });
+      expect(marks).toHaveLength(0);
+    });
+
+    test("a mapped target keeps the plain quote-sized mark", () => {
+      const comments = [suggestionComment({ sha: "OLD" })];
+      const marks = buildSuggestionMarks({
+        comments,
+        source,
+        lineStarts,
+        currentPath: "a.md",
+        dismissed: {},
+        displayPositionFor: () => ({
+          status: "mapped" as const,
+          range: { sl: 2, sc: 1, el: 2, ec: 9 },
+        }),
+      });
+      expect(marks).toHaveLength(1);
+      expect(source.slice(marks[0].from, marks[0].to)).toBe("line two");
+      expect(marks[0].replacement).toBe("LINE TWO");
+      expect(marks[0].shifted).toBeUndefined();
+    });
   });
 
   // Issue #283: positions are head coordinates, but the editor may show a

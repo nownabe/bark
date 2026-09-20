@@ -7,11 +7,15 @@
 import { StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 import { charDiffs } from "../../lib/suggest";
+import { STATUS_LABEL } from "./uiHelpers";
 
 export interface SuggestionMark {
   from: number;
   to: number;
   replacement: string;
+  /** The target drifted from the quote, so `replacement` is the merge preview
+   *  of what Accept would stage — badged so the reader knows to look. */
+  shifted?: boolean;
 }
 
 export const setSuggestionMarks = StateEffect.define<SuggestionMark[]>();
@@ -31,6 +35,19 @@ class InsertWidget extends WidgetType {
   }
   ignoreEvent() {
     return false;
+  }
+}
+
+/** The sidebar's "position shifted" badge, inline after a merge preview. */
+class ShiftedBadgeWidget extends WidgetType {
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const span = document.createElement("span");
+    span.className = "badge badge--reanchored";
+    span.textContent = STATUS_LABEL.reanchored ?? "";
+    return span;
   }
 }
 
@@ -59,6 +76,11 @@ export const suggestionMarksField = StateField.define<DecorationSet>({
             } else if (text.length > 0) {
               decos.push(Decoration.widget({ widget: new InsertWidget(text), side: 1 }).range(pos));
             }
+          }
+          if (m.shifted) {
+            decos.push(
+              Decoration.widget({ widget: new ShiftedBadgeWidget(), side: 2 }).range(m.to),
+            );
           }
         }
         next = Decoration.set(decos, true);

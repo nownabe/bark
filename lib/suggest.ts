@@ -100,7 +100,11 @@ export function applyAcceptedSuggestion(args: {
   const lines = source.split("\n");
   const span = locateSpan(oldLines, lines, buildLineMap(anchorSource, source), meta.range, quote);
   if (span === null) return null;
-  const merged = mergeSpan(quote, replacement, lines.slice(span.sl - 1, span.el).join("\n"));
+  const merged = mergeSuggestionSpan(
+    quote,
+    replacement,
+    lines.slice(span.sl - 1, span.el).join("\n"),
+  );
   if (merged === null) return null;
   return replaceLines(source, span.sl, span.el, merged, replacement === "");
 }
@@ -134,8 +138,16 @@ function applyExactQuote(
 
 /** Apply the quote → replacement delta to a span that has drifted from the
  *  quote. Null when any hunk fails: a partially applied suggestion would stage
- *  text neither the reviewer nor the author wrote. */
-function mergeSpan(quote: string, replacement: string, spanText: string): string | null {
+ *  text neither the reviewer nor the author wrote.
+ *
+ *  Exported because the editor's merge preview (issue #312) must show exactly
+ *  what the accept would stage — including refusing to preview what the accept
+ *  would refuse. */
+export function mergeSuggestionSpan(
+  quote: string,
+  replacement: string,
+  spanText: string,
+): string | null {
   if (spanText === quote) return replacement;
   const dmp = new diff_match_patch();
   const [merged, results] = dmp.patch_apply(dmp.patch_make(quote, replacement), spanText);
