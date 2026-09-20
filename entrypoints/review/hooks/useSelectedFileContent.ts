@@ -1,11 +1,16 @@
-// Per-file content load (Pack B / R8d).
+// Per-file content load for the editor.
 //
-// Owns the source / baseSource pair plus the legacy "Effect 2": fetch
-// the file's content from GitHub whenever (ref, headSha, selectedPath)
-// becomes available, restore any persisted SuggestionEdit for that
-// path, normalise the stored edit against the freshly-fetched base if
-// they drifted, and flush pending debounced writes before swapping
-// files / unmounting.
+// Owns the source / baseSource pair: fetch the viewed file at
+// (headSha, selectedPath) whenever that pair becomes available, restore
+// any persisted SuggestionEdit for that path, normalise the stored edit
+// against the freshly-fetched base if they drifted, and flush pending
+// debounced writes before swapping files / unmounting.
+//
+// This fetch deliberately runs above the Repository: the viewed path is
+// UI state the Repository does not know (ADR 0002 §1), while the
+// Repository already holds (headSha, path) for every *commented* path
+// (ADR 0005 §2). When the two overlap, ghRequest's ETag cache turns this
+// request into a free 304 rather than a second download.
 //
 // The hook owns no draft-layer state itself: per-path
 // SuggestionEdit / SuggestionComments updates and the "flush before

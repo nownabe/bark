@@ -31,8 +31,10 @@ A full refresh refetches:
 
 - `PullRequest` — may reveal a new `headSha`.
 - `Comment` and `Thread` — for the PR.
-- `FileContent` at `(newHeadSha, currentPath)` if `headSha` advanced.
-- `FileContent` at any newly-referenced `(anchor.sha, path)` introduced by newly-fetched Comments.
+- `FileContent` at every `(anchor.sha, path)` referenced by a Comment (fetched or local draft).
+- `FileContent` at `(headSha, path)` for every such anchored `path` — re-anchoring maps `anchor.sha → headSha` and needs both ends (issues #265, #267).
+
+The _viewed_ path is ephemeral UI state ([ADR 0002 §1](0002-data-model.md)) that the Repository does not know, so its head-sha content is **not** part of the refresh scope. The editor hook (`useSelectedFileContent`) loads it through the same `fetchFileContent`, keyed on `(headSha, path)`, so a `headSha` advance reloads the open file. Where the viewed path is also an anchored path, the hook's request is a conditional GET answered from the ETag cache (a 304 does not count against the rate limit), so the overlap costs one free round trip rather than a second download.
 
 `User` is fetched once at bootstrap and not refreshed (it changes only on re-auth).
 
