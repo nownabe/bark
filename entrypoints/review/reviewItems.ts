@@ -662,6 +662,10 @@ export interface SuggestionRender {
  * The span is sized by the quoted old text rather than by the anchor's end
  * column: the quote is the source text at the range (ADR 0002 §3), so the two
  * agree, and the quote stays right after re-anchoring moved the position.
+ *
+ * Positions are head coordinates; `headToEdited` maps them onto the edited
+ * document. A suggestion whose line carries local edits has no stable position
+ * and is not drawn (issue #283).
  */
 export function buildSuggestionMarks(args: {
   comments: ExistingComment[];
@@ -675,9 +679,20 @@ export function buildSuggestionMarks(args: {
   displayPositionFor: (cid: string) => DisplayPosition | null | undefined;
   /** Thread keys reported resolved by the new data layer. */
   resolvedKeys?: ReadonlySet<string>;
+  /** `buildLineMap(headSource, source)`; null/omitted when `source` is the
+   *  head text itself. */
+  headToEdited?: Map<number, number> | null;
 }): SuggestionRender[] {
-  const { comments, source, lineStarts, currentPath, dismissed, displayPositionFor, resolvedKeys } =
-    args;
+  const {
+    comments,
+    source,
+    lineStarts,
+    currentPath,
+    dismissed,
+    displayPositionFor,
+    resolvedKeys,
+    headToEdited,
+  } = args;
   const docLen = source.length;
   const resolved = resolvedThreadIds(comments, { resolvedKeys });
   const out: SuggestionRender[] = [];
@@ -689,7 +704,9 @@ export function buildSuggestionMarks(args: {
     const meta = c.meta as CommentMetadata;
     const dp = displayPositionFor(meta.cid);
     if (!dp || dp.status === "outdated") continue;
-    const from = lineColToOffset(dp.range.sl, dp.range.sc, lineStarts);
+    const line = headToEdited ? headToEdited.get(dp.range.sl) : dp.range.sl;
+    if (line === undefined) continue;
+    const from = lineColToOffset(line, dp.range.sc, lineStarts);
     const to = from + (meta.quote?.length ?? 0);
     if (from < 0 || to > docLen || from >= to) continue;
     // Overlay only a target that is still byte-identical to the quoted

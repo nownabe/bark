@@ -3,7 +3,9 @@ import {
   applyAcceptedSuggestion,
   charDiffs,
   diffToSuggestions,
+  editedSpanToHead,
   extractSuggestionBlock,
+  headRangeToEditedOffsets,
   isMeaningfulEdit,
   rebaseEdit,
   rebaseLoadedEdit,
@@ -733,6 +735,66 @@ describe("applyAcceptedSuggestion", () => {
 // review-list item exists and Submit early-returns. isMeaningfulEdit is the
 // single dirty-check both the persistence gate and the load path share, so a
 // trailing-newline-only difference no longer registers as a pending change.
+// Issue #283: `displayPosition` is in head coordinates while the editor shows
+// the locally edited copy. These two helpers are the single bridge between the
+// two spaces; a line with local edits has no stable position, so it maps to
+// nothing in either direction.
+describe("head ↔ edited coordinates (issue #283)", () => {
+  describe("headRangeToEditedOffsets", () => {
+    const lineStarts = buildLineIndex("a\nX\nY\nb\n");
+
+    test("a null map (no local edits) gives the identity offsets", () => {
+      expect(
+        headRangeToEditedOffsets({ sl: 2, sc: 1, el: 2, ec: 2 }, null, buildLineIndex("a\nb\n")),
+      ).toEqual({ from: 2, to: 3 });
+    });
+
+    test("two lines inserted above move the range down", () => {
+      const headToEdited = new Map([
+        [1, 1],
+        [2, 4],
+      ]);
+      expect(
+        headRangeToEditedOffsets({ sl: 2, sc: 1, el: 2, ec: 2 }, headToEdited, lineStarts),
+      ).toEqual({ from: 6, to: 7 });
+    });
+
+    test("a range on a locally edited line has no position", () => {
+      const headToEdited = new Map([
+        [1, 1],
+        [2, 4],
+      ]);
+      expect(
+        headRangeToEditedOffsets({ sl: 3, sc: 1, el: 3, ec: 2 }, headToEdited, lineStarts),
+      ).toBeNull();
+    });
+  });
+
+  describe("editedSpanToHead", () => {
+    const editedToHead = new Map([
+      [3, 1],
+      [4, 2],
+      [5, 5],
+    ]);
+
+    test("a null map (no local edits) gives the identity span", () => {
+      expect(editedSpanToHead(2, 3, null)).toEqual({ sl: 2, el: 3 });
+    });
+
+    test("a span of unedited lines maps back to its head lines", () => {
+      expect(editedSpanToHead(3, 4, editedToHead)).toEqual({ sl: 1, el: 2 });
+    });
+
+    test("a span touching a locally edited line is refused", () => {
+      expect(editedSpanToHead(3, 6, editedToHead)).toBeNull();
+    });
+
+    test("a span that is not contiguous in head coordinates is refused", () => {
+      expect(editedSpanToHead(3, 5, editedToHead)).toBeNull();
+    });
+  });
+});
+
 describe("isMeaningfulEdit (issue #194)", () => {
   test("identical text is not a pending edit", () => {
     expect(isMeaningfulEdit("a\nb\n", "a\nb\n")).toBe(false);

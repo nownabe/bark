@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildLineMap, lineDiff, lineMapFor } from "../../lib/pr/linemap";
+import { buildLineMap, invertLineMap, lineDiff, lineMapFor } from "../../lib/pr/linemap";
 
 describe("linemap", () => {
   test("identical sources map every line to itself", () => {
@@ -111,5 +111,23 @@ describe("linemap — lineMapFor", () => {
       lineMapFor({ oldSha: "o", newSha: "n", path: `lru-${i}.md` }, "a", "a");
     }
     expect(lineMapFor(key, "a", "a")).not.toBe(first);
+  });
+});
+
+describe("linemap — invertLineMap", () => {
+  test("swaps each pair so the map reads new line → old line", () => {
+    expect(
+      invertLineMap(
+        new Map([
+          [1, 1],
+          [2, 4],
+        ]),
+      ),
+    ).toEqual(
+      new Map([
+        [1, 1],
+        [4, 2],
+      ]),
+    );
   });
 });
