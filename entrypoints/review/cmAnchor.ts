@@ -44,14 +44,20 @@ export function cmSelectionToAnchor(state: EditorState): SourceAnchor | null {
   if (sel.empty) return null;
   const { from, to } = sel;
   const startLine = state.doc.lineAt(from);
-  const endLine = state.doc.lineAt(to);
+  // A selection dragged through a line's newline ends on the NEXT line's first
+  // offset. Reporting that line would span one the reviewer never selected, and
+  // past the file's trailing newline it names a line GitHub does not have —
+  // which 422s the whole review batch (issue #291). Close the range on the last
+  // line the selection actually covers; `to - 1` is inside it because a
+  // non-empty selection always has `to > from`.
+  const endLine = state.doc.lineAt(to - 1);
   return {
     startOffset: from,
     endOffset: to,
     startLine: startLine.number,
     startCol: from - startLine.from + 1,
     endLine: endLine.number,
-    endCol: to - endLine.from + 1,
+    endCol: Math.min(to, endLine.to) - endLine.from + 1,
     quotedText: state.doc.sliceString(from, to),
   };
 }

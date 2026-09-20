@@ -18,6 +18,7 @@ import type { ThreadGroup } from "../../lib/pr/appstate";
 import { RepositoryProvider, useAppState, useRepository } from "../../lib/pr/react";
 import type { PullRequestRepository } from "../../lib/pr/repository";
 import type { Comment, FileContent, LocalId } from "../../lib/pr/types";
+import { cmSelectionToAnchor } from "./cmAnchor";
 import { SnackbarProvider, useSnackbar } from "./components/Snackbar";
 import { useVisibilityRefresh } from "./hooks/useVisibilityRefresh";
 
@@ -373,21 +374,18 @@ function SourceViewer({
   const onUpdate = useCallback(
     (vu: ViewUpdate) => {
       if (!vu.selectionSet || selected === null) return;
-      const sel = vu.state.selection.main;
-      if (sel.from === sel.to) {
+      const a = cmSelectionToAnchor(vu.state);
+      if (a === null) {
         onSelectionChange(null);
         return;
       }
-      const quote = vu.state.doc.sliceString(sel.from, sel.to);
-      const startLine = vu.state.doc.lineAt(sel.from);
-      const endLine = vu.state.doc.lineAt(sel.to);
       onSelectionChange({
         path: selected,
-        sl: startLine.number,
-        sc: sel.from - startLine.from + 1,
-        el: endLine.number,
-        ec: sel.to - endLine.from + 1,
-        quote,
+        sl: a.startLine,
+        sc: a.startCol,
+        el: a.endLine,
+        ec: a.endCol,
+        quote: a.quotedText,
       });
     },
     [selected, onSelectionChange],
