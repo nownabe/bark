@@ -5,6 +5,7 @@
 - Builds on: [ADR 0001](0001-pr-data-layer-architecture.md), [ADR 0002](0002-data-model.md), [ADR 0003](0003-operations-and-execution.md)
 - Amends: [ADR 0002](0002-data-model.md) (generalises `RemoteState.FileContent` from `(path)` to `(sha, path)`)
 - Amended: 2026-09 (#269) — bounded region search for single-line anchors; line-local merge for accepts.
+- Amended: 2026-09 (#280) — the line map is a memoised line-level Myers diff.
 
 ## Context
 
@@ -48,7 +49,7 @@ flowchart TD
     Q1 -->|yes| Current["status: current<br/>range: anchor.range"]
     Q1 -->|no| Q2{FileContent at<br/>(anchor.sha, anchor.path)<br/>available?}
     Q2 -->|no| Outdated["status: outdated"]
-    Q2 -->|yes| LineMap[buildLineMap LCS<br/>oldSource → source]
+    Q2 -->|yes| LineMap[buildLineMap line diff<br/>oldSource → source]
     LineMap --> Q3{both anchor.sl and anchor.el<br/>map to a new line?}
     Q3 -->|no| Q3b{single-line anchor?}
     Q3b -->|no| Outdated
@@ -68,7 +69,7 @@ Notes:
 - **No whole-file `quote` search.** If the line-map cannot resolve both endpoints of a multi-line anchor, the result is `outdated`. For a single-line anchor the search is confined to the current-source lines between the nearest line-mapped neighbours (the region the old line's content must have gone to), capped at 50 candidates around the expected position. A candidate is chosen only when it is the _unique_ line containing the quote, or the _unique_ best line by Levenshtein similarity to the old line with ratio ≥ 0.5; ties and duplicates yield `outdated`. Never guess.
 - **Columns.** When both endpoints line-map, `sc`/`ec` carry through unchanged. When a line was located by the region search, `sc`/`ec` are mapped through a character diff of the old line against the located line (`diff_xIndex`). There is one verification rule for every anchor: the text extracted at the mapped range must equal `anchor.quote` ([ADR 0002 §3](0002-data-model.md) defines `quote` so that line-based anchors satisfy it too).
 - **`shifted`** means the line was located (through the line map or the region search) but the quote no longer verifies at the mapped columns — the comment is probably still about the right area, but the user should look.
-- **Line-map** is the standard LCS-based line-correspondence map. It is computed once per `(anchor.sha, path, headSha)` triple and reused across all comments on that file with the same `anchor.sha`.
+- **Line-map** is the kept-line set of a line-level Myers diff (`diff-match-patch` over one code unit per distinct line, no timeout, so it is optimal and runs in linear space): `Map<oldLine, newLine>` for lines present unchanged in both revisions. It is computed once per `(anchor.sha, path, headSha)` triple, memoised in a small LRU that is validated against the two source texts on every hit (a reused sha never serves a stale map), and reused across all comments on that file and across derivations. The reviewer's live suggestion hunks are produced by the same line diff per keystroke; its cost is proportional to the number of changed lines, not to the file.
 
 ### 4. Status taxonomy
 
@@ -87,6 +88,7 @@ Notes:
 - **Single-line anchor whose line was modified** → region search (§3). A line deleted with nothing in its place (empty region), a region with no qualifying candidate, or a similarity tie → `outdated`.
 - **Whole span deleted** → `outdated`.
 - **Empty `quote`** → `outdated` (defensive; should not occur given creation invariants).
+- **More than 65,535 distinct lines across the two revisions** (the one-code-unit line encoding's ceiling) → no lines are kept and every anchor on the file is `outdated`; an explicit, visible failure rather than a wrong map.
 - **Legacy line-based anchor** (`sc = ec = 1` with a non-empty `quote`, written before the `quote` definition in ADR 0002 §3) → normalised to `ec = length(last line) + 1` at ingress (metadata parse, LocalState hydration); the algorithm never sees the legacy shape.
 - **`anchor.sha` no longer in the PR's branch history** (e.g. force-push removed it) → `GET contents` returns 404 → `outdated`.
 
@@ -107,6 +109,8 @@ displayPositions(file) = memoize(
   }
 )
 ```
+
+The line map inside `reanchor` is the memoised `lineMapFor(anchor.sha, path, headSha)`; the derivation itself stays uncached.
 
 `AppState` reads `RemoteState.FileContent` as input but does not cache it independently.
 

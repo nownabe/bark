@@ -5,6 +5,7 @@
 
 import { extractSuggestionBlock } from "../suggest";
 import { buildIsInDiff } from "./diff";
+import { lineMapFor } from "./linemap";
 import { type DisplayPosition, reanchor } from "./reanchor";
 import type {
   ChangedFile,
@@ -137,14 +138,8 @@ function deriveCommentView(
   isInDiff: (comment: Comment) => boolean,
 ): CommentView {
   const { kind, replacement } = parseSuggestion(comment.body);
-  const displayPosition: DisplayPosition = headSha
-    ? reanchor(
-        comment.anchor,
-        fileContents.get(fileKey(headSha, comment.path)) ?? "",
-        headSha,
-        fileContents.get(fileKey(comment.anchor.sha, comment.path)) ?? null,
-      )
-    : { status: "outdated" };
+  const displayPosition: DisplayPosition =
+    headSha === null ? { status: "outdated" } : reanchorMemoised(comment, fileContents, headSha);
   return {
     comment,
     kind,
@@ -153,6 +148,27 @@ function deriveCommentView(
     inDiff: isInDiff(comment),
     isMyDraft: comment.state === "draft",
   };
+}
+
+/** `reanchor` with the line map taken from the shared per-(sha, path, headSha)
+ *  memo, so one map serves every comment on a file and every derivation
+ *  (issue #280). A comment already at head never touches it. */
+function reanchorMemoised(
+  comment: Comment,
+  fileContents: Map<string, string>,
+  headSha: string,
+): DisplayPosition {
+  const current = fileContents.get(fileKey(headSha, comment.path)) ?? "";
+  const old = fileContents.get(fileKey(comment.anchor.sha, comment.path)) ?? null;
+  const lineMap =
+    old === null || comment.anchor.sha === headSha
+      ? undefined
+      : lineMapFor(
+          { oldSha: comment.anchor.sha, newSha: headSha, path: comment.path },
+          old,
+          current,
+        );
+  return reanchor(comment.anchor, current, headSha, old, lineMap);
 }
 
 // ---- Thread grouping ----------------------------------------------------

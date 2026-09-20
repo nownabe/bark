@@ -116,6 +116,16 @@ describe("reanchor", () => {
     expect(result).toEqual({ status: "outdated" });
   });
 
+  test("a caller-supplied line map is used instead of rebuilding one", () => {
+    const src = "hello\nhello\n";
+    const a = anchor({ sha: "old", range: { sl: 1, sc: 1, el: 1, ec: 6 } });
+    expect(reanchor(a, src, "head", src)).toMatchObject({ status: "mapped" });
+    // An empty map leaves both endpoints unmapped; the region search then finds
+    // two equally good candidates and refuses. Only an honoured fifth argument
+    // can turn the mapped result into `outdated`.
+    expect(reanchor(a, src, "head", src, new Map())).toEqual({ status: "outdated" });
+  });
+
   // A line-based suggestion anchor is not a second convention but the case
   // `sc = 1`, `ec = length(last quoted line) + 1` of the single "quote is the
   // source text at range" rule (issue #276, ADR 0002 §3). The same

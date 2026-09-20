@@ -403,3 +403,48 @@ describe("appstate — deriveAppState: changedMarkdownFiles", () => {
     expect(out.changedMarkdownFiles).toEqual([]);
   });
 });
+
+describe("appstate — deriveAppState: re-anchoring cost (issue #280)", () => {
+  test("30 old-sha comments on a 4,000-line file derive twice well under a second", () => {
+    const lines = Array.from({ length: 4000 }, (_, i) => `line ${i + 1} lorem ipsum dolor`);
+    const oldSource = lines.join("\n");
+    const comments = Array.from({ length: 30 }, (_, k) => {
+      const sl = (k + 1) * 100;
+      const quote = lines[sl - 1] ?? "";
+      return comment({
+        id: `c${k}`,
+        threadId: `t${k}`,
+        anchor: { sha: "old-sha", range: { sl, sc: 1, el: sl, ec: quote.length + 1 }, quote },
+      });
+    });
+    const local = localState({
+      comments,
+      threads: comments.map((c) => thread({ id: c.threadId })),
+    });
+    const remote = remoteState({
+      pullRequest: pr(),
+      fileContents: [
+        fileContent("old-sha", "README.md", oldSource),
+        fileContent("head", "README.md", `inserted\n${oldSource}`),
+      ],
+    });
+
+    const t0 = performance.now();
+    deriveAppState(local, remote);
+    const state = deriveAppState(local, remote);
+    const elapsed = performance.now() - t0;
+
+    for (const c of comments) {
+      expect(state.commentViews.get(c.id)?.displayPosition).toEqual({
+        status: "mapped",
+        range: {
+          sl: c.anchor.range.sl + 1,
+          sc: 1,
+          el: c.anchor.range.el + 1,
+          ec: c.anchor.range.ec,
+        },
+      });
+    }
+    expect(elapsed).toBeLessThan(1500);
+  });
+});

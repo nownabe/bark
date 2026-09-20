@@ -1,11 +1,11 @@
 // Reviewer edit → suggestion conversion + diff for tracked changes (equivalent to Google Docs suggestions).
 //  - charDiffs: char-level diff (for inline decoration: insert=underline / delete=strikethrough widget)
-//  - diffToSuggestions: split into hunks via line-level LCS and convert to GitHub suggestions (line replacement)
+//  - diffToSuggestions: split into hunks via the shared line diff (lib/pr/linemap) and convert to GitHub suggestions (line replacement)
 import { diff_match_patch } from "diff-match-patch";
 import { lineColToOffset } from "./anchor";
 import type { SuggestionEdit } from "./drafts";
 import type { CommentMetadata } from "./metadata";
-import { buildLineMap } from "./pr/linemap";
+import { buildLineMap, lineDiff } from "./pr/linemap";
 import { type DisplayPosition, locateLine } from "./pr/reanchor";
 
 /** A ```suggestion block: group 1 is the opening fence, group 2 the replacement.
@@ -250,38 +250,6 @@ function splitLines(s: string): string[] {
   return s.endsWith("\n") ? s.slice(0, -1).split("\n") : s.split("\n");
 }
 
-type LineOp = { op: -1 | 0 | 1; text: string };
-
-function lcsDiff(a: string[], b: string[]): LineOp[] {
-  const n = a.length;
-  const m = b.length;
-  const dp = Array.from({ length: n + 1 }, () => Array.from({ length: m + 1 }, () => 0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    }
-  }
-  const ops: LineOp[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) {
-      ops.push({ op: 0, text: a[i] });
-      i++;
-      j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      ops.push({ op: -1, text: a[i] });
-      i++;
-    } else {
-      ops.push({ op: 1, text: b[j] });
-      j++;
-    }
-  }
-  while (i < n) ops.push({ op: -1, text: a[i++] });
-  while (j < m) ops.push({ op: 1, text: b[j++] });
-  return ops;
-}
-
 /** A suggestion hunk's span in the *edited* (current) document, in char offsets. */
 export interface SuggestionEditRange {
   /** Base line range (matches the corresponding SuggestionHunk.sl/el → its cid). */
@@ -301,7 +269,7 @@ export interface SuggestionEditRange {
  */
 export function suggestionEditRanges(base: string, edited: string): SuggestionEditRange[] {
   const baseLines = splitLines(base);
-  const ops = lcsDiff(baseLines, splitLines(edited));
+  const ops = lineDiff(baseLines, splitLines(edited));
   const editedLines = splitLines(edited);
   const lineStart: number[] = [];
   let acc = 0;
@@ -385,7 +353,7 @@ export function suggestionEditRanges(base: string, edited: string): SuggestionEd
  */
 export function diffToSuggestions(base: string, edited: string): SuggestionHunk[] {
   const baseLines = splitLines(base);
-  const ops = lcsDiff(baseLines, splitLines(edited));
+  const ops = lineDiff(baseLines, splitLines(edited));
   const hunks: SuggestionHunk[] = [];
   let baseLine = 1;
   let i = 0;
