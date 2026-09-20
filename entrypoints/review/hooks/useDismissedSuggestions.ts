@@ -9,7 +9,7 @@
 
 import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import type { SuggestionDecision } from "../../../lib/drafts";
-import type { PrRef } from "../../../lib/github";
+import type { PrRef } from "../../../lib/pr/types";
 
 export type DismissedDeps = {
   listDismissedSuggestions: (ref: PrRef) => Promise<Record<string, SuggestionDecision>>;

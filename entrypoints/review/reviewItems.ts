@@ -23,22 +23,8 @@ import {
   type SuggestionHunk,
 } from "../../lib/suggest";
 
-/** The viewer's capability in the review UI. */
+/** The viewer's capability in the review UI. Derived by AppState (lib/pr/appstate). */
 export type Role = "author" | "reviewer";
-
-/**
- * Derive the role from identity: "author" iff the authenticated viewer's login
- * matches the PR author's login (GitHub logins are case-insensitive). Any
- * missing side falls back to "reviewer" — the safe default that withholds the
- * author-only commit affordance without breaking the reviewer flow.
- */
-export function deriveRole(
-  viewerLogin: string | null | undefined,
-  prAuthor: string | null | undefined,
-): Role {
-  if (!viewerLogin || !prAuthor) return "reviewer";
-  return viewerLogin.toLowerCase() === prAuthor.toLowerCase() ? "author" : "reviewer";
-}
 
 /** One message in a thread: either already submitted, or a pending local draft. */
 export type ThreadMessage =

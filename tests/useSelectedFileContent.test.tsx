@@ -10,8 +10,8 @@ import {
   useSelectedFileContent,
 } from "../entrypoints/review/hooks/useSelectedFileContent";
 import type { SuggestionEdit } from "../lib/drafts";
-import type { PrRef } from "../lib/github";
 import type { GitHubClient } from "../lib/pr/github-api";
+import type { PrRef } from "../lib/pr/types";
 
 afterEach(() => {
   cleanup();

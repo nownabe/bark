@@ -9,7 +9,7 @@ import {
   useDismissedSuggestions,
 } from "../entrypoints/review/hooks/useDismissedSuggestions";
 import type { SuggestionDecision } from "../lib/drafts";
-import type { PrRef } from "../lib/github";
+import type { PrRef } from "../lib/pr/types";
 
 afterEach(() => {
   cleanup();

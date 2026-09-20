@@ -1,65 +1,9 @@
-// Shared review types + pure GitHub display helpers.
-//
-// The HTTP client lives in lib/pr/github-api (`ghRequest` / `ghGraphQL` /
-// `ghPaginate`, with ETag caching and GET retry per issue #9); the typed
-// fetchers built on it live in lib/pr/remote-fetcher. This module carries
-// only network-free types and helpers shared across the review surface.
+// Pure GitHub display helpers: PR lifecycle status, suggestion blocks, avatar
+// and blob URLs. No network and no data model — the HTTP client lives in
+// lib/pr/github-api, the typed fetchers in lib/pr/remote-fetcher, and every
+// shared type in lib/pr/types.
 
-export interface PrRef {
-  owner: string;
-  repo: string;
-  number: number;
-}
-
-/** Precise anchor in the source. */
-export interface CommentAnchor {
-  startLine: number;
-  endLine: number;
-  startCol: number;
-  endCol: number;
-  /** Text for fuzzy matching during re-anchoring. */
-  quotedText: string;
-  /** Which document version the comment targets (basis for history tracking). */
-  createdAtSha: string;
-}
-
-export type CommentKind = "comment" | "suggestion";
-export type CommentStatus = "pending" | "open" | "addressed" | "resolved" | "outdated";
-
-/** Comment structure shared by local drafts and embedded metadata. */
-export interface ReviewComment {
-  id: string;
-  path: string;
-  anchor: CommentAnchor;
-  body: string;
-  kind: CommentKind;
-  /** Conversation grouping. */
-  threadId: string;
-  status: CommentStatus;
-  /** Recorded when a later commit addresses the comment. */
-  addressedBySha: string | null;
-}
-
-/** A changed file in the PR (near-raw form, before the .md filter). */
-export interface ChangedFile {
-  path: string;
-  status: string; // added | modified | removed | renamed | ...
-  /** unified-diff (for the in/out-of-diff decision). undefined when large/binary. */
-  patch?: string;
-}
-
-/** PR head info + display metadata (title/body/author/status). */
-export interface PullInfo {
-  headSha: string;
-  headRef: string;
-  title: string;
-  /** PR description (Markdown); empty string when none. */
-  body: string;
-  author: string;
-  state: "open" | "closed";
-  draft: boolean;
-  merged: boolean;
-}
+import type { PrRef } from "./pr/types";
 
 export type PullStatus = "draft" | "merged" | "open" | "closed";
 

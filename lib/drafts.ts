@@ -6,7 +6,7 @@
 import { browser } from "wxt/browser";
 import { storageKeys } from "./storage";
 import type { AnchorRange } from "./metadata";
-import type { PrRef } from "./github";
+import type { PrRef } from "./pr/types";
 
 export interface PendingDraft {
   cid: string;

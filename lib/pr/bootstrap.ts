@@ -17,10 +17,10 @@ import {
 } from "./chrome-storage";
 import { buildIsInDiff } from "./diff";
 import type { GitHubClient } from "./github-api";
-import { createGitHubTransport, type PrRef } from "./github-transport";
+import { createGitHubTransport } from "./github-transport";
 import { fetchChangedFiles, fetchRemoteState } from "./remote-fetcher";
 import { PullRequestRepository } from "./repository";
-import type { Comment, LocalState, User } from "./types";
+import type { Comment, LocalState, PrRef, User } from "./types";
 
 export type BootstrapOptions = {
   token: string;
