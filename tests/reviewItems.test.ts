@@ -586,6 +586,14 @@ describe("buildAllPendingSuggestions", () => {
     expect(b.inDiff).toBe(false); // b.md routed out-of-diff
   });
 
+  test("carries the edit's baseSha so the materialised draft is anchored at the sha its lines belong to (issue #265)", () => {
+    const out = buildAllPendingSuggestions(
+      { "docs/a.md": { base: "x\ny\n", source: "x\nY\n", baseSha: "sha-a", comments: {} } },
+      () => true,
+    );
+    expect(out.map((s) => s.baseSha)).toEqual(["sha-a"]);
+  });
+
   test("ignores files whose edited source matches the base (no live suggestion)", () => {
     const out = buildAllPendingSuggestions(
       { "docs/a.md": { base: "x\ny\n", source: "x\ny\n", comments: {} } },

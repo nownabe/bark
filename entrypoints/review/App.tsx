@@ -1077,7 +1077,11 @@ function AppBody() {
         inDiff: s.inDiff,
         range: s.range,
         quote: s.quote,
-        sha: headSha ?? "",
+        // The hunk's lines are in the coordinates of the head the edit's base
+        // was fetched at, which for a file not currently open may be older
+        // than headSha (only the open file is rebased on load). The Planner
+        // maps the anchor to the current head at submit (issue #265).
+        sha: s.baseSha ?? headSha ?? "",
         thread: id,
         body: s.body,
         kind: "suggestion",
@@ -1146,6 +1150,11 @@ function AppBody() {
           pendingDraftToComment({ ...d, body }, viewerLogin ?? "you", parentLocalId),
         );
       }
+      // The Planner maps each draft's anchor into the current head, which
+      // needs the source at both shas in RemoteState.fileContents. Drafts
+      // just upserted (suggestions at an older baseSha in particular) were
+      // not yet targets of the last refresh, so refresh first.
+      await safeRefresh?.();
       await prRepository.submitDrafts();
       // No explicit draft clear is needed — submitDrafts flips each draft
       // Comment from "draft" → "syncing" → "synced", so they fall out of
@@ -1490,8 +1499,7 @@ function AppBody() {
       return;
     }
     const sHit = suggestionRanges.find((r) => r.from <= pos && pos <= r.to);
-    if (sHit)
-      emphasizeSuggestion(sHit.cid, false); // text already clicked; just emphasize the item
+    if (sHit) emphasizeSuggestion(sHit.cid, false); // text already clicked; just emphasize the item
     else setEmphasizedThreadId(null); // clicked away from any comment → drop emphasis
   };
 

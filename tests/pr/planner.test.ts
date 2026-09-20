@@ -4,8 +4,11 @@ import { planExecution, type PlannerContext } from "../../lib/pr/planner";
 import type { Comment, FileEdit } from "../../lib/pr/types";
 
 const author = { login: "alice" };
+// Anchored at the planner's head sha: comments at an older sha are
+// re-anchored (or refused) before planning — see the repository tests
+// for issue #265.
 const anchor = {
-  sha: "deadbeef",
+  sha: "current-head",
   range: { sl: 1, sc: 1, el: 1, ec: 10 },
   quote: "hello",
 };
@@ -39,6 +42,7 @@ function context(overrides: Partial<PlannerContext> = {}): PlannerContext {
     isInDiff: () => true,
     headSha: "current-head",
     headRef: "topic",
+    fileContents: [],
     ...overrides,
   };
 }

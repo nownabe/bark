@@ -81,9 +81,9 @@ describe("useDismissedSuggestions — reset", () => {
   test("clears local state without touching storage", async () => {
     const saveDismissedSuggestions = mock(async () => {});
     const deps = makeDeps({
-      listDismissedSuggestions: mock(
-        async (): Promise<Record<string, SuggestionDecision>> => ({ "1": "accepted" }),
-      ),
+      listDismissedSuggestions: mock(async (): Promise<Record<string, SuggestionDecision>> => ({
+        "1": "accepted",
+      })),
       saveDismissedSuggestions,
     });
     const { result } = renderHook(() => useDismissedSuggestions(PR, deps));
