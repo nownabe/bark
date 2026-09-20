@@ -15,7 +15,8 @@
 // of v2 — but v1 `event` is kept as `legacyResolveEvent` so the fetcher
 // can recognise and drop legacy resolve-marker comments (issue #186).
 
-import { type Anchor, type Comment, normalizeAnchor } from "./types";
+import { buildBlobPermalink } from "../github";
+import { type Anchor, type Comment, normalizeAnchor, type PrRef } from "./types";
 
 const MARKER = "bark:v2";
 
@@ -62,6 +63,37 @@ export function envelopeOf(c: Comment): WireMetadata {
  *  limit. */
 export function wireBodyLength(body: string, meta: WireMetadata): number {
   return embedMetadata(body, meta).length;
+}
+
+/** Most quoted lines an out-of-diff comment shows before the `> …` trailer. */
+const QUOTE_BLOCK_LINES = 12;
+
+/** Render an anchor's quote as the Markdown blockquote an out-of-diff comment
+ *  shows above its permalink. The quote can be a whole chapter, and GitHub
+ *  caps a body at 65,536 characters, so the block is an excerpt (issue #279);
+ *  the full quote stays in LocalState and in the anchor. */
+export function quoteBlock(quote: string): string {
+  const lines = quote.slice(0, QUOTE_EXCERPT_CHARS).split("\n").slice(0, QUOTE_BLOCK_LINES);
+  const block = lines.map((l) => `> ${l}`).join("\n");
+  const complete = lines.join("\n").length === quote.length;
+  return complete ? block : `${block}\n> …`;
+}
+
+/** The visible body of an out-of-diff post: the author's text, the lines it was
+ *  written on, and a permalink to them.
+ *
+ *  A GitHub review comment carries its own position; an issue comment does not,
+ *  so without this a reader on github.com sees the words and nothing else
+ *  (issue #282). It is composed here rather than stored on `Comment.body` so
+ *  LocalState keeps the raw text — one definition, so the Planner's size check
+ *  measures exactly what the Transport will send. */
+export function composeIssueCommentBody(c: Comment, ref: PrRef): string {
+  const { sl, el } = c.anchor.range;
+  const context = [
+    c.anchor.quote === "" ? "" : quoteBlock(c.anchor.quote),
+    c.anchor.sha === "" ? "" : buildBlobPermalink(ref, c.path, c.anchor.sha, sl, el),
+  ].filter(Boolean);
+  return context.length === 0 ? c.body : `${c.body}\n\n${context.join("\n")}`;
 }
 
 /** Append the metadata fence to a comment body. A quote longer than

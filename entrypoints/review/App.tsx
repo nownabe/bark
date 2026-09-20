@@ -72,7 +72,7 @@ import {
 import { buildLineMap, invertLineMap } from "../../lib/pr/linemap";
 import { buildLineIndex, type SourceAnchor } from "../../lib/anchor";
 import type { ExistingComment } from "../../lib/comments";
-import { buildBlobPermalink, buildSuggestionBlock, pullStatus } from "../../lib/github";
+import { buildSuggestionBlock, pullStatus } from "../../lib/github";
 import { GitHubApiError } from "../../lib/pr/github-api";
 import { fetchFileContent } from "../../lib/pr/remote-fetcher";
 import { canResolveThread, type FileEdit, type PrRef } from "../../lib/pr/types";
@@ -85,7 +85,12 @@ import {
   type SuggestionDecision,
 } from "../../lib/drafts";
 import type { AnchorRange, CommentMetadata } from "../../lib/metadata";
-import { BODY_LIMIT, envelopeOf, wireBodyLength } from "../../lib/pr/metadata";
+import {
+  BODY_LIMIT,
+  composeIssueCommentBody,
+  envelopeOf,
+  wireBodyLength,
+} from "../../lib/pr/metadata";
 import { browser } from "wxt/browser";
 import { bootstrapPullRequest } from "../../lib/pr/bootstrap";
 import type { PullRequestRepository } from "../../lib/pr/repository";
@@ -114,7 +119,6 @@ import {
   DEV_ROLE_SWITCH,
   errMessage,
   installUrl,
-  quoteBlock,
   type ViewMode,
 } from "./uiHelpers";
 
@@ -469,7 +473,6 @@ function AppBody() {
   // Drafts derived from Repository LocalState (Comment.state === "draft").
   // The PendingDraft shape's derivable fields:
   //   - inDiff: from diffRangesByPath + anchor range
-  //   - permalink: rebuilt for out-of-diff drafts
   //   - kind: always "comment" — suggestion-typed drafts are transient (built
   //     by suggestionsToDrafts at submit time only).
   const drafts = useMemo<PendingDraft[]>(() => {
@@ -491,10 +494,6 @@ function AppBody() {
         body: c.body,
         kind: "comment",
         lastError: c.lastError?.message,
-        permalink:
-          !inDiff && c.anchor.sha
-            ? buildBlobPermalink(ref, c.path, c.anchor.sha, c.anchor.range.sl, c.anchor.range.el)
-            : undefined,
       });
     }
     return out;
@@ -889,15 +888,14 @@ function AppBody() {
       thread: id,
       body: commentBody.trim() || "(no comment)",
       kind: "comment",
-      permalink:
-        !inDiff && headSha ? buildBlobPermalink(ref, path, headSha, span.sl, span.el) : undefined,
     };
     const comment = pendingDraftToComment(draft, viewerLogin ?? "you");
     // GitHub refuses a body over 65,536 characters, and a review batch is
     // atomic — tell the reviewer now rather than at submit (issue #279).
     // simplify: live suggestions are only checked by the Planner at submit;
     // the upgrade path is a per-keystroke check on allPendingSuggestions.
-    if (wireBodyLength(composeDraftBody(draft), envelopeOf(comment)) > BODY_LIMIT) {
+    const wireBody = inDiff ? comment.body : composeIssueCommentBody(comment, ref);
+    if (wireBodyLength(wireBody, envelopeOf(comment)) > BODY_LIMIT) {
       reportError(
         "This comment is too large for GitHub (limit 65,536 characters). Shorten it or select less text.",
       );
@@ -999,10 +997,6 @@ function AppBody() {
       thread: a.thread,
       body: replyText.trim(),
       kind: "comment",
-      permalink:
-        !inDiff && headSha
-          ? buildBlobPermalink(ref, a.path, headSha, a.range.sl, a.range.el)
-          : undefined,
     };
     if (!prRepository) return;
     // parentLocalId resolves the reply's target inside Repository.LocalState:
@@ -1132,29 +1126,20 @@ function AppBody() {
         body: s.body,
         kind: "suggestion",
         suggestion: s.replacement,
-        permalink:
-          !s.inDiff && headSha
-            ? buildBlobPermalink(ref!, s.path, headSha, s.range.sl, s.range.el)
-            : undefined,
       };
     });
 
-  // Compose the visible body for a submitted draft:
-  //   in-diff:     <body> + (suggestion block if any)
-  //   out-of-diff: <body> + (suggestion block if any) + note + quoted + permalink
-  // The new layer's Comment.body is the *visible* body — the Executor appends
-  // the metadata fence at post time, so the wire format matches the legacy
-  // path exactly.
+  // Compose the visible body of a suggestion draft: the reviewer's text plus
+  // the GitHub suggestion block (and, out of diff, the caveat that GitHub will
+  // not offer Apply for it). The quote and permalink an out-of-diff post needs
+  // are NOT composed here — the Executor adds them to every out-of-diff post,
+  // so LocalState keeps the raw text (issue #282).
   const composeDraftBody = (d: PendingDraft): string => {
-    const suggestion =
-      d.kind === "suggestion" ? `\n\n${buildSuggestionBlock(d.suggestion ?? "")}` : "";
-    if (d.inDiff) return `${d.body}${suggestion}`;
-    const quoted = quoteBlock(d.quote);
-    const note =
-      d.kind === "suggestion"
-        ? "\n\n(Out of diff: this suggestion will not show an Apply button.)"
-        : "";
-    return `${d.body}${suggestion}${note}\n\n${quoted}\n${d.permalink ?? ""}`.trimEnd();
+    if (d.kind !== "suggestion") return d.body;
+    const note = d.inDiff
+      ? ""
+      : "\n\n(Out of diff: this suggestion will not show an Apply button.)";
+    return `${d.body}\n\n${buildSuggestionBlock(d.suggestion ?? "")}${note}`;
   };
 
   // Submit steps never throw: a failed post parks the Comment (and the Thread
@@ -1189,12 +1174,11 @@ function AppBody() {
     setLoading(true);
     setError(null);
     try {
-      // In-diff and out-of-diff drafts both go through Repository.submitDrafts.
-      // The Planner routes Comments based on the bootstrap's isInDiff predicate:
-      // in-diff → PostReviewBatch, out-of-diff → PostIssueComment. The Bark-
-      // specific quoted-body / permalink composition for out-of-diff lives on
-      // Comment.body (ADR 0001 §3: body is the visible body only), so the new
-      // layer's wire format (visible body + metadata fence) carries it as-is.
+      // Comment drafts are already in LocalState (addDraft/addReply write them
+      // straight to the Repository); only the suggestion drafts materialised
+      // just above still have to be written. The Planner routes each Comment
+      // on the bootstrap's isInDiff predicate: in-diff → PostReviewBatch,
+      // out-of-diff → PostIssueComment.
       const inRepo = new Set(prRepository.getLocalState().comments.map((c) => c.id));
       for (const d of toSubmit) {
         if (inRepo.has(d.cid)) continue; // already double-written by L4/L6a
@@ -1266,28 +1250,13 @@ function AppBody() {
     setError(null);
     try {
       // Drafts + FileEdits + accepted-thread resolves all go through
-      // Repository.submitDrafts(). Planner routes Comments to PostReviewBatch
-      // (in-diff) or PostIssueComment (out-of-diff); body composition lives
-      // on Comment.body via composeDraftBody.
+      // Repository.submitDrafts(). The author has no suggestion drafts to
+      // materialise, so every Comment draft is already in LocalState. Planner
+      // routes Comments to PostReviewBatch (in-diff) or PostIssueComment
+      // (out-of-diff), and the Executor composes the out-of-diff quote and
+      // permalink (issue #282).
 
-      // 1. Drafts → Repository.
-      const inRepo = new Set(prRepository.getLocalState().comments.map((c) => c.id));
-      for (const d of drafts) {
-        if (inRepo.has(d.cid)) continue;
-        const body = composeDraftBody(d);
-        const thread = threads.find((t) => t.id === d.thread);
-        const parentLocalId =
-          d.cid === d.thread
-            ? undefined
-            : thread?.rootComment
-              ? commentViewByRemoteId.get(thread.rootComment.id)?.comment.id
-              : (thread?.rootDraft?.cid ?? undefined);
-        await prRepository.upsertComment(
-          pendingDraftToComment({ ...d, body }, viewerLogin ?? "you", parentLocalId),
-        );
-      }
-
-      // 2. Re-sync FileEdits authoritatively (the L6d-1 effect is best-
+      // 1. Re-sync FileEdits authoritatively (the L6d-1 effect is best-
       //    effort; this is the source of truth for the impending commit).
       //    Each carries the accepted suggestions' threads in resolveOnCommit.
       const wantedFileEdits = fileEditsFromEdits();
@@ -1300,7 +1269,7 @@ function AppBody() {
         }
       }
 
-      // 3. Accepted suggestions whose replacement is already in the file
+      // 2. Accepted suggestions whose replacement is already in the file
       //    produce no FileEdit, so there is no commit to wait for: resolve
       //    them now. The rest ride on their FileEdit's resolveOnCommit and
       //    are resolved by the Commit's own success (issue #278).
@@ -1314,7 +1283,7 @@ function AppBody() {
         acceptedResolvedRemoteIds.push(info.commentId);
       }
 
-      // 4. Submit — Reconciler emits PostReviewBatch / PostIssueComment /
+      // 3. Submit — Reconciler emits PostReviewBatch / PostIssueComment /
       //    PostReply + one Commit step for the FileEdits, then a follow-up
       //    cycle for the threads that Commit flipped to syncing.
       await prRepository.submitDrafts();
@@ -1330,7 +1299,7 @@ function AppBody() {
         .getLocalState()
         .fileEdits.find((fe) => fe.lastError)?.lastError;
 
-      // 5. Legacy state cleanup. Drafts auto-fall-out of the drafts useMemo
+      // 4. Legacy state cleanup. Drafts auto-fall-out of the drafts useMemo
       //    once submitDrafts flips them past "draft"; only suggestionEdits +
       //    accepted-decision state still own their own storage.
       if (commitFailure) {

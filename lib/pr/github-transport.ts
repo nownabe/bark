@@ -7,7 +7,7 @@
 // GitHub API mapping and §7 for the identity-matching contract.
 
 import { type GitHubClient, ghGraphQL, GitHubApiError, ghRequest } from "./github-api";
-import { embedMetadata, envelopeOf, extractMetadata } from "./metadata";
+import { composeIssueCommentBody, embedMetadata, envelopeOf, extractMetadata } from "./metadata";
 import { listReviewThreads } from "./review-threads";
 import type {
   CommitStep,
@@ -120,7 +120,13 @@ async function postIssueComment(
   step: PostIssueCommentStep,
 ): Promise<PostIssueCommentOutcome> {
   try {
-    const body = embedMetadata(step.comment.body, envelopeOf(step.comment));
+    // Every out-of-diff post — a new comment or a reply GitHub cannot nest —
+    // goes through here, so this is the one place the quote and permalink are
+    // composed (issue #282).
+    const body = embedMetadata(
+      composeIssueCommentBody(step.comment, prRef),
+      envelopeOf(step.comment),
+    );
     const result = await ghRequest<{ id: number }>(
       client,
       "POST",

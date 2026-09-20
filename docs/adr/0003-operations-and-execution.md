@@ -76,7 +76,9 @@ In-diff vs out-of-diff routing for `CreateComment` is computed at planning time 
 
 **Posted coordinates are the current head's.** A review has a single `commit_id`, and Bark always posts against `RemoteState.pullRequest.headSha`, so the `line` / `start_line` it sends must be in that commit's coordinates. `Comment.anchor` is immutable (ADR 0002 §2) and may carry an older sha, so at planning time each `CreateComment` is re-anchored `anchor.sha → headSha` with the same line map ADR 0004 uses for display (`RemoteState.fileContents` therefore holds every anchored path at both shas). The in-diff routing and the posted copy (including the embedded metadata `anchor`) use the mapped range; `LocalState` keeps the original anchor. A `CreateComment` whose mapping is `outdated` becomes a `RejectComment` Step instead: it never reaches GitHub and fails locally, so the rest of the submission proceeds and the batch cannot 422 on stale lines (issue #265). A `CreateComment` whose re-anchoring is `shifted` — the line was located but the quoted text changed upstream — is also planned as `RejectComment`, with a message distinct from the `outdated` one. Posting it would attach the reviewer's words (and, for a suggestion, an applicable replacement) to text they never saw, and the posted copy's `quote` would no longer be the text at its range (ADR 0002 §3). The draft shows the same `shifted` badge before Submit, so the refusal matches what was flagged. `mapped` drafts, including those located by the region search, post at the mapped range with their quote unchanged (issue #313).
 
-A `CreateComment` or `CreateReply` whose wire body (visible body + envelope) exceeds GitHub's 65,536-character limit is planned as `RejectComment` with a size error; the batch proceeds without it (issue #279).
+**The out-of-diff quote and permalink are the Executor's business.** An issue comment carries no position of its own, so `PostIssueComment` appends the quoted excerpt (capped at 12 lines / 1,000 characters) and a `blob/{anchor.sha}/{path}#L…` permalink to the visible body before embedding the envelope — for a `CreateReply` routed out of diff as much as for a `CreateComment`, since GitHub shows neither of them next to the code. `LocalState` keeps `Comment.body` as the raw text the user typed, which is what the sidebar renders and what re-anchoring works from (issue #282).
+
+A `CreateComment` or `CreateReply` whose wire body (visible body + envelope) exceeds GitHub's 65,536-character limit is planned as `RejectComment` with a size error; the batch proceeds without it (issue #279). For an out-of-diff post the measured body is the composed one, so the Planner's check is exactly what GitHub will apply its limit to.
 
 ### 6. Failure semantics
 
@@ -127,7 +129,7 @@ For out-of-diff threads the join is by ownership instead: the earliest issue com
 ### Deferred
 
 - The exact retry / debouncing affordance in the UI for a failed `draft + lastError` item.
-- The textual format of the out-of-diff `PostIssueComment` body (quote-prefixing, permalink shape) — currently inherited from the legacy implementation.
+- The textual format of the out-of-diff `PostIssueComment` body (quote-prefixing, permalink shape) — inherited from the legacy implementation; §5 fixes only where it is composed, not what it looks like.
 - Whether to ever introduce a `DeleteComment` or `UpdateCommentBody` Op. Not required by current Bark features.
 
 ## References

@@ -251,6 +251,33 @@ describe("github-transport — postIssueComment", () => {
     expect(calls[0]?.url).toBe("https://api.github.com/repos/o/r/issues/7/comments");
     expect(calls[0]?.body).toContain("bark:v2");
   });
+
+  // Issue #282: an issue comment carries no position of its own, so the quoted
+  // excerpt and the permalink are all a reader on github.com has to go on.
+  test("composes the quoted excerpt and the permalink above the fence", async () => {
+    const { fetch, calls } = makeFetch(async () => jsonResponse({ id: 555 }));
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const c = comment({
+      body: "typo here",
+      anchor: { sha: "h0", range: { sl: 5, sc: 1, el: 6, ec: 7 }, quote: "first\nsecond" },
+    });
+    await transport.postIssueComment({ kind: "post-issue-comment", comment: c });
+    const sent = JSON.parse(calls[0]?.body ?? "{}") as { body: string };
+    expect(extractMetadata(sent.body).body).toBe(
+      "typo here\n\n> first\n> second\nhttps://github.com/o/r/blob/h0/f.md#L5-L6",
+    );
+  });
+
+  test("a reply routed out of diff carries the same quote and permalink", async () => {
+    const { fetch, calls } = makeFetch(async () => jsonResponse({ id: 556 }));
+    const transport = createGitHubTransport({ token: "t", fetch }, PR);
+    const reply = comment({ id: "r", parentLocalId: "c1", body: "agreed" });
+    await transport.postIssueComment({ kind: "post-issue-comment", comment: reply });
+    const sent = JSON.parse(calls[0]?.body ?? "{}") as { body: string };
+    expect(extractMetadata(sent.body).body).toBe(
+      "agreed\n\n> hello\nhttps://github.com/o/r/blob/h0/f.md#L5",
+    );
+  });
 });
 
 describe("github-transport — Resolve / Unresolve", () => {

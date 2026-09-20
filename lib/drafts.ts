@@ -24,8 +24,6 @@ export interface PendingDraft {
   kind: "comment" | "suggestion";
   /** Replacement source lines for a suggestion (when kind==='suggestion'). */
   suggestion?: string;
-  /** Blob permalink for out-of-diff comments. */
-  permalink?: string;
   /** Why the last submit of this draft failed (Comment.lastError.message).
    *  Absent until a submit parks it back as a draft. */
   lastError?: string;
