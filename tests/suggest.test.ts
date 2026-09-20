@@ -691,6 +691,40 @@ describe("applyAcceptedSuggestion", () => {
       expect(accept(afterA, "")).toBe("h\nt\n");
     });
   });
+
+  // Issue #311: the fallback locates each endpoint of a multi-line target with
+  // the same region search, so a multi-line suggestion applies after an earlier
+  // accept moved or rewrote one of its lines — just like a single-line one.
+  describe("span-local merge for multi-line targets (issue #311)", () => {
+    const anchorSource = "h\nalpha one here\nbeta two\nt\n";
+    const spanMeta = suggestionMeta({
+      sha: "OLD",
+      range: { sl: 2, sc: 1, el: 3, ec: 9 },
+      quote: "alpha one here\nbeta two",
+    });
+    const acceptSpan = (source: string, replacement: string) =>
+      applyAcceptedSuggestion({
+        source,
+        baseSource: anchorSource,
+        lineStarts: buildLineIndex(source),
+        meta: spanMeta,
+        replacement,
+        displayPosition: dpCurrent(spanMeta.range),
+        anchorSource,
+      });
+    // An accepted single-line suggestion on the span's first line.
+    const afterA = "h\nALPHA one here\nbeta two\nt\n";
+
+    test("a two-line suggestion applies after an earlier accept changed its first line", () => {
+      expect(acceptSpan(afterA, "alpha ONE here\nbeta TWO")).toBe(
+        "h\nALPHA ONE here\nbeta TWO\nt\n",
+      );
+    });
+
+    test("a multi-line deletion via the fallback removes every span line and its newline", () => {
+      expect(acceptSpan(afterA, "")).toBe("h\nt\n");
+    });
+  });
 });
 
 // Issue #194: adding or removing only the file's final newline used to count as

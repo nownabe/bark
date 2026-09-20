@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildLineMap } from "../../lib/pr/linemap";
-import { locateLine, reanchor } from "../../lib/pr/reanchor";
+import { locateLine, locateSpan, reanchor } from "../../lib/pr/reanchor";
 import type { Anchor } from "../../lib/pr/types";
 
 function anchor(overrides: Partial<Anchor> = {}): Anchor {
@@ -301,7 +301,10 @@ describe("region search (issue #269)", () => {
     expect(result.status === "shifted" && result.range.ec).toBeGreaterThan(1);
   });
 
-  test("a multi-line anchor with an unmapped endpoint stays outdated", () => {
+  // A one-character line can neither contain the quote part nor reach the
+  // similarity floor, so this endpoint is unlocatable — not because multi-line
+  // anchors are refused outright (they are not, since issue #311).
+  test("a multi-line anchor whose unmapped endpoint is unrecognisable → outdated", () => {
     const result = reanchor(
       anchor({ sha: "old", range: { sl: 2, sc: 1, el: 3, ec: 2 }, quote: "b\nc" }),
       "a\nB!\nc\nd",
@@ -348,5 +351,75 @@ describe("region search (issue #269)", () => {
       "b",
     );
     expect(located).toBeNull();
+  });
+});
+
+// Issue #311 (#269 Phase 2): a multi-line anchor locates each endpoint
+// independently with the same bounded, uniqueness-gated region search, and the
+// whole quote is verified across the located span. A tie stays `outdated` — the
+// expected position centres the window but never ranks candidates.
+describe("multi-line region search (issue #311)", () => {
+  const OLD = "# T\n\nOne one. Two two.\n\nThree three. Four four.\n\nEnd";
+  // "One one. " is 9 chars → the quote starts at column 10 on line 3 and ends
+  // after "Three three." (12 chars) on line 5.
+  const spanAnchor = anchor({
+    sha: "old",
+    range: { sl: 3, sc: 10, el: 5, ec: 13 },
+    quote: "Two two.\n\nThree three.",
+  });
+
+  test("locateSpan keeps both endpoints when the line map resolves them", () => {
+    const oldLines = ["a", "b", "c", "d"];
+    const newLines = ["a", "b", "X", "c", "d"];
+    const map = buildLineMap(oldLines.join("\n"), newLines.join("\n"));
+    expect(locateSpan(oldLines, newLines, map, { sl: 2, sc: 1, el: 3, ec: 2 }, "b\nc")).toEqual({
+      sl: 2,
+      el: 4,
+    });
+  });
+
+  test("a two-paragraph comment survives an edit elsewhere in the second paragraph", () => {
+    const result = reanchor(
+      spanAnchor,
+      "# T\n\nOne one. Two two.\n\nThree three. FOUR changed.\n\nEnd",
+      "head",
+      OLD,
+    );
+    expect(result).toEqual({ status: "mapped", range: { sl: 3, sc: 10, el: 5, ec: 13 } });
+  });
+
+  test("the quoted text of a multi-line anchor was edited → shifted at the located span", () => {
+    const result = reanchor(
+      spanAnchor,
+      "# T\n\nOne one. Two TWO!\n\nThree three. Four four.\n\nEnd",
+      "head",
+      OLD,
+    );
+    expect(result).toEqual({ status: "shifted", range: { sl: 3, sc: 10, el: 5, ec: 13 } });
+  });
+
+  test("the end line was deleted with nothing in its place → outdated", () => {
+    const result = reanchor(spanAnchor, "# T\n\nOne one. Two two.\nEnd", "head", OLD);
+    expect(result).toEqual({ status: "outdated" });
+  });
+
+  test("endpoints that cross over → outdated", () => {
+    const result = reanchor(
+      anchor({ sha: "old", range: { sl: 2, sc: 1, el: 3, ec: 2 }, quote: "P\nQ" }),
+      "a\nQ!\nP!\nz",
+      "head",
+      "a\nP\nQ\nz",
+    );
+    expect(result).toEqual({ status: "outdated" });
+  });
+
+  test("a similarity tie for one endpoint → outdated", () => {
+    const result = reanchor(
+      anchor({ sha: "old", range: { sl: 2, sc: 1, el: 4, ec: 8 }, quote: "foo bar\nmid\nbaz qux" }),
+      "a\nfoo bar!\nmid\nbaz qux 1\nbaz qux 2\nz",
+      "head",
+      "a\nfoo bar\nmid\nbaz qux\nz",
+    );
+    expect(result).toEqual({ status: "outdated" });
   });
 });

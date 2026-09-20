@@ -7,8 +7,8 @@
 //   3. Take the line map oldSource → currentSource (memoised by the caller via
 //      `lineMapFor`; built here otherwise); if both anchor endpoints map →
 //      status: mapped (quote matches) / shifted (quote differs)
-//   4. Single-line anchor whose line did not map → bounded region search
-//      (`locateLine`) over the diff region between the nearest mapped
+//   4. An unmapped endpoint (single- or multi-line anchor) → bounded region
+//      search (`locateLine`) over the diff region between the nearest mapped
 //      neighbours, then columns carried through a char diff → mapped/shifted
 //   5. Otherwise → status: outdated
 //
@@ -74,10 +74,9 @@ export function reanchor(
   return { status: "shifted", range: newRange };
 }
 
-/** A single-line anchor whose line did not survive the LCS map: look for it in
- *  the diff region, then carry `sc`/`ec` across a char diff of the old line
- *  against the located one. Multi-line anchors keep ADR 0004 §5's partial-span
- *  rule (any unmapped endpoint → outdated). */
+/** An anchor with an endpoint the line map did not resolve: locate each
+ *  endpoint in its own diff region, then carry `sc`/`ec` across a char diff of
+ *  the old line against the located one. */
 function reanchorByRegion(
   anchor: Anchor,
   currentSource: string,
@@ -85,14 +84,35 @@ function reanchorByRegion(
   lineMap: Map<number, number>,
 ): DisplayPosition {
   const { sl, sc, el, ec } = anchor.range;
-  if (sl !== el) return { status: "outdated" };
-
   const oldLines = oldSource.split("\n");
-  const located = locateLine(oldLines, currentSource.split("\n"), lineMap, sl, anchor.quote);
-  if (located === null) return { status: "outdated" };
-  const { line, text } = located;
+  const newLines = currentSource.split("\n");
+  const span = locateSpan(oldLines, newLines, lineMap, anchor.range, anchor.quote);
+  if (span === null) return { status: "outdated" };
 
   const dmp = new diff_match_patch();
+  /** An old column in the coordinates of the line it ended up on. */
+  const column = (oldLine: number, newLine: number, c: number) =>
+    lineMap.get(oldLine) === newLine
+      ? c
+      : dmp.diff_xIndex(
+          dmp.diff_main(oldLines[oldLine - 1] ?? "", newLines[newLine - 1] ?? ""),
+          c - 1,
+        ) + 1;
+
+  if (sl !== el) {
+    const range: Range = {
+      sl: span.sl,
+      sc: column(sl, span.sl, sc),
+      el: span.el,
+      ec: Math.min(column(el, span.el, ec), (newLines[span.el - 1] ?? "").length + 1),
+    };
+    return extractTextAtRange(currentSource, range) === anchor.quote
+      ? { status: "mapped", range }
+      : { status: "shifted", range };
+  }
+
+  const line = span.sl;
+  const text = newLines[line - 1] ?? "";
   const diffs = dmp.diff_main(oldLines[sl - 1] ?? "", text);
   const sc2 = dmp.diff_xIndex(diffs, sc - 1) + 1;
   let ec2 = dmp.diff_xIndex(diffs, ec - 1) + 1;
@@ -114,6 +134,35 @@ function reanchorByRegion(
   }
   ec2 = Math.min(Math.max(ec2, sc2 + 1), text.length + 1);
   return { status: "shifted", range: { sl: line, sc: sc2, el: line, ec: ec2 } };
+}
+
+/**
+ * The line span `range` now occupies in `newLines`: a mapped endpoint keeps its
+ * mapping, an unmapped one goes through {@link locateLine} with the part of
+ * `quote` that lies on that endpoint's line (exact under ADR 0002 §3's
+ * definition of `quote`).
+ *
+ * Null when either endpoint is unlocatable, or when the located end does not
+ * lie after the located start — endpoints that crossed or collapsed describe no
+ * span the user would recognise, so the caller reports `outdated` (ADR 0004 §3).
+ * A single-line range is the case `sl === el`, which resolves one endpoint.
+ */
+export function locateSpan(
+  oldLines: string[],
+  newLines: string[],
+  lineMap: Map<number, number>,
+  range: Range,
+  quote: string,
+): { sl: number; el: number } | null {
+  const parts = quote.split("\n");
+  const locate = (line: number, needle: string) =>
+    lineMap.get(line) ?? locateLine(oldLines, newLines, lineMap, line, needle)?.line;
+
+  const sl = locate(range.sl, parts[0] ?? "");
+  if (sl === undefined) return null;
+  if (range.sl === range.el) return { sl, el: sl };
+  const el = locate(range.el, parts[parts.length - 1] ?? "");
+  return el === undefined || el <= sl ? null : { sl, el };
 }
 
 /**

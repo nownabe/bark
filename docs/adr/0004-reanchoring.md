@@ -6,6 +6,7 @@
 - Amends: [ADR 0002](0002-data-model.md) (generalises `RemoteState.FileContent` from `(path)` to `(sha, path)`)
 - Amended: 2026-09 (#269) — bounded region search for single-line anchors; line-local merge for accepts.
 - Amended: 2026-09 (#280) — the line map is a memoised line-level Myers diff.
+- Amended: 2026-09 (#311) — per-endpoint region search for multi-line anchors; span-local merge for accepts.
 
 ## Context
 
@@ -51,10 +52,8 @@ flowchart TD
     Q2 -->|no| Outdated["status: outdated"]
     Q2 -->|yes| LineMap[buildLineMap line diff<br/>oldSource → source]
     LineMap --> Q3{both anchor.sl and anchor.el<br/>map to a new line?}
-    Q3 -->|no| Q3b{single-line anchor?}
-    Q3b -->|no| Outdated
-    Q3b -->|yes| Region["locate line in the diff region<br/>between mapped neighbours<br/>(≤ 50 candidates)"]
-    Region --> Q3c{unique exact quote match,<br/>or unique best similarity ≥ 0.5?}
+    Q3 -->|no| Region["locate each unmapped endpoint<br/>in the diff region between<br/>its mapped neighbours (≤ 50 candidates)"]
+    Region --> Q3c{"every endpoint unique<br/>(exact quote part, or best<br/>similarity ≥ 0.5) and end > start?"}
     Q3c -->|no| Outdated
     Q3c -->|yes| Cols[map sc/ec through char diff<br/>old line → located line]
     Cols --> Verify
@@ -66,7 +65,7 @@ flowchart TD
 
 Notes:
 
-- **No whole-file `quote` search.** If the line-map cannot resolve both endpoints of a multi-line anchor, the result is `outdated`. For a single-line anchor the search is confined to the current-source lines between the nearest line-mapped neighbours (the region the old line's content must have gone to), capped at 50 candidates around the expected position. A candidate is chosen only when it is the _unique_ line containing the quote, or the _unique_ best line by Levenshtein similarity to the old line with ratio ≥ 0.5; ties and duplicates yield `outdated`. Never guess.
+- **No whole-file `quote` search.** An endpoint the line-map cannot resolve is looked for only in the current-source lines between its nearest line-mapped neighbours (the region the old line's content must have gone to), capped at 50 candidates around the expected position. A candidate is chosen only when it is the _unique_ line containing the part of `quote` that lies on that endpoint's line, or the _unique_ best line by Levenshtein similarity to the old line with ratio ≥ 0.5. Ties and duplicates yield `outdated`; the expected position centres the window and never breaks a tie. A multi-line anchor locates each endpoint independently and is `outdated` unless the located end lies strictly after the located start. Never guess.
 - **Columns.** When both endpoints line-map, `sc`/`ec` carry through unchanged. When a line was located by the region search, `sc`/`ec` are mapped through a character diff of the old line against the located line (`diff_xIndex`). There is one verification rule for every anchor: the text extracted at the mapped range must equal `anchor.quote` ([ADR 0002 §3](0002-data-model.md) defines `quote` so that line-based anchors satisfy it too).
 - **`shifted`** means the line was located (through the line map or the region search) but the quote no longer verifies at the mapped columns — the comment is probably still about the right area, but the user should look.
 - **Line-map** is the kept-line set of a line-level Myers diff (`diff-match-patch` over one code unit per distinct line, no timeout, so it is optimal and runs in linear space): `Map<oldLine, newLine>` for lines present unchanged in both revisions. It is computed once per `(anchor.sha, path, headSha)` triple, memoised in a small LRU that is validated against the two source texts on every hit (a reused sha never serves a stale map), and reused across all comments on that file and across derivations. The reviewer's live suggestion hunks are produced by the same line diff per keystroke; its cost is proportional to the number of changed lines, not to the file.
@@ -84,8 +83,7 @@ Notes:
 
 ### 5. Edge cases
 
-- **Partial span deletion** (start mapped, end's source line gone, or vice versa) → `outdated`. No clipping to a partial range — an explicit failure beats a silent half-truth.
-- **Single-line anchor whose line was modified** → region search (§3). A line deleted with nothing in its place (empty region), a region with no qualifying candidate, or a similarity tie → `outdated`.
+- **An endpoint's source line was modified or removed** → region search for that endpoint (§3), single- and multi-line anchors alike. An empty region (the line was deleted with nothing in its place), no qualifying candidate, a similarity tie, or a located end at or before the located start → `outdated`. No clipping to a partial range — an explicit failure beats a silent half-truth.
 - **Whole span deleted** → `outdated`.
 - **Empty `quote`** → `outdated` (defensive; should not occur given creation invariants).
 - **More than 65,535 distinct lines across the two revisions** (the one-code-unit line encoding's ceiling) → no lines are kept and every anchor on the file is `outdated`; an explicit, visible failure rather than a wrong map.
@@ -116,7 +114,7 @@ The line map inside `reanchor` is the memoised `lineMapFor(anchor.sha, path, hea
 
 ### 7. Applying a suggestion
 
-Accepting a suggestion first tries the exact path: the located line (head coordinates mapped to the author's edited source) must contain the quote byte-for-byte, which is replaced. When it does not (the paragraph already changed locally or upstream), the target line is located from the anchor-sha file directly in the edited source with the §3 region search, and the suggestion is applied as a line-local three-way merge: `patch_make(quote → replacement)` applied to that line only; every hunk must apply, otherwise the accept is refused. The merge never touches any other line, and the result is staged as tracked changes for the author to review before commit.
+Accepting a suggestion first tries the exact path: the located line (head coordinates mapped to the author's edited source) must contain the quote byte-for-byte, which is replaced. When it does not (the paragraph already changed locally or upstream), the target span (one or more lines) is located from the anchor-sha file directly in the edited source with the §3 region search, and the suggestion is applied as a span-local three-way merge: `patch_make(quote → replacement)` applied to those lines only; every hunk must apply, otherwise the accept is refused. The merge never touches any line outside the span, and the result is staged as tracked changes for the author to review before commit.
 
 ## Consequences
 
@@ -134,7 +132,6 @@ Accepting a suggestion first tries the exact path: the located line (head coordi
 
 ### Deferred
 
-- Region search for multi-line anchors (per-endpoint).
 - Editor overlay for `shifted` suggestions (merge preview).
 - Cross-file content move tracking (renamed file → no FileContent match).
 - Persistent `FileContent` cache for faster reopens.
