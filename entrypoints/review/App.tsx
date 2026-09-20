@@ -433,9 +433,8 @@ function AppBody() {
   // Threads that can actually be resolved/reopened: they exist on GitHub
   // with a remote identity — a review thread (GraphQL) or an out-of-diff
   // thread whose root issue comment carries Bark metadata (issue #270). A
-  // thread created in the current session has neither until the next refresh
-  // (#272), so Resolve stays hidden there (issue #182); a foreign issue
-  // comment never gets one at all.
+  // thread created in this session gets its identity from the step result
+  // that posted it (issue #272); a foreign issue comment never gets one.
   const resolvableThreadKeys = useMemo(() => {
     if (!prRepository || !repositoryAppState) return new Set<string>();
     return new Set(

@@ -94,7 +94,7 @@ For every `PostReviewBatch` / `PostReply` / `PostIssueComment`, the Executor:
 
 1. Embeds `{ cid: Comment.id, threadId: Comment.threadId, anchor }` as base64-encoded hidden metadata in the comment body (ADR 0002 §5).
 2. After the API call returns, matches the freshly-created GitHub comments back to `LocalState` `Comment` entries by extracting the same metadata from the response bodies. `POST /pulls/{n}/reviews` returns only the review object, so for `PostReviewBatch` the Transport instead lists the PR's review threads via GraphQL right after the POST and matches by `cid`. GitHub's listing can lag behind the write, so while any posted `cid` is missing the Transport re-lists with a small bounded backoff (two retries, ~2 s total) before giving up.
-3. Populates `Comment.remoteId` (and, for a freshly-created thread, the matched `Thread.remoteThreadId`) and flips state to `synced`. A `cid` still missing after the bound is reported as unmapped and handled per §6 (`draft + lastError`, adopted on the next refresh).
+3. Populates `Comment.remoteId` and flips state to `synced`. For a freshly-created thread it also fills the Thread's remote identity: `remoteThreadId` from the matched review thread (`PostReviewBatch`), or `remoteIssueCommentId` = the new comment's REST id when a top-level comment was posted as an issue comment (`PostIssueComment`). A `cid` still missing after the bound is reported as unmapped and handled per §6 (`draft + lastError`, adopted on the next refresh).
 
 For Threads with no native body to embed in, identity is resolved at fetch time by joining GraphQL `reviewThreads` to the matched `Comment` set (any contained comment with a known `Comment.id` reveals the `Thread.id` ↔ `remoteThreadId` mapping).
 
