@@ -121,6 +121,5 @@ describe("useAuthFlow — clearToken", () => {
 
 // The device-flow polling effect is driven by a chain of self-scheduling
 // `setTimeout`s, which interact poorly with happy-dom + the testing-library
-// async helpers. It is covered by manual reload testing and the existing
-// AppV2-side device-flow integration coverage. The unit tests above pin
-// every other state transition this hook performs.
+// async helpers. It is covered by manual reload testing. The unit tests
+// above pin every other state transition this hook performs.

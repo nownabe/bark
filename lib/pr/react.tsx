@@ -1,81 +1,20 @@
 // React integration for the PullRequestRepository.
 //
 // Layered architecture (ADR 0001 §4):
-//   - React **reads** AppState only (`useAppState` / `useAppStateFromRepository`).
-//   - React **writes** through the Repository (`useRepository`).
+//   - React **reads** AppState only (`useAppStateFromRepository`).
+//   - React **writes** through the Repository the surface holds.
 //   - LocalState / RemoteState are Repository-internal — they MUST NOT be
-//     read from React components directly. The two `useLocal/RemoteState`
-//     hooks below are file-private helpers that exist so `useAppState` can
-//     subscribe to the underlying snapshots; they are intentionally not
-//     exported.
-//
-// Two `useAppState` flavours, same semantics:
-//   - `useAppState()`            — for a tree under `<RepositoryProvider>`.
-//   - `useAppStateFromRepository(repo)` — pass the repository directly,
-//     so a single component (the legacy `App.tsx` during the
-//     legacy-on-new-data-layer rollout) can read AppState without
-//     restructuring around the Provider. Returns `null` when `repo` is null.
+//     read from React components directly.
 
-import {
-  createContext,
-  type ReactNode,
-  useCallback,
-  useContext,
-  useMemo,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { type AppState, deriveAppState } from "./appstate";
 import type { PullRequestRepository } from "./repository";
-import type { LocalState, RemoteState } from "./types";
-
-const RepositoryContext = createContext<PullRequestRepository | null>(null);
-
-export function RepositoryProvider({
-  repo,
-  children,
-}: {
-  repo: PullRequestRepository;
-  children: ReactNode;
-}) {
-  return <RepositoryContext.Provider value={repo}>{children}</RepositoryContext.Provider>;
-}
-
-export function useRepository(): PullRequestRepository {
-  const repo = useContext(RepositoryContext);
-  if (!repo) {
-    throw new Error("useRepository requires a <RepositoryProvider /> ancestor");
-  }
-  return repo;
-}
-
-function useLocalStateInternal(): LocalState {
-  const repo = useRepository();
-  const subscribe = useCallback((cb: () => void) => repo.subscribe(cb), [repo]);
-  const getSnapshot = useCallback(() => repo.getLocalState(), [repo]);
-  return useSyncExternalStore(subscribe, getSnapshot);
-}
-
-function useRemoteStateInternal(): RemoteState {
-  const repo = useRepository();
-  const subscribe = useCallback((cb: () => void) => repo.subscribe(cb), [repo]);
-  const getSnapshot = useCallback(() => repo.getRemoteState(), [repo]);
-  return useSyncExternalStore(subscribe, getSnapshot);
-}
-
-/** Derive AppState from the subscribed LocalState + RemoteState. */
-export function useAppState(): AppState {
-  const local = useLocalStateInternal();
-  const remote = useRemoteStateInternal();
-  return useMemo(() => deriveAppState(local, remote), [local, remote]);
-}
 
 const NO_OP_UNSUBSCRIBE = () => {};
 
-/** Same semantics as `useAppState()` but takes the repository
- *  directly. Used by callers that can't sit under a
- *  `<RepositoryProvider>` — the legacy `App.tsx` during the
- *  legacy-on-new-data-layer rollout, where the bootstrapped repository
- *  is a local state of the surface itself.
+/** AppState derived from the subscribed LocalState + RemoteState of the
+ *  given repository. `App.tsx` bootstraps the repository as a local state
+ *  of the surface itself and passes it here.
  *
  *  Returns `null` when `repo` is null (the surface is still warming up:
  *  no PR, no token, or bootstrap in flight). The hook always subscribes
