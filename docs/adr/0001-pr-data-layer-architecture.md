@@ -40,6 +40,7 @@ Adopt a Repository-based data layer with explicit separation between local-persi
 
 - Source of truth: GitHub.
 - Accessed via a single `PullRequestRepository` per PR.
+- **One writer per PR per browser.** `LocalState` is persisted as one whole-state value under `pr:{owner}/{repo}#{number}:state`, so two Repository instances on the same PR would overwrite each other (last writer wins). The background worker enforces the invariant: "Open in Bark" activates an existing review tab for the same PR instead of opening a second one. Tabs the user duplicates by hand are unsupported and may lose the other tab's unsaved drafts.
 
 ### 2. PullRequestRepository internal structure
 
