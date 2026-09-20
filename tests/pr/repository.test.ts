@@ -526,7 +526,7 @@ describe("repository — setThreadResolved", () => {
     expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: false });
   });
 
-  test("a failed resolve can be retried (issue #188)", async () => {
+  test("a failed resolve leaves the Thread synced and unresolved; the retry succeeds (issues #188, #275)", async () => {
     let fail = true;
     const { transport, calls } = happyTransport();
     const flaky: Transport = {
@@ -547,16 +547,20 @@ describe("repository — setThreadResolved", () => {
     });
 
     await r.setThreadResolved("t1", true);
+    // A thread that exists on GitHub never becomes a draft: the toggle is
+    // rolled back to the remote value and the error is surfaced (issue #275).
+    expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: false });
     expect(r.getLocalState().threads[0]?.lastError?.message).toBe("boom");
 
-    // The retry click must dispatch again — a thread that exists on GitHub
-    // (remoteThreadId present) must not be stranded in a state that
-    // setThreadResolved silently ignores.
     fail = false;
     await r.setThreadResolved("t1", true);
 
     expect(calls).toEqual(["resolve-review-thread(fail)", "resolve-review-thread"]);
-    expect(r.getLocalState().threads[0]).toMatchObject({ state: "synced", resolved: true });
+    expect(r.getLocalState().threads[0]).toMatchObject({
+      state: "synced",
+      resolved: true,
+      lastError: undefined,
+    });
   });
 
   test("an out-of-diff thread resolves via SetIssueThreadResolved and stays resolved across refresh and reload (issue #270)", async () => {

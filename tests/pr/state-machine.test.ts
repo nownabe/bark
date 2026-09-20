@@ -7,6 +7,7 @@ import {
   completeNoopThreadSyncs,
   flipDraftsToSyncing,
   mergeRemoteIntoLocal,
+  revertOrphanedSyncing,
   setThreadResolvedToSyncing,
 } from "../../lib/pr/state-machine";
 import type {
@@ -128,10 +129,10 @@ describe("state-machine — setThreadResolvedToSyncing", () => {
     expect(out.threads[0]).toMatchObject({ state: "draft", resolved: true });
   });
 
-  test("a draft Thread WITH a remoteThreadId (failed sync) re-enters syncing (issue #188)", () => {
-    // applyThreadSyncFailure parks a failed resolve as draft+lastError; the
-    // retry click must transition it back to syncing or it never dispatches.
-    const t = thread({ state: "draft", remoteThreadId: "PRT", lastError: { message: "boom" } });
+  test("a synced Thread carrying lastError re-enters syncing on retry and clears the error (issue #275)", () => {
+    // A failed resolve parks the Thread as synced+lastError, so the retry
+    // click is the ordinary synced edge.
+    const t = thread({ state: "synced", remoteThreadId: "PRT", lastError: { message: "boom" } });
     const out = setThreadResolvedToSyncing(localState({ threads: [t] }), "t1", true);
     expect(out.threads[0]).toMatchObject({
       state: "syncing",
@@ -145,11 +146,33 @@ describe("state-machine — setThreadResolvedToSyncing", () => {
     const local = localState({ threads: [t] });
     expect(setThreadResolvedToSyncing(local, "other", true)).toEqual(local);
   });
+});
 
-  test("a draft Thread whose only identity is remoteIssueCommentId re-enters syncing (issue #270)", () => {
-    const t = thread({ state: "draft", remoteIssueCommentId: 501, resolved: false });
-    const out = setThreadResolvedToSyncing(localState({ threads: [t] }), "t1", true);
-    expect(out.threads[0]).toMatchObject({ state: "syncing", resolved: true });
+describe("state-machine — revertOrphanedSyncing", () => {
+  test("a syncing Thread with a remote identity reverts to synced, one without reverts to draft (issue #275)", () => {
+    const out = revertOrphanedSyncing(
+      localState({
+        threads: [
+          thread({ id: "a", state: "syncing", remoteThreadId: "PRT" }),
+          thread({ id: "b", state: "syncing" }),
+        ],
+      }),
+    );
+    expect(out.threads[0]).toMatchObject({ id: "a", state: "synced" });
+    expect(out.threads[1]).toMatchObject({ id: "b", state: "draft" });
+    expect(out.threads[0]?.lastError).toBeDefined();
+    expect(out.threads[1]?.lastError).toBeDefined();
+  });
+
+  test("syncing Comments and FileEdits always revert to draft", () => {
+    const out = revertOrphanedSyncing(
+      localState({
+        comments: [comment({ state: "syncing", remoteId: 1 })],
+        fileEdits: [fileEdit({ state: "syncing" })],
+      }),
+    );
+    expect(out.comments[0]?.state).toBe("draft");
+    expect(out.fileEdits[0]?.state).toBe("draft");
   });
 });
 
@@ -372,24 +395,7 @@ describe("state-machine — applyStepResults: Resolve / Unresolve", () => {
     expect(out.threads[0]).toMatchObject({ state: "synced", resolved: true });
   });
 
-  test("UnresolveReviewThread failure reverts to draft + lastError, preserving the desired field value", () => {
-    const t = thread({ state: "syncing", resolved: false, remoteThreadId: "PRT" });
-    const err = { message: "unauthorized" };
-    const results: StepResult[] = [
-      {
-        step: { kind: "unresolve-review-thread", threadId: "t1", remoteThreadId: "PRT" },
-        outcome: { ok: false, error: err },
-      },
-    ];
-    const out = applyStepResults(localState({ threads: [t] }), results);
-    expect(out.threads[0]).toMatchObject({
-      state: "draft",
-      resolved: false,
-      lastError: err,
-    });
-  });
-
-  test("SetIssueThreadResolved: ok marks the Thread synced, failure reverts it to draft + lastError (issue #270)", () => {
+  test("SetIssueThreadResolved success marks the Thread synced (issue #270)", () => {
     const t = thread({ id: "t-out", state: "syncing", resolved: true, remoteIssueCommentId: 501 });
     const step = {
       kind: "set-issue-thread-resolved" as const,
@@ -399,12 +405,57 @@ describe("state-machine — applyStepResults: Resolve / Unresolve", () => {
     };
     const ok = applyStepResults(localState({ threads: [t] }), [{ step, outcome: { ok: true } }]);
     expect(ok.threads[0]).toMatchObject({ state: "synced", resolved: true });
+  });
+});
 
+describe("state-machine — applyStepResults: resolve failure (issue #275)", () => {
+  test("a failed resolve-review-thread returns the Thread to synced with resolved reverted and lastError", () => {
+    const t = thread({ state: "syncing", remoteThreadId: "PRT", resolved: true });
+    const results: StepResult[] = [
+      {
+        step: { kind: "resolve-review-thread", threadId: "t1", remoteThreadId: "PRT" },
+        outcome: { ok: false, error: { message: "boom" } },
+      },
+    ];
+    const out = applyStepResults(localState({ threads: [t] }), results);
+    expect(out.threads[0]).toEqual({
+      id: "t1",
+      state: "synced",
+      remoteThreadId: "PRT",
+      resolved: false,
+      lastError: { message: "boom" },
+    });
+  });
+
+  test("a failed unresolve-review-thread reverts resolved back to true", () => {
+    const t = thread({ state: "syncing", remoteThreadId: "PRT", resolved: false });
+    const err = { message: "unauthorized" };
+    const results: StepResult[] = [
+      {
+        step: { kind: "unresolve-review-thread", threadId: "t1", remoteThreadId: "PRT" },
+        outcome: { ok: false, error: err },
+      },
+    ];
+    const out = applyStepResults(localState({ threads: [t] }), results);
+    expect(out.threads[0]).toMatchObject({ state: "synced", resolved: true, lastError: err });
+  });
+
+  test("a failed set-issue-thread-resolved reverts resolved to the opposite of the step", () => {
+    const t = thread({ id: "t-out", state: "syncing", remoteIssueCommentId: 501, resolved: false });
     const err = { message: "Forbidden", code: 403 };
-    const failed = applyStepResults(localState({ threads: [t] }), [
-      { step, outcome: { ok: false, error: err } },
-    ]);
-    expect(failed.threads[0]).toMatchObject({ state: "draft", resolved: true, lastError: err });
+    const results: StepResult[] = [
+      {
+        step: {
+          kind: "set-issue-thread-resolved",
+          threadId: "t-out",
+          issueCommentId: 501,
+          resolved: false,
+        },
+        outcome: { ok: false, error: err },
+      },
+    ];
+    const out = applyStepResults(localState({ threads: [t] }), results);
+    expect(out.threads[0]).toMatchObject({ state: "synced", resolved: true, lastError: err });
   });
 });
 
