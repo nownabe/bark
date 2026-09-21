@@ -38,6 +38,14 @@ below). With direnv active, the toolchain is on `PATH` inside the project.
 
 `mise run setup` runs the whole setup in one step.
 
+### Work with Codex
+
+Open this repository in Codex or run `codex` from its root. Codex automatically
+loads the repository's [`AGENTS.md`](AGENTS.md), which describes the project,
+development workflow, and required checks. Run `mise run setup` after cloning;
+then give Codex a task in the repository. No project-specific Codex configuration
+is needed to load these instructions.
+
 ### Install dependencies
 
 ```bash
