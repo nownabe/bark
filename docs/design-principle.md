@@ -111,6 +111,18 @@ heavy drop shadows.
 
 ## 3. Component conventions
 
+- **Mermaid diagrams:** a bordered viewport with a compact, always visible
+  toolbar for fit, zoom, reset, expansion, and source selection. Expand opens a
+  centered native modal dialog with space around it (90vw × 80dvh, relative to
+  the browser viewport with no fixed pixel cap); a close button (×) or Escape returns
+  to the inline viewport and its previous position and zoom. Navigation remains
+  available in the expanded view. Drag or use arrow keys to
+  pan; `+` / `-` zoom, `F` fits, and `0` resets. Reset restores the natural size
+  (scaled down when needed to fit). Zoom buttons step through round presets
+  (for example 100%, 125%, 150%); fitting keeps the exact scale needed. Fit and
+  source controls use icons with accessible names and tooltips. Source selection opens editing/commenting
+  explicitly so navigation does not select document text. Reuse button, focus,
+  border, and surface tokens; keep the viewport height stable during navigation.
 - **Buttons** (`.btn`, `.btn--primary`, `.btn--sm`, `.btn--danger`): 500 weight,
   `--radius-sm`, token-driven transitions, a slight press (`translateY`).
   Primary = brand green. Danger = red outline that fills with `--red-tint` on

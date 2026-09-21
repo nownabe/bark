@@ -3,6 +3,7 @@
 // Mermaid is a large dependency and only needed when a ```mermaid block is
 // actually present, so it is imported lazily on first render and initialized
 // once. securityLevel "strict" sanitizes diagram input (PR content is untrusted).
+import { addMermaidControls } from "./mermaidViewer";
 
 /** The info string of a fenced-code opening line, lowercased ("```mermaid" → "mermaid"). */
 export function fenceInfo(firstLine: string): string {
@@ -44,17 +45,34 @@ function loadMermaid(): Promise<MermaidModule> {
  * shouldn't break the surrounding preview). `parse` is checked first so invalid
  * input never reaches `render` (which would otherwise leak an error element).
  */
-export async function renderMermaid(container: HTMLElement, code: string): Promise<void> {
+export async function renderMermaid(
+  container: HTMLElement,
+  code: string,
+  signal: AbortSignal,
+  selectSource: () => void,
+): Promise<void> {
   try {
     const mermaid = await loadMermaid();
     if ((await mermaid.parse(code, { suppressErrors: true })) === false) {
       throw new Error("invalid diagram syntax");
     }
     const { svg } = await mermaid.render(`dr-mermaid-${seq++}`, code);
+    if (signal.aborted) return;
     container.innerHTML = svg;
+    addMermaidControls(container, signal, selectSource);
     container.classList.remove("dr-mermaid--error");
   } catch (e) {
+    if (signal.aborted) return;
     container.classList.add("dr-mermaid--error");
     container.textContent = `Mermaid error: ${e instanceof Error ? e.message : String(e)}`;
+    const source = document.createElement("button");
+    source.type = "button";
+    source.className = "btn btn--sm btn--icon";
+    source.innerHTML =
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 6-6 6 6 6m8-12 6 6-6 6m-2-16-4 20" /></svg>';
+    source.title = "Edit or comment on diagram source";
+    source.setAttribute("aria-label", "Edit or comment on diagram source");
+    source.addEventListener("click", selectSource, { signal });
+    container.append(document.createElement("br"), source);
   }
 }
