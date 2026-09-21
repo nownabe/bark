@@ -124,6 +124,8 @@ class TableWidget extends WidgetType {
 // A rendered ```mermaid diagram. Async render (mermaid is lazy-loaded); the DOM
 // is reused while the code is unchanged (eq), so cursor moves don't re-render.
 class MermaidWidget extends WidgetType {
+  // CodeMirror can reuse the DOM with a new, equivalent widget instance.
+  private static controllers = new WeakMap<HTMLElement, AbortController>();
   constructor(readonly code: string) {
     super();
   }
@@ -134,11 +136,10 @@ class MermaidWidget extends WidgetType {
     const div = document.createElement("div");
     div.className = "dr-mermaid";
     div.textContent = "Rendering diagram…";
-    void renderMermaid(div, this.code);
-    // Click the rendered diagram to select its source block, which opens the
-    // comment composer for it (the block reveals its source while selected).
-    div.addEventListener("mousedown", (e) => {
-      e.preventDefault();
+    const controller = new AbortController();
+    MermaidWidget.controllers.set(div, controller);
+    // Source selection remains explicit so dragging the diagram can pan it.
+    void renderMermaid(div, this.code, controller.signal, () => {
       const pos = view.posAtDOM(div);
       let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(pos, 1);
       while (node && node.name !== "FencedCode") node = node.parent;
@@ -146,6 +147,9 @@ class MermaidWidget extends WidgetType {
       view.focus();
     });
     return div;
+  }
+  destroy(dom: HTMLElement) {
+    MermaidWidget.controllers.get(dom)?.abort();
   }
   ignoreEvent() {
     return true;
@@ -365,13 +369,6 @@ export const richMarkdownTheme = EditorView.baseTheme({
     textAlign: "left",
   },
   ".dr-table th": { backgroundColor: "#f6f8fa", fontWeight: "bold" },
-  ".dr-mermaid": {
-    display: "flex",
-    justifyContent: "center",
-    padding: "8px 0",
-    cursor: "pointer",
-  },
-  ".dr-mermaid svg": { maxWidth: "100%", height: "auto" },
   ".dr-mermaid--error": {
     display: "block",
     color: "#cf222e",

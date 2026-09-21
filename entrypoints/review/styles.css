@@ -97,6 +97,87 @@ select:focus-visible {
   border-radius: var(--radius-sm);
 }
 
+.dr-mermaid {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.dr-mermaid__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dr-mermaid__controls output {
+  min-width: 5ch;
+  text-align: center;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dr-mermaid__controls button[hidden] {
+  display: none;
+}
+
+.dr-mermaid__controls .dr-mermaid__close {
+  margin-left: 8px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.dr-mermaid__viewport {
+  height: clamp(200px, 50vh, 480px);
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.dr-mermaid__viewport--dragging {
+  cursor: grabbing;
+}
+
+.dr-mermaid__viewport > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none !important; /* Mermaid sets an inline max-width on its SVG. */
+}
+
+.dr-mermaid--expanded[open] {
+  display: flex;
+  flex-direction: column;
+  width: 90vw;
+  height: 80dvh;
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+}
+
+.dr-mermaid--expanded::backdrop {
+  background: color-mix(in srgb, var(--fg) 40%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.dr-mermaid--expanded .dr-mermaid__viewport {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
 /* ---- top bar (sticky) ---- */
 .topbar {
   position: sticky;
