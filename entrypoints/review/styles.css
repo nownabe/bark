@@ -97,8 +97,11 @@ select:focus-visible {
   border-radius: var(--radius-sm);
 }
 
+.dr-mermaid-block {
+  padding: 8px 0;
+}
+
 .dr-mermaid {
-  margin: 8px 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
