@@ -609,7 +609,7 @@ select.input:focus {
   color: var(--fg);
 }
 .comment__body {
-  font-size: 13px;
+  font-size: 14px;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -807,11 +807,13 @@ select.input:focus {
 
 /* suggestion in comment card (old -> new). The full line is shown in a calm
    neutral tone; only the changed substring (.sugg-chg) is emphasized so the
-   surrounding context stays readable (char-level, like a comment anchor). */
+   surrounding context stays readable (char-level, like a comment anchor).
+   Sans, not mono: suggestions are mostly prose edits, and mono in the
+   narrow sidebar wraps them into hard-to-read fragments. */
 .sugg-old,
 .sugg-new {
-  font-size: 12px;
-  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
   border-radius: 6px;
