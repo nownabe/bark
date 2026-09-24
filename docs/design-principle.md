@@ -60,8 +60,12 @@ Rules:
   on an elevated system stack (`--font-sans`) and a quality monospace
   (`--font-mono`). If a bundled custom face is ever wanted, ship the files in the
   extension — never a runtime `<link>` to Google Fonts.
-- Body is 14px / line-height 1.6, antialiased. The document editor (`.cm-editor`)
-  is a touch larger (15px) for reading comfort.
+- Body is 14px / line-height 1.6, antialiased. The document in Preview is set
+  for reading: `--font-sans`, 16px / line-height 1.75, a 720px measure, and
+  headings sized 1.75 / 1.375 / 1.125em with space above (a hairline under H1–H2)
+  instead of the syntax highlighter's underline. Raw view keeps the editor's
+  15px monospace source look. Preview styles live in `richMarkdownTheme`
+  (`entrypoints/review/richMarkdown.ts`) and use the same tokens.
 - **Hierarchy comes from weight, size, and color — not many type families.**
   Headings: 700 weight, slightly tight tracking (`letter-spacing: -0.02em`).
   Labels/eyebrows: small, uppercase, positive tracking, `--faint` color

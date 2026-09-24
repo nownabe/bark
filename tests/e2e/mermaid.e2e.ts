@@ -17,6 +17,8 @@ test("navigate a diagram without selecting source, then explicitly open its sour
   const viewport = diagram.locator(".dr-mermaid__viewport");
   const svg = viewport.locator("svg");
   await expect(svg).toBeVisible();
+  // Scrolled to the very bottom, the toolbar can sit under the sticky top bar.
+  await diagram.evaluate((element) => element.scrollIntoView({ block: "center" }));
   const original = await svg.getAttribute("viewBox");
   await diagram.getByRole("button", { name: "Zoom in", exact: true }).click();
   await expect(svg).not.toHaveAttribute("viewBox", original!);
