@@ -51,3 +51,34 @@ describe("preview mode: inline Markdown inside table cells", () => {
     expect([...table.querySelectorAll("th")].map((c) => c.textContent)).toEqual(["a | b", "c"]);
   });
 });
+
+describe("preview mode: table inside a blockquote", () => {
+  test("renders inside the quote without a stray empty quote line", () => {
+    const table = renderTable("> note\n>\n> | a | b |\n> | --- | --- |\n> | 1 | 2 |");
+    const block = table.parentElement!;
+    expect(block.classList.contains("dr-table-block--quote")).toBe(true);
+    expect([...table.querySelectorAll("th, td")].map((c) => c.textContent)).toEqual([
+      "a",
+      "b",
+      "1",
+      "2",
+    ]);
+    const quoteLines = [...block.parentElement!.querySelectorAll(".cm-line.dr-quote")];
+    expect(quoteLines.map((l) => l.textContent)).toEqual(["note", ""]);
+  });
+
+  test("editing the table shows the `>` on every row, the header included", () => {
+    const doc = "> | a |\n> | - |\n> | 1 |\n\nend";
+    const view = new EditorView({
+      state: EditorState.create({
+        doc,
+        selection: { anchor: doc.indexOf("1") },
+        extensions: [markdown({ extensions: [GFM] }), richMarkdown, richMarkdownTheme],
+      }),
+      parent: document.body,
+    });
+    const rows = [...view.dom.querySelectorAll(".cm-line")].slice(0, 3);
+    expect(rows.map((l) => l.textContent)).toEqual(["> | a |", "> | - |", "> | 1 |"]);
+    view.destroy();
+  });
+});
