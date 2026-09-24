@@ -73,6 +73,18 @@ class LinkWidget extends WidgetType {
   }
 }
 
+class BulletWidget extends WidgetType {
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const span = document.createElement("span");
+    span.className = "dr-bullet";
+    span.textContent = "•";
+    return span;
+  }
+}
+
 class TableWidget extends WidgetType {
   constructor(
     readonly raw: string,
@@ -238,23 +250,40 @@ function buildDecorations(state: EditorState): DecorationSet {
         }
       }
 
-      // Code block language label: tag the opening fence line with the
-      // language (e.g. `ts`) so CSS can show a small Obsidian-style label in
-      // its top-right corner. Hidden while the cursor is on that line (the info
-      // string is then being edited), matching the marker-hiding convention.
-      // Mermaid fences are handled above (they render as diagrams, not labels).
+      // Fence lines: hide the ``` source so the block reads as a padded box, and
+      // tag the opening line with the language (e.g. `ts`) so CSS can show a
+      // small Obsidian-style label in its top-right corner. The fence under the
+      // cursor shows its source, matching the marker-hiding convention. Mermaid
+      // fences are handled above (they render as diagrams, not labels).
       if (node.name === "FencedCode") {
-        const openLine = state.doc.lineAt(node.from);
         const lang = fencedCodeLang(state, node.node);
-        if (lang && openLine.number !== cursorLine) {
-          seenLines.add(openLine.number);
+        for (let c = node.node.firstChild; c; c = c.nextSibling) {
+          if (c.name !== "CodeMark") continue;
+          const line = state.doc.lineAt(c.from);
+          if (line.number === cursorLine) continue;
+          const isOpen = c.from === node.from;
+          seenLines.add(line.number);
           decos.push(
-            Decoration.line({
-              class: "dr-codeblock dr-codeblock--labelled",
-              attributes: { "data-lang": lang },
-            }).range(openLine.from),
+            Decoration.line(
+              isOpen && lang
+                ? {
+                    class: "dr-codeblock dr-codeblock--open dr-codeblock--labelled",
+                    attributes: { "data-lang": lang },
+                  }
+                : { class: `dr-codeblock dr-codeblock--${isOpen ? "open" : "close"}` },
+            ).range(line.from),
+            Decoration.replace({}).range(line.from, line.to),
           );
         }
+      }
+
+      if (node.name.startsWith("ATXHeading") || node.name.startsWith("SetextHeading")) {
+        const level = Math.min(Number(node.name.slice(-1)) || 1, 6);
+        decos.push(
+          Decoration.line({ class: `dr-hline dr-hline--${level}` }).range(
+            state.doc.lineAt(node.from).from,
+          ),
+        );
       }
 
       // Block line decorations
@@ -273,6 +302,14 @@ function buildDecorations(state: EditorState): DecorationSet {
       const cls = classFor(node.name);
       if (cls && node.to > node.from) {
         decos.push(Decoration.mark({ class: cls }).range(node.from, node.to));
+      }
+
+      if (
+        node.name === "ListMark" &&
+        node.node.parent?.parent?.name === "BulletList" &&
+        state.doc.lineAt(node.from).number !== cursorLine
+      ) {
+        decos.push(Decoration.replace({ widget: new BulletWidget() }).range(node.from, node.to));
       }
 
       // Hide delimiter markers on inactive lines
@@ -315,22 +352,58 @@ export const richMarkdown = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+// Preview is for reading prose, so it overrides the editor's monospace source
+// look; Raw view (which doesn't mount this theme) keeps it.
 export const richMarkdownTheme = EditorView.baseTheme({
-  ".dr-h1": { fontSize: "1.6em", fontWeight: "bold" },
-  ".dr-h2": { fontSize: "1.4em", fontWeight: "bold" },
-  ".dr-h3": { fontSize: "1.2em", fontWeight: "bold" },
-  ".dr-h4, .dr-h5, .dr-h6": { fontWeight: "bold" },
+  ".cm-scroller": { fontFamily: "var(--font-sans)", fontSize: "16px", lineHeight: "1.75" },
+  ".cm-content": { maxWidth: "720px" },
+  // Drop the line gutter padding so block edges (rules, code boxes, quote
+  // bars) line up with the text instead of sitting 6px to its left.
+  ".cm-line": { paddingLeft: "0", paddingRight: "0" },
+  ".dr-hline": { lineHeight: "1.3", letterSpacing: "-0.02em" },
+  // The syntax highlighter underlines headings; hierarchy comes from size and
+  // spacing here instead.
+  ".dr-hline span": { textDecoration: "none" },
+  ".dr-hline--1": {
+    paddingTop: "0.6em",
+    paddingBottom: "0.35em",
+    borderBottom: "1px solid var(--border-subtle)",
+  },
+  ".dr-hline--2": {
+    paddingTop: "1.4em",
+    paddingBottom: "0.3em",
+    borderBottom: "1px solid var(--border-subtle)",
+  },
+  ".dr-hline--3, .dr-hline--4, .dr-hline--5, .dr-hline--6": { paddingTop: "1.1em" },
+  ".dr-h1": { fontSize: "1.75em", fontWeight: "700" },
+  ".dr-h2": { fontSize: "1.375em", fontWeight: "700" },
+  ".dr-h3": { fontSize: "1.125em", fontWeight: "700" },
+  ".dr-h4, .dr-h5, .dr-h6": { fontWeight: "700" },
   ".dr-strong": { fontWeight: "bold" },
   ".dr-em": { fontStyle: "italic" },
   ".dr-code": {
-    fontFamily: "monospace",
-    backgroundColor: "rgba(175,184,193,0.2)",
-    borderRadius: "4px",
-    padding: "0 3px",
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.875em",
+    backgroundColor: "var(--bg-inset)",
+    borderRadius: "5px",
+    padding: "0.1em 0.35em",
   },
-  ".dr-codeblock": {
-    fontFamily: "monospace",
-    backgroundColor: "rgba(175,184,193,0.15)",
+  ".cm-line.dr-codeblock": {
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.85em",
+    lineHeight: "1.6",
+    backgroundColor: "var(--bg-subtle)",
+    paddingLeft: "16px",
+    paddingRight: "16px",
+  },
+  // Hidden fence lines shrink into the box's top and bottom padding.
+  ".cm-line.dr-codeblock--open": {
+    fontSize: "0.6em",
+    borderRadius: "var(--radius-sm) var(--radius-sm) 0 0",
+  },
+  ".cm-line.dr-codeblock--close": {
+    fontSize: "0.6em",
+    borderRadius: "0 0 var(--radius-sm) var(--radius-sm)",
   },
   // Language label on the opening fence line — small, muted, top-right, quiet
   // until the reader looks for it (Obsidian Live Preview style).
@@ -338,41 +411,43 @@ export const richMarkdownTheme = EditorView.baseTheme({
   ".dr-codeblock--labelled::after": {
     content: "attr(data-lang)",
     position: "absolute",
-    top: "0",
-    right: "6px",
+    top: "6px",
+    right: "12px",
     fontFamily: "var(--font-mono)",
-    fontSize: "0.75em",
+    fontSize: "11px",
     lineHeight: "1.6",
     color: "var(--faint)",
     pointerEvents: "none",
     userSelect: "none",
   },
-  ".dr-quote": {
-    borderLeft: "3px solid #d0d7de",
-    paddingLeft: "12px",
-    color: "#57606a",
+  ".cm-line.dr-quote": {
+    borderLeft: "3px solid var(--border)",
+    paddingLeft: "16px",
+    color: "var(--fg-soft)",
   },
-  ".dr-list": { paddingLeft: "8px" },
+  ".cm-line.dr-list": { paddingLeft: "8px" },
+  ".dr-bullet": { color: "var(--muted)" },
   ".dr-link": {
-    color: "#0969da",
+    color: "var(--accent)",
     textDecoration: "underline",
+    textUnderlineOffset: "2px",
     cursor: "pointer",
   },
   ".dr-table": {
     borderCollapse: "collapse",
-    margin: "8px 0",
-    fontSize: "0.95em",
+    margin: "12px 0",
+    fontSize: "0.9375em",
   },
   ".dr-table th, .dr-table td": {
-    border: "1px solid #d0d7de",
-    padding: "4px 10px",
+    border: "1px solid var(--border-subtle)",
+    padding: "6px 12px",
     textAlign: "left",
   },
-  ".dr-table th": { backgroundColor: "#f6f8fa", fontWeight: "bold" },
+  ".dr-table th": { backgroundColor: "var(--bg-subtle)", fontWeight: "600" },
   ".dr-mermaid--error": {
     display: "block",
-    color: "#cf222e",
-    fontFamily: "monospace",
+    color: "var(--red)",
+    fontFamily: "var(--font-mono)",
     fontSize: "0.9em",
     whiteSpace: "pre-wrap",
   },
