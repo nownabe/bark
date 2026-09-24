@@ -77,6 +77,19 @@ bun run dev
 This starts WXT in dev mode and launches a Chrome instance with the extension
 loaded. Open a GitHub PR with changed `.md` files and click **Open in Bark**.
 
+### Preview the review UI locally
+
+```bash
+bun run preview   # http://localhost:5174
+```
+
+Serves the review page on a plain Vite dev server against a fixture PR
+(`dev/preview/fake-github.ts`): open, resolved, Suggestion, and foreign
+threads across two Markdown files. No build, no extension, no GitHub token;
+edits hot-reload. Drafts persist in `localStorage` (clear site data to
+reset), and anything that would write to GitHub is refused. The role switch
+is on, so both the reviewer and the author views are available.
+
 ### Build
 
 Produce the unpacked extension:
