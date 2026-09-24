@@ -44,6 +44,59 @@ function safeHref(raw: string): string | null {
   }
 }
 
+function linkElement(text: string, rawHref: string): HTMLAnchorElement {
+  const a = document.createElement("a");
+  a.className = "dr-link";
+  a.textContent = text;
+  const href = safeHref(rawHref);
+  if (href === null) return a; // inert text for disallowed/invalid URLs
+  a.href = href;
+  a.rel = "noopener noreferrer";
+  a.target = "_blank";
+  return a;
+}
+
+/** The visible text and destination of a `Link` node (href falls back to the text). */
+function linkParts(state: EditorState, node: SyntaxNode): { text: string; href: string } {
+  // Children: LinkMark "[", <text>, LinkMark "]", LinkMark "(", URL, LinkMark ")".
+  let textTo = node.to;
+  let href: string | null = null;
+  for (let child = node.firstChild; child; child = child.nextSibling) {
+    if (child.name === "LinkMark" && state.doc.sliceString(child.from, child.to) === "]") {
+      textTo = child.from;
+    }
+    if (child.name === "URL") href = state.doc.sliceString(child.from, child.to);
+  }
+  const text = state.doc.sliceString(node.from + 1, textTo);
+  return { text, href: href ?? text };
+}
+
+const INLINE_MARKS = new Set(["EmphasisMark", "CodeMark", "StrikethroughMark"]);
+
+// Rebuild a table cell's inline Markdown as DOM from its syntax-tree children,
+// since a block widget replaces the source the inline decorations would style.
+function appendInline(state: EditorState, node: SyntaxNode, parent: HTMLElement) {
+  let pos = node.from;
+  for (let c = node.firstChild; c; c = c.nextSibling) {
+    parent.append(state.doc.sliceString(pos, c.from));
+    pos = c.to;
+    if (INLINE_MARKS.has(c.name)) continue;
+    if (c.name === "Escape") {
+      parent.append(state.doc.sliceString(c.from + 1, c.to));
+    } else if (c.name === "Link") {
+      const { text, href } = linkParts(state, c);
+      parent.append(linkElement(text, href));
+    } else {
+      const el = document.createElement(c.name === "Strikethrough" ? "s" : "span");
+      const cls = classFor(c.name);
+      if (cls) el.className = cls;
+      appendInline(state, c, el);
+      parent.append(el);
+    }
+  }
+  parent.append(state.doc.sliceString(pos, node.to));
+}
+
 class LinkWidget extends WidgetType {
   constructor(
     readonly text: string,
@@ -55,19 +108,11 @@ class LinkWidget extends WidgetType {
     return other.text === this.text && other.href === this.href;
   }
   toDOM() {
-    const a = document.createElement("a");
-    a.className = "dr-link";
-    a.textContent = this.text;
-    const href = safeHref(this.href);
-    if (href === null) return a; // inert text for disallowed/invalid URLs
-    a.href = href;
-    a.rel = "noopener noreferrer";
-    a.target = "_blank";
     // A reviewer clicking the link should follow it (open in a new tab), so let
     // the browser handle the click natively — don't hijack it for editing. To
     // edit the link's Markdown source, move the cursor into it (e.g. with the
     // arrow keys), which reveals the canonical `[text](url)` source.
-    return a;
+    return linkElement(this.text, this.href);
   }
   ignoreEvent() {
     return true; // let the native anchor handle clicks (follow the link)
@@ -98,41 +143,36 @@ function spacedBlock(child: HTMLElement, className: string): HTMLElement {
 
 class TableWidget extends WidgetType {
   constructor(
+    readonly state: EditorState,
+    readonly node: SyntaxNode,
     readonly raw: string,
-    readonly from: number,
   ) {
     super();
+  }
+  get from() {
+    return this.node.from;
   }
   eq(other: TableWidget) {
     return other.raw === this.raw && other.from === this.from;
   }
   toDOM(view: EditorView) {
-    const lines = this.raw.split("\n").filter((l) => l.trim().length > 0);
-    const parseRow = (line: string) =>
-      line
-        .replace(/^\s*\|?/, "")
-        .replace(/\|?\s*$/, "")
-        .split("|")
-        .map((c) => c.trim());
     const table = document.createElement("table");
     table.className = "dr-table";
-    if (lines.length > 0) {
-      const hr = table.createTHead().insertRow();
-      for (const cell of parseRow(lines[0])) {
-        const th = document.createElement("th");
-        th.textContent = cell;
-        hr.appendChild(th);
-      }
-    }
     const tbody = table.createTBody();
-    for (const line of lines.slice(2)) {
-      const row = tbody.insertRow();
-      for (const cell of parseRow(line)) {
-        row.insertCell().textContent = cell;
+    for (let r = this.node.firstChild; r; r = r.nextSibling) {
+      if (r.name !== "TableHeader" && r.name !== "TableRow") continue;
+      const isHeader = r.name === "TableHeader";
+      const row = isHeader ? table.createTHead().insertRow() : tbody.insertRow();
+      for (let c = r.firstChild; c; c = c.nextSibling) {
+        if (c.name !== "TableCell") continue;
+        const cell = isHeader ? row.appendChild(document.createElement("th")) : row.insertCell();
+        appendInline(this.state, c, cell);
       }
     }
-    // On click, place the cursor inside the table and switch to source editing.
+    // On click, place the cursor inside the table and switch to source editing —
+    // except on a link, which the reviewer should be able to follow.
     table.addEventListener("mousedown", (e) => {
+      if ((e.target as Element).closest("a[href]")) return;
       e.preventDefault();
       view.dispatch({ selection: { anchor: this.from + 1 } });
       view.focus();
@@ -211,7 +251,7 @@ function buildDecorations(state: EditorState): DecorationSet {
         if (!inside) {
           decos.push(
             Decoration.replace({
-              widget: new TableWidget(state.doc.sliceString(node.from, node.to), node.from),
+              widget: new TableWidget(state, node.node, state.doc.sliceString(node.from, node.to)),
               block: true,
             }).range(node.from, node.to),
           );
@@ -224,24 +264,9 @@ function buildDecorations(state: EditorState): DecorationSet {
       if (node.name === "Link") {
         const inside = cursor >= node.from && cursor <= node.to;
         if (!inside) {
-          // Children: LinkMark "[", <text>, LinkMark "]", LinkMark "(", URL, LinkMark ")".
-          // The link text is between the opening "[" and closing "]" marks; the
-          // href is the URL node (fall back to the text if there is no URL).
-          let textTo = node.to;
-          let href: string | null = null;
-          for (let child = node.node.firstChild; child; child = child.nextSibling) {
-            if (child.name === "LinkMark" && state.doc.sliceString(child.from, child.to) === "]") {
-              textTo = child.from;
-            }
-            if (child.name === "URL") {
-              href = state.doc.sliceString(child.from, child.to);
-            }
-          }
-          const text = state.doc.sliceString(node.from + 1, textTo);
+          const { text, href } = linkParts(state, node.node);
           decos.push(
-            Decoration.replace({
-              widget: new LinkWidget(text, href ?? text),
-            }).range(node.from, node.to),
+            Decoration.replace({ widget: new LinkWidget(text, href) }).range(node.from, node.to),
           );
         }
         return false; // do not process children (marks/URL)
