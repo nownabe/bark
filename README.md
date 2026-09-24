@@ -113,7 +113,8 @@ bun run typecheck     # tsc --noEmit
 ```
 
 End-to-end tests use Playwright: `bun run test:e2e` (run
-`bun run test:e2e:install` once to fetch the browser).
+`bun run test:e2e:install` once to fetch the browser). CI runs them on every
+pull request that touches code, styles, or dependencies.
 
 ## Project layout
 

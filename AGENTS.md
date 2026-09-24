@@ -39,6 +39,7 @@ The project toolchain (`bun`, `oxlint`, `oxfmt`, `actionlint`, `ghalint`, `zizmo
   - `bun run check:format` — format check (`oxfmt --check`); `bun run fmt` (`oxfmt --write`) to auto-fix.
   - `bun run typecheck` — type check (`tsc --noEmit`).
   - `bun run build` — build (`wxt build`).
+  - `bun run test:e2e` — Playwright E2E (builds first); CI runs it too, so run it for any review-UI change.
 - **Use `.local/tmp` for scratch/temporary files, not `/tmp`.** `.local/` is git-ignored, so temp files stay near the work without ever risking being committed. Create the directory if it doesn't exist.
 
 ## UI / design
