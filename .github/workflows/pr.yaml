@@ -34,6 +34,9 @@ jobs:
               - 'package.json'
               - 'bun.lock'
               - 'tsconfig.json'
+              # A change to the checks themselves must prove they still pass.
+              - '.github/workflows/pr.yaml'
+              - '.github/workflows/reusable-check.yaml'
 
   check:
     name: Check
