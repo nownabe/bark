@@ -5,7 +5,8 @@
 //
 // Note: because tables use block decorations, they must be provided via a **StateField** rather than a ViewPlugin
 //     (CM6: "Block decorations may not be specified via plugins").
-import { syntaxTree } from "@codemirror/language";
+import { defaultHighlightStyle, syntaxTree } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 import { type EditorState, type Range, StateField } from "@codemirror/state";
 import type { SyntaxNode } from "@lezer/common";
@@ -362,8 +363,10 @@ export const richMarkdownTheme = EditorView.baseTheme({
   ".cm-line": { paddingLeft: "0", paddingRight: "0" },
   ".dr-hline": { lineHeight: "1.3", letterSpacing: "-0.02em" },
   // The syntax highlighter underlines headings; hierarchy comes from size and
-  // spacing here instead.
-  ".dr-hline span": { textDecoration: "none" },
+  // spacing here instead. Target only its heading class, not every span:
+  // deletions and insertions inside a heading draw their own line-through /
+  // underline.
+  [`.dr-hline .${defaultHighlightStyle.style([tags.heading])}`]: { textDecoration: "none" },
   ".dr-hline--1": {
     paddingTop: "0.6em",
     paddingBottom: "0.35em",
