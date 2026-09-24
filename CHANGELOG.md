@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/nownabe/bark/compare/bark-v0.4.0...bark-v0.5.0) (2026-09-24)
+
+
+### Features
+
+* **dev:** add local preview server with a fixture PR ([#360](https://github.com/nownabe/bark/issues/360)) ([6878f39](https://github.com/nownabe/bark/commit/6878f391af2a69d72a94279244425fc6574708ee))
+* **review:** add Mermaid diagram navigation and expanded view ([#356](https://github.com/nownabe/bark/issues/356)) ([5e14f52](https://github.com/nownabe/bark/commit/5e14f5216ba2fbd0477f5711817fb837b3eae8d5))
+* **review:** restyle Preview for reading, not editing ([#358](https://github.com/nownabe/bark/issues/358)) ([fa0ab59](https://github.com/nownabe/bark/commit/fa0ab5956b2839d927d0ea1ecad384bc8371efb7))
+* **review:** restyle sidebar text for reading, not editing ([#359](https://github.com/nownabe/bark/issues/359)) ([79650eb](https://github.com/nownabe/bark/commit/79650eb2c161b30047d948acbf74c15db2e8186f))
+
+
+### Bug Fixes
+
+* **review:** keep strikethrough visible inside a Preview heading ([#361](https://github.com/nownabe/bark/issues/361)) ([5abe8b8](https://github.com/nownabe/bark/commit/5abe8b83e53e1de33f615f1d604fd0c67a9ac700))
+* **review:** render a table inside a blockquote correctly ([#366](https://github.com/nownabe/bark/issues/366)) ([be6378d](https://github.com/nownabe/bark/commit/be6378dad6b23b1fdeb2b7cad88facab6c3f7265))
+* **review:** render inline Markdown inside Preview table cells ([#365](https://github.com/nownabe/bark/issues/365)) ([af85de4](https://github.com/nownabe/bark/commit/af85de4ee450da6bc6f34b3b937d8f58f9479129))
+* **review:** stop margins on table/mermaid widgets from skewing click position ([#364](https://github.com/nownabe/bark/issues/364)) ([ea4b86f](https://github.com/nownabe/bark/commit/ea4b86fead9ea32a2e4b3b70ff3f5b460be5e5cf))
+
 ## [0.4.0](https://github.com/nownabe/bark/compare/bark-v0.3.0...bark-v0.4.0) (2026-09-20)
 
 
