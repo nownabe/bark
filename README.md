@@ -132,3 +132,7 @@ pull request that touches code, styles, or dependencies.
 Development follows TDD and Conventional Commits; everything committed is written
 in English. Read [`AGENTS.md`](AGENTS.md) for the full development workflow,
 environment notes, and repository conventions before making changes.
+
+## License
+
+[MIT](LICENSE)
