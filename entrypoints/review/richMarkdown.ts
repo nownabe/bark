@@ -86,6 +86,16 @@ class BulletWidget extends WidgetType {
   }
 }
 
+// Space block widgets with padding on a wrapper, not margin on the widget:
+// CodeMirror measures block heights without margins, so a margin shifts every
+// click below the widget onto a later line.
+function spacedBlock(child: HTMLElement, className: string): HTMLElement {
+  const block = document.createElement("div");
+  block.className = className;
+  block.append(child);
+  return block;
+}
+
 class TableWidget extends WidgetType {
   constructor(
     readonly raw: string,
@@ -127,7 +137,7 @@ class TableWidget extends WidgetType {
       view.dispatch({ selection: { anchor: this.from + 1 } });
       view.focus();
     });
-    return table;
+    return spacedBlock(table, "dr-table-block");
   }
   ignoreEvent() {
     return true;
@@ -149,8 +159,9 @@ class MermaidWidget extends WidgetType {
     const div = document.createElement("div");
     div.className = "dr-mermaid";
     div.textContent = "Rendering diagram…";
+    const block = spacedBlock(div, "dr-mermaid-block");
     const controller = new AbortController();
-    MermaidWidget.controllers.set(div, controller);
+    MermaidWidget.controllers.set(block, controller);
     // Source selection remains explicit so dragging the diagram can pan it.
     void renderMermaid(div, this.code, controller.signal, () => {
       const pos = view.posAtDOM(div);
@@ -159,7 +170,7 @@ class MermaidWidget extends WidgetType {
       view.dispatch({ selection: { anchor: node?.from ?? pos, head: node?.to ?? pos } });
       view.focus();
     });
-    return div;
+    return block;
   }
   destroy(dom: HTMLElement) {
     MermaidWidget.controllers.get(dom)?.abort();
@@ -436,9 +447,9 @@ export const richMarkdownTheme = EditorView.baseTheme({
     textUnderlineOffset: "2px",
     cursor: "pointer",
   },
+  ".dr-table-block": { padding: "12px 0" },
   ".dr-table": {
     borderCollapse: "collapse",
-    margin: "12px 0",
     fontSize: "0.9375em",
   },
   ".dr-table th, .dr-table td": {
