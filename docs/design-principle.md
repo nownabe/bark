@@ -70,8 +70,9 @@ Rules:
   Headings: 700 weight, slightly tight tracking (`letter-spacing: -0.02em`).
   Labels/eyebrows: small, uppercase, positive tracking, `--faint` color
   (see `.panel__title`).
-- Use `--font-mono` for code, suggestions (old/new), the device code, and debug
-  output. Use `font-variant-numeric: tabular-nums` for SHAs and metrics so digits
+- Use `--font-mono` for code, the device code, and debug output. Suggestion
+  diffs in the sidebar (`.sugg-old` / `.sugg-new`) stay in the sans stack:
+  they are mostly prose edits, and mono wraps badly in the narrow sidebar. Use `font-variant-numeric: tabular-nums` for SHAs and metrics so digits
   align.
 
 ### Spacing & layout
