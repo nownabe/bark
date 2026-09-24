@@ -16,7 +16,7 @@ test("a click below a table and a diagram lands on the clicked line", async ({ p
     { owner: PREVIEW_REF.owner, repo: PREVIEW_REF.repo, pr: PREVIEW_REF.number },
     { storage: { github_token: "preview", auth_method: "pat" } },
   );
-  await expect(page.locator(".dr-table")).toBeVisible();
+  await expect(page.locator(".dr-table").first()).toBeVisible();
   await expect(page.locator(".dr-mermaid svg").first()).toBeVisible();
 
   const heading = page.locator(".dr-hline--2", { hasText: "Rollout" });

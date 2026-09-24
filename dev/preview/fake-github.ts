@@ -40,6 +40,11 @@ The mobile client currently requires a live connection for every write. Field us
 Every write is appended to a durable \`outbox\` table before it is sent. A background worker drains the outbox in order and marks entries as acknowledged once the server responds with \`2xx\`.
 
 > Open question: should the outbox be per-account or per-device? Per-device is simpler but makes account switching awkward.
+>
+> | Option | Account switch |
+> | --- | --- |
+> | Per-account | seamless |
+> | Per-device | **manual** re-sync |
 
 \`\`\`ts
 interface OutboxEntry {

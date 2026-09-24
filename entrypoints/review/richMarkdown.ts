@@ -146,6 +146,7 @@ class TableWidget extends WidgetType {
     readonly state: EditorState,
     readonly node: SyntaxNode,
     readonly raw: string,
+    readonly quoted: boolean,
   ) {
     super();
   }
@@ -153,7 +154,7 @@ class TableWidget extends WidgetType {
     return this.node.from;
   }
   eq(other: TableWidget) {
-    return other.raw === this.raw && other.from === this.from;
+    return other.raw === this.raw && other.from === this.from && other.quoted === this.quoted;
   }
   toDOM(view: EditorView) {
     const table = document.createElement("table");
@@ -177,7 +178,10 @@ class TableWidget extends WidgetType {
       view.dispatch({ selection: { anchor: this.from + 1 } });
       view.focus();
     });
-    return spacedBlock(table, "dr-table-block");
+    return spacedBlock(
+      table,
+      this.quoted ? "dr-table-block dr-table-block--quote" : "dr-table-block",
+    );
   }
   ignoreEvent() {
     return true;
@@ -247,13 +251,21 @@ function buildDecorations(state: EditorState): DecorationSet {
     enter: (node) => {
       // Table: replace with an HTML widget when the cursor is outside, show source when inside.
       if (node.name === "Table") {
-        const inside = cursor >= node.from && cursor <= node.to;
+        // Start at the line start so a quoted table also swallows its first `> `.
+        const from = state.doc.lineAt(node.from).from;
+        const inside = cursor >= from && cursor <= node.to;
         if (!inside) {
+          const quoted = node.node.parent?.name === "Blockquote";
           decos.push(
             Decoration.replace({
-              widget: new TableWidget(state, node.node, state.doc.sliceString(node.from, node.to)),
+              widget: new TableWidget(
+                state,
+                node.node,
+                state.doc.sliceString(node.from, node.to),
+                quoted,
+              ),
               block: true,
-            }).range(node.from, node.to),
+            }).range(from, node.to),
           );
         }
         return false; // do not process children (rows/cells)
@@ -358,7 +370,10 @@ function buildDecorations(state: EditorState): DecorationSet {
         isInlineCodeMark;
       if (hideMark && node.to > node.from) {
         const line = state.doc.lineAt(node.from).number;
-        if (line !== cursorLine) {
+        // The table's other rows keep their `>` (Table children are skipped
+        // above), so its header row keeps one too. The rendered table covers it.
+        const startsTable = node.node.nextSibling?.name === "Table";
+        if (line !== cursorLine && !startsTable) {
           // Also hide the space right after heading ## / quote > (so no leading space remains).
           let to = node.to;
           if (
@@ -473,6 +488,7 @@ export const richMarkdownTheme = EditorView.baseTheme({
     cursor: "pointer",
   },
   ".dr-table-block": { padding: "12px 0" },
+  ".dr-table-block--quote": { borderLeft: "3px solid var(--border)", paddingLeft: "16px" },
   ".dr-table": {
     borderCollapse: "collapse",
     fontSize: "0.9375em",
