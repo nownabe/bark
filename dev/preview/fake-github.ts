@@ -55,8 +55,8 @@ interface OutboxEntry {
 | Case | Server state | Resolution |
 | --- | --- | --- |
 | Stale update | newer version | reject, surface to user |
-| Delete after edit | deleted | drop local edit |
-| Duplicate create | exists | treat as success |
+| Delete after edit | \`deleted\` | **drop** local edit |
+| Duplicate create | exists | treat as *success* ([why](https://example.com/idempotency)) |
 
 When a conflict is rejected, the client keeps the local copy and shows a banner so the user can decide. See the [retry policy](https://example.com/retry) for backoff details.
 
