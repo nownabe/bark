@@ -3,6 +3,7 @@
   "version": "0.4.0",
   "private": true,
   "description": "Google Docs-like Markdown review for GitHub Pull Requests (Chrome MV3 extension)",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "wxt",
