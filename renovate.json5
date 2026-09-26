@@ -1,4 +1,13 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["github>nownabe/renovate-config"],
+  packageRules: [
+    // group:monorepos matches React by its old facebook/react source URL, so
+    // since React moved to react/react, react and react-dom get split PRs
+    // that can never pass on their own.
+    {
+      matchPackageNames: ["react", "react-dom"],
+      groupName: "react",
+    },
+  ],
 }
