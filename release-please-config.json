@@ -1,6 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "release-type": "node",
+  "include-component-in-tag": false,
+  "last-release-sha": "5a422f98a4e0f15234c49f967f12b878387834f8",
   "packages": {
     ".": {
       "package-name": "bark",
