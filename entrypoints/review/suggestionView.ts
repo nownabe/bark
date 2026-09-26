@@ -24,7 +24,7 @@ class InsertWidget extends WidgetType {
   constructor(readonly text: string) {
     super();
   }
-  eq(other: InsertWidget) {
+  override eq(other: InsertWidget) {
     return other.text === this.text;
   }
   toDOM() {
@@ -33,14 +33,14 @@ class InsertWidget extends WidgetType {
     span.textContent = this.text;
     return span;
   }
-  ignoreEvent() {
+  override ignoreEvent() {
     return false;
   }
 }
 
 /** The sidebar's "position shifted" badge, inline after a merge preview. */
 class ShiftedBadgeWidget extends WidgetType {
-  eq() {
+  override eq() {
     return true;
   }
   toDOM() {

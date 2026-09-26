@@ -104,7 +104,7 @@ class LinkWidget extends WidgetType {
   ) {
     super();
   }
-  eq(other: LinkWidget) {
+  override eq(other: LinkWidget) {
     return other.text === this.text && other.href === this.href;
   }
   toDOM() {
@@ -114,13 +114,13 @@ class LinkWidget extends WidgetType {
     // arrow keys), which reveals the canonical `[text](url)` source.
     return linkElement(this.text, this.href);
   }
-  ignoreEvent() {
+  override ignoreEvent() {
     return true; // let the native anchor handle clicks (follow the link)
   }
 }
 
 class BulletWidget extends WidgetType {
-  eq() {
+  override eq() {
     return true;
   }
   toDOM() {
@@ -153,7 +153,7 @@ class TableWidget extends WidgetType {
   get from() {
     return this.node.from;
   }
-  eq(other: TableWidget) {
+  override eq(other: TableWidget) {
     return other.raw === this.raw && other.from === this.from && other.quoted === this.quoted;
   }
   toDOM(view: EditorView) {
@@ -183,7 +183,7 @@ class TableWidget extends WidgetType {
       this.quoted ? "dr-table-block dr-table-block--quote" : "dr-table-block",
     );
   }
-  ignoreEvent() {
+  override ignoreEvent() {
     return true;
   }
 }
@@ -196,7 +196,7 @@ class MermaidWidget extends WidgetType {
   constructor(readonly code: string) {
     super();
   }
-  eq(other: MermaidWidget) {
+  override eq(other: MermaidWidget) {
     return other.code === this.code;
   }
   toDOM(view: EditorView) {
@@ -216,10 +216,10 @@ class MermaidWidget extends WidgetType {
     });
     return block;
   }
-  destroy(dom: HTMLElement) {
+  override destroy(dom: HTMLElement) {
     MermaidWidget.controllers.get(dom)?.abort();
   }
-  ignoreEvent() {
+  override ignoreEvent() {
     return true;
   }
 }

@@ -42,16 +42,13 @@
     "@types/diff-match-patch": "^1.0.36",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.0.0",
     "@wxt-dev/module-react": "^1.1.0",
     "happy-dom": "^20.10.4",
     "oxfmt": "^0.68.0",
     "oxlint": "^1.70.0",
     "typescript": "^7.0.0",
-    "wxt": "^0.20.0"
-  },
-  "overrides": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "publish-browser-extension": "^4.0.5"
+    "vite": "^8.0.0",
+    "wxt": "^0.21.0"
   }
 }

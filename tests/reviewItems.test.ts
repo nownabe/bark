@@ -155,9 +155,9 @@ describe("buildSuggestionMarks", () => {
       displayPositionFor: dpFromAnchor(comments),
     });
     expect(marks).toHaveLength(1);
-    expect(marks[0].to).toBeGreaterThan(marks[0].from);
-    expect(source.slice(marks[0].from, marks[0].to)).toBe("line two");
-    expect(marks[0].replacement).toBe("LINE TWO");
+    expect(marks[0]!.to).toBeGreaterThan(marks[0]!.from);
+    expect(source.slice(marks[0]!.from, marks[0]!.to)).toBe("line two");
+    expect(marks[0]!.replacement).toBe("LINE TWO");
   });
 
   test("skips non-suggestion comments, other files, and dismissed suggestions", () => {
@@ -209,9 +209,9 @@ describe("buildSuggestionMarks", () => {
         displayPositionFor: shiftedAt({ sl: 2, sc: 1, el: 2, ec: 9 }),
       });
       expect(marks).toHaveLength(1);
-      expect(altered.slice(marks[0].from, marks[0].to)).toBe("line 2!!");
-      expect(marks[0].replacement).toBe("LINE TWO");
-      expect(marks[0].shifted).toBe(true);
+      expect(altered.slice(marks[0]!.from, marks[0]!.to)).toBe("line 2!!");
+      expect(marks[0]!.replacement).toBe("LINE TWO");
+      expect(marks[0]!.shifted).toBe(true);
     });
 
     test("draws nothing when the merge would be refused", () => {
@@ -242,9 +242,9 @@ describe("buildSuggestionMarks", () => {
         }),
       });
       expect(marks).toHaveLength(1);
-      expect(source.slice(marks[0].from, marks[0].to)).toBe("line two");
-      expect(marks[0].replacement).toBe("LINE TWO");
-      expect(marks[0].shifted).toBeUndefined();
+      expect(source.slice(marks[0]!.from, marks[0]!.to)).toBe("line two");
+      expect(marks[0]!.replacement).toBe("LINE TWO");
+      expect(marks[0]!.shifted).toBeUndefined();
     });
   });
 
@@ -270,7 +270,7 @@ describe("buildSuggestionMarks", () => {
         ]),
       });
       expect(marks).toHaveLength(1);
-      expect(marks[0].from).toBe(6);
+      expect(marks[0]!.from).toBe(6);
     });
 
     test("a suggestion on a locally edited line is not drawn", () => {
@@ -398,7 +398,7 @@ describe("buildThreads", () => {
     const drafts = [draft({ cid: "d1", thread: "t1", range: { sl: 5, sc: 1, el: 5, ec: 5 } })];
     const threads = buildThreads(comments, drafts, "a.md");
     expect(threads).toHaveLength(1);
-    const t = threads[0];
+    const t = threads[0]!;
     expect(t.messages.map((m) => m.kind)).toEqual(["submitted", "pending"]);
     expect(t.hasSubmitted).toBe(true);
     expect(t.hasPending).toBe(true);
@@ -458,7 +458,8 @@ describe("buildReviewEntries / filter", () => {
   test("'submitted' shows only threads that have submitted comments", () => {
     const submitted = filterReviewEntries(entries, new Set(["submitted"] as const));
     expect(submitted).toHaveLength(1);
-    expect(submitted[0].kind === "thread" && submitted[0].thread.id).toBe("t1");
+    const entry = submitted[0]!;
+    expect(entry.kind === "thread" && entry.thread.id).toBe("t1");
   });
 
   test("pending+submitted is the union of the two facets", () => {
@@ -502,7 +503,8 @@ describe("filterReviewEntries — pending reply on a resolved thread (#193)", ()
   test("the resolved thread's pending reply shows under the pending facet", () => {
     const pending = filterReviewEntries(entries, new Set(["pending"] as const));
     expect(pending).toHaveLength(1);
-    expect(pending[0].kind === "thread" && pending[0].thread.id).toBe("t1");
+    const entry = pending[0]!;
+    expect(entry.kind === "thread" && entry.thread.id).toBe("t1");
   });
 
   test("pending count agrees with the submit count (both include the reply)", () => {
@@ -591,13 +593,13 @@ describe("groupPendingByFile", () => {
     const groups = groupPendingByFile(items);
     expect(groups.map((g) => g.path)).toEqual(["docs/a.md", "docs/b.md"]);
     // a.md items sorted by line: d3 (L2) then d2 (L4)
-    expect(groups[0].items.map((i) => (i.kind === "comment" ? i.draft.cid : ""))).toEqual([
+    expect(groups[0]!.items.map((i) => (i.kind === "comment" ? i.draft.cid : ""))).toEqual([
       "d3",
       "d2",
     ]);
     // b.md: suggestion (L1) before the draft (L9)
-    expect(groups[1].items[0].kind).toBe("suggestion");
-    expect(groups[1].items).toHaveLength(2);
+    expect(groups[1]!.items[0]!.kind).toBe("suggestion");
+    expect(groups[1]!.items).toHaveLength(2);
   });
 });
 
@@ -641,7 +643,7 @@ describe("buildAllPendingSuggestions", () => {
     const out = buildAllPendingSuggestions(edits, (path) => path === "docs/a.md");
     expect(out.map((s) => s.path)).toEqual(["docs/a.md", "docs/b.md"]);
 
-    const a = out[0];
+    const a = out[0]!;
     expect(a.cid).toBe("live:2:2");
     expect(a.replacement).toBe("A2");
     expect(a.quote).toBe("a2");
@@ -649,7 +651,7 @@ describe("buildAllPendingSuggestions", () => {
     expect(a.inDiff).toBe(true); // a.md routed in-diff
     expect(a.range).toEqual({ sl: 2, sc: 1, el: 2, ec: 3 });
 
-    const b = out[1];
+    const b = out[1]!;
     expect(b.cid).toBe("live:4:4");
     expect(b.replacement).toBe("B4");
     expect(b.body).toBe(""); // no attached comment
@@ -693,7 +695,7 @@ describe("buildThreads resolved state", () => {
     const [t] = buildThreads([comment({ id: 1, meta: meta(5, "a.md", "t1") })], [], "a.md", {
       resolvedKeys: new Set(["t1"]),
     });
-    expect(t.resolved).toBe(true);
+    expect(t?.resolved).toBe(true);
   });
 
   test("an accepted suggestion thread is resolved", () => {
@@ -703,12 +705,12 @@ describe("buildThreads resolved state", () => {
       "a.md",
       { accepted: (id) => id === 1 },
     );
-    expect(t.resolved).toBe(true);
+    expect(t?.resolved).toBe(true);
   });
 
   test("threads default to not resolved", () => {
     const [t] = buildThreads([comment({ id: 1, meta: meta(5, "a.md", "t1") })], [], "a.md");
-    expect(t.resolved).toBe(false);
+    expect(t?.resolved).toBe(false);
   });
 });
 
@@ -726,15 +728,15 @@ describe("buildPendingSuggestions", () => {
       commentFor: (cid) => comments[cid] ?? "",
     });
     expect(out.map((s) => s.cid)).toEqual(["live:3:3", "live:7:8"]);
-    expect(out[0].body).toBe("fix this");
-    expect(out[1].body).toBe("");
-    expect(out[0].inDiff).toBe(true);
-    expect(out[1].inDiff).toBe(false);
-    expect(out[0].replacement).toBe("new3");
+    expect(out[0]!.body).toBe("fix this");
+    expect(out[1]!.body).toBe("");
+    expect(out[0]!.inDiff).toBe(true);
+    expect(out[1]!.inDiff).toBe(false);
+    expect(out[0]!.replacement).toBe("new3");
     // A line-based anchor is the single `quote`-at-`range` rule with `sc = 1`
     // and `ec` past the last quoted line's end (issue #276).
-    expect(out[1].range).toEqual({ sl: 7, sc: 1, el: 8, ec: 5 });
-    expect(out[0].range).toEqual({ sl: 3, sc: 1, el: 3, ec: 5 });
+    expect(out[1]!.range).toEqual({ sl: 7, sc: 1, el: 8, ec: 5 });
+    expect(out[0]!.range).toEqual({ sl: 3, sc: 1, el: 3, ec: 5 });
   });
 });
 
@@ -824,9 +826,10 @@ describe("buildAuthorPendingItems", () => {
     const items = buildAuthorPendingItems([], {}, accepted);
     const acc = items.filter((i) => i.kind === "acceptedSuggestion");
     expect(acc).toHaveLength(1);
-    expect(acc[0].kind === "acceptedSuggestion" && acc[0].commentId).toBe(42);
-    expect(acc[0].kind === "acceptedSuggestion" && acc[0].path).toBe("docs/a.md");
-    expect(acc[0].kind === "acceptedSuggestion" && acc[0].replacement).toBe("new");
+    const item = acc[0]!;
+    expect(item.kind === "acceptedSuggestion" && item.commentId).toBe(42);
+    expect(item.kind === "acceptedSuggestion" && item.path).toBe("docs/a.md");
+    expect(item.kind === "acceptedSuggestion" && item.replacement).toBe("new");
   });
 
   test("includes comment/reply drafts unchanged", () => {
@@ -859,7 +862,7 @@ describe("buildAuthorPendingItems", () => {
       [{ commentId: 42, path: "docs/a.md", quote: "old line", replacement: "new line", line: 3 }],
     );
     expect(items).toHaveLength(1);
-    expect(items[0].kind).toBe("acceptedSuggestion");
+    expect(items[0]!.kind).toBe("acceptedSuggestion");
   });
 
   test("keeps the 'edit' item when the file has manual edits and no accepts", () => {
@@ -869,7 +872,7 @@ describe("buildAuthorPendingItems", () => {
       [],
     );
     expect(items).toHaveLength(1);
-    expect(items[0].kind).toBe("edit");
+    expect(items[0]!.kind).toBe("edit");
   });
 
   test("multiple accepts on the same file emit one item per accept (no edit)", () => {
@@ -936,9 +939,9 @@ describe("groupPendingByFile — author variants", () => {
     );
     const groups = groupPendingByFile(items);
     expect(groups.map((g) => g.path)).toEqual(["docs/a.md"]);
-    expect(groups[0].items).toHaveLength(2);
+    expect(groups[0]!.items).toHaveLength(2);
     // Sort puts accepted suggestion (line 2) before comment (line 5).
-    const order = groups[0].items.map((i) => i.kind);
+    const order = groups[0]!.items.map((i) => i.kind);
     expect(order).toEqual(["acceptedSuggestion", "comment"]);
   });
 
@@ -950,7 +953,7 @@ describe("groupPendingByFile — author variants", () => {
     );
     const groups = groupPendingByFile(items);
     expect(groups.map((g) => g.path)).toEqual(["docs/c.md"]);
-    expect(groups[0].items[0].kind).toBe("edit");
+    expect(groups[0]!.items[0]!.kind).toBe("edit");
   });
 });
 

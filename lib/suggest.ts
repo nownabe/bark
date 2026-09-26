@@ -25,7 +25,7 @@ const SUGGESTION_BLOCK_RE = /(`{3,})suggestion\r?\n?([\s\S]*?)\r?\n?\1`*[ \t]*(?
 /** Extract the replacement text of a ```suggestion block from a comment body (null if absent). */
 export function extractSuggestionBlock(body: string): string | null {
   const m = body.match(SUGGESTION_BLOCK_RE);
-  return m ? m[2] : null;
+  return m?.[2] ?? null;
 }
 
 /**
@@ -329,10 +329,10 @@ export function suggestionEditRanges(base: string, edited: string): SuggestionEd
     acc += ln.length + 1; // + the "\n" separator
   }
   const startOf = (line1: number) =>
-    line1 - 1 < editedLines.length ? lineStart[line1 - 1] : edited.length;
+    line1 - 1 < editedLines.length ? lineStart[line1 - 1]! : edited.length;
   const endOf = (line1: number) =>
     line1 - 1 < editedLines.length
-      ? lineStart[line1 - 1] + editedLines[line1 - 1].length
+      ? lineStart[line1 - 1]! + editedLines[line1 - 1]!.length
       : edited.length;
 
   const ranges: SuggestionEditRange[] = [];
@@ -340,7 +340,7 @@ export function suggestionEditRanges(base: string, edited: string): SuggestionEd
   let editedLine = 1; // 1-based index into editedLines
   let i = 0;
   while (i < ops.length) {
-    if (ops[i].op === 0) {
+    if (ops[i]!.op === 0) {
       baseLine++;
       editedLine++;
       i++;
@@ -350,8 +350,8 @@ export function suggestionEditRanges(base: string, edited: string): SuggestionEd
     const startEdited = editedLine;
     let del = 0;
     let ins = 0;
-    while (i < ops.length && ops[i].op !== 0) {
-      if (ops[i].op === -1) {
+    while (i < ops.length && ops[i]!.op !== 0) {
+      if (ops[i]!.op === -1) {
         del++;
         baseLine++;
       } else {
@@ -364,7 +364,7 @@ export function suggestionEditRanges(base: string, edited: string): SuggestionEd
       const from = startOf(startEdited);
       const to =
         ins > 0
-          ? lineStart[startEdited + ins - 2] + editedLines[startEdited + ins - 2].length
+          ? lineStart[startEdited + ins - 2]! + editedLines[startEdited + ins - 2]!.length
           : from;
       ranges.push({ sl: startBase, el: startBase + del - 1, from, to });
     } else if (ins > 0) {
@@ -409,7 +409,7 @@ export function diffToSuggestions(base: string, edited: string): SuggestionHunk[
   let baseLine = 1;
   let i = 0;
   while (i < ops.length) {
-    if (ops[i].op === 0) {
+    if (ops[i]!.op === 0) {
       baseLine++;
       i++;
       continue;
@@ -417,12 +417,13 @@ export function diffToSuggestions(base: string, edited: string): SuggestionHunk[
     const startLine = baseLine;
     const del: string[] = [];
     const ins: string[] = [];
-    while (i < ops.length && ops[i].op !== 0) {
-      if (ops[i].op === -1) {
-        del.push(ops[i].text);
+    while (i < ops.length && ops[i]!.op !== 0) {
+      const { op, text } = ops[i]!;
+      if (op === -1) {
+        del.push(text);
         baseLine++;
       } else {
-        ins.push(ops[i].text);
+        ins.push(text);
       }
       i++;
     }
@@ -440,7 +441,7 @@ export function diffToSuggestions(base: string, edited: string): SuggestionHunk[
       // consume it here).
       if (startLine - 1 < baseLines.length) {
         // The next base line exists (insertion in middle or at start).
-        const nextLine = baseLines[startLine - 1];
+        const nextLine = baseLines[startLine - 1]!;
         hunks.push({
           sl: startLine,
           el: startLine,
@@ -450,7 +451,7 @@ export function diffToSuggestions(base: string, edited: string): SuggestionHunk[
       } else if (startLine >= 2) {
         // EOF insertion — anchor to the previous (last) base line.
         const prevLine = startLine - 1;
-        const prevLineText = baseLines[prevLine - 1];
+        const prevLineText = baseLines[prevLine - 1]!;
         hunks.push({
           sl: prevLine,
           el: prevLine,

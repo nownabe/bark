@@ -132,10 +132,9 @@ export function buildAllPendingSuggestions(
   edits: Record<string, SuggestionEdit>,
   isInDiff: (path: string, sl: number, el: number) => boolean,
 ): PendingSuggestion[] {
-  return Object.keys(edits)
-    .sort((a, b) => a.localeCompare(b))
-    .flatMap((path) => {
-      const edit = edits[path];
+  return Object.entries(edits)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .flatMap(([path, edit]) => {
       // Edits persisted before `base` existed can't be diffed — skip them rather
       // than crash diffToSuggestions on an undefined source/base.
       if (typeof edit.base !== "string" || typeof edit.source !== "string") return [];
