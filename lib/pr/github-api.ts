@@ -57,7 +57,6 @@ export function clearEtagCache(): void {
 
 // ---- Retry with backoff ------------------------------------------------
 
-const MAX_RETRIES = 2;
 const BACKOFF_MS = [300, 900];
 
 const defaultDelay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -73,17 +72,15 @@ function isTransient(err: unknown): boolean {
  *  bounded exponential backoff. Non-transient errors surface immediately. */
 async function withRetry<T>(client: GitHubClient, op: () => Promise<T>): Promise<T> {
   const sleep = client.delay ?? defaultDelay;
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (const backoff of BACKOFF_MS) {
     try {
       return await op();
     } catch (err) {
-      lastErr = err;
-      if (attempt === MAX_RETRIES || !isTransient(err)) throw err;
-      await sleep(BACKOFF_MS[attempt]);
+      if (!isTransient(err)) throw err;
+      await sleep(backoff);
     }
   }
-  throw lastErr;
+  return op();
 }
 
 // ---- Requests ----------------------------------------------------------

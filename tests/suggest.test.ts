@@ -67,7 +67,7 @@ describe("diffToSuggestions", () => {
       // so the pending suggestion never appeared in the sidebar.
       const h = diffToSuggestions("\n\n\n", "\n\nhello\n\n");
       expect(h).toHaveLength(1);
-      expect(h[0].replacement).toContain("hello");
+      expect(h[0]?.replacement).toContain("hello");
     });
   });
 });
@@ -77,14 +77,14 @@ describe("suggestionEditRanges", () => {
     const edited = "line1\nLINE2 changed\nline3\n";
     const r = suggestionEditRanges("line1\nline2\nline3\n", edited);
     expect(r).toEqual([{ sl: 2, el: 2, from: 6, to: 19 }]);
-    expect(edited.slice(r[0].from, r[0].to)).toBe("LINE2 changed");
+    expect(edited.slice(r[0]?.from, r[0]?.to)).toBe("LINE2 changed");
   });
 
   test("multi-line replacement spans all replacement lines", () => {
     const edited = "h1\nX\nY\nh2\n";
     const r = suggestionEditRanges("h1\nx\ny\nz\nh2\n", edited);
     expect(r).toEqual([{ sl: 2, el: 4, from: 3, to: 6 }]);
-    expect(edited.slice(r[0].from, r[0].to)).toBe("X\nY");
+    expect(edited.slice(r[0]?.from, r[0]?.to)).toBe("X\nY");
   });
 
   test("pure deletion collapses to the point where the text was", () => {
@@ -113,7 +113,7 @@ describe("suggestionEditRanges", () => {
       expect(ranges).toHaveLength(hunks.length);
       expect(ranges).toEqual([{ sl: 2, el: 2, from: 2, to: 5 }]);
       // Covers "X\nb" in the edited doc.
-      expect(edited.slice(ranges[0].from, ranges[0].to)).toBe("X\nb");
+      expect(edited.slice(ranges[0]?.from, ranges[0]?.to)).toBe("X\nb");
     });
 
     test("beginning insertion: range starts at offset 0", () => {
@@ -121,7 +121,7 @@ describe("suggestionEditRanges", () => {
       const edited = "X\na\n";
       const ranges = suggestionEditRanges(base, edited);
       expect(ranges).toEqual([{ sl: 1, el: 1, from: 0, to: 3 }]);
-      expect(edited.slice(ranges[0].from, ranges[0].to)).toBe("X\na");
+      expect(edited.slice(ranges[0]?.from, ranges[0]?.to)).toBe("X\na");
     });
 
     test("EOF insertion: range covers previous line + inserted block", () => {
@@ -129,7 +129,7 @@ describe("suggestionEditRanges", () => {
       const edited = "a\nX\n";
       const ranges = suggestionEditRanges(base, edited);
       expect(ranges).toEqual([{ sl: 1, el: 1, from: 0, to: 3 }]);
-      expect(edited.slice(ranges[0].from, ranges[0].to)).toBe("a\nX");
+      expect(edited.slice(ranges[0]?.from, ranges[0]?.to)).toBe("a\nX");
     });
   });
 });

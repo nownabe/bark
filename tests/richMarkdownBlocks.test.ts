@@ -42,17 +42,17 @@ describe("preview mode: list markers", () => {
   test("bullet markers render as bullets; ordered markers keep their numbers", () => {
     const view = render("- one\n* two\n\n1. first\n\nend");
     const [one, two, , first] = lines(view);
-    expect(one.textContent).toBe("• one");
-    expect(two.textContent).toBe("• two");
-    expect(first.textContent).toBe("1. first");
+    expect(one?.textContent).toBe("• one");
+    expect(two?.textContent).toBe("• two");
+    expect(first?.textContent).toBe("1. first");
     view.destroy();
   });
 
   test("the marker under the cursor shows its source", () => {
     const view = render("- one\n- two", 1);
     const [one, two] = lines(view);
-    expect(one.textContent).toBe("- one");
-    expect(two.textContent).toBe("• two");
+    expect(one?.textContent).toBe("- one");
+    expect(two?.textContent).toBe("• two");
     view.destroy();
   });
 });
@@ -61,25 +61,25 @@ describe("preview mode: code-block fences", () => {
   test("fence lines are hidden when the cursor is outside the block", () => {
     const view = render("```ts\nconst x = 1;\n```\n");
     const [open, code, close] = lines(view);
-    expect(open.classList.contains("dr-codeblock--open")).toBe(true);
-    expect(open.textContent).toBe("");
-    expect(code.textContent).toBe("const x = 1;");
-    expect(close.classList.contains("dr-codeblock--close")).toBe(true);
-    expect(close.textContent).toBe("");
+    expect(open?.classList.contains("dr-codeblock--open")).toBe(true);
+    expect(open?.textContent).toBe("");
+    expect(code?.textContent).toBe("const x = 1;");
+    expect(close?.classList.contains("dr-codeblock--close")).toBe(true);
+    expect(close?.textContent).toBe("");
     view.destroy();
   });
 
   test("the fence under the cursor shows its source for editing", () => {
     const view = render("```ts\nconst x = 1;\n```\n", 2);
     const [open, , close] = lines(view);
-    expect(open.textContent).toBe("```ts");
-    expect(close.textContent).toBe("");
+    expect(open?.textContent).toBe("```ts");
+    expect(close?.textContent).toBe("");
     view.destroy();
   });
 
   test("an unterminated block does not hide its last content line", () => {
     const view = render("```ts\nconst x = 1;", 0);
-    expect(lines(view)[1].textContent).toBe("const x = 1;");
+    expect(lines(view)[1]?.textContent).toBe("const x = 1;");
     expect(view.dom.querySelector(".dr-codeblock--close")).toBeNull();
     view.destroy();
   });

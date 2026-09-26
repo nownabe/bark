@@ -39,7 +39,7 @@ class DeletedWidget extends WidgetType {
   ) {
     super();
   }
-  eq(other: DeletedWidget) {
+  override eq(other: DeletedWidget) {
     return other.text === this.text && other.contextClass === this.contextClass;
   }
   toDOM() {
@@ -48,7 +48,7 @@ class DeletedWidget extends WidgetType {
     span.textContent = this.text;
     return span;
   }
-  ignoreEvent() {
+  override ignoreEvent() {
     return false;
   }
 }

@@ -153,7 +153,7 @@ describe("executor — dispatch", () => {
     const { transport, calls } = fakeTransport();
     const results = await execute([step], transport);
     expect(calls).toEqual([{ kind: "post-reply", step }]);
-    expect(results[0].outcome).toEqual({
+    expect(results[0]?.outcome).toEqual({
       ok: true,
       mapping: { cid: "r", remoteId: 0 },
     });
@@ -167,7 +167,7 @@ describe("executor — dispatch", () => {
     const { transport, calls } = fakeTransport();
     const results = await execute([step], transport);
     expect(calls).toEqual([{ kind: "post-issue-comment", step }]);
-    expect(results[0].outcome).toMatchObject({ ok: true });
+    expect(results[0]?.outcome).toMatchObject({ ok: true });
   });
 
   test("ResolveReviewThread and UnresolveReviewThread dispatch to their own methods", async () => {
@@ -212,7 +212,7 @@ describe("executor — dispatch", () => {
     });
     const results = await execute([step], transport);
     expect(calls).toEqual([{ kind: "commit", step }]);
-    expect(results[0].outcome).toEqual({ ok: true, newHeadSha: "h1" });
+    expect(results[0]?.outcome).toEqual({ ok: true, newHeadSha: "h1" });
   });
 });
 
@@ -257,7 +257,7 @@ describe("executor — error pass-through", () => {
       },
     });
     const results = await execute([step], transport);
-    expect(results[0].outcome).toEqual({
+    expect(results[0]?.outcome).toEqual({
       ok: false,
       error: { message: "422 Unprocessable", code: 422 },
     });
@@ -302,7 +302,7 @@ describe("executor — error pass-through", () => {
     const results = await execute([batch, reply1], transport);
     expect(replyCalled).toBe(true);
     expect(results).toHaveLength(2);
-    expect(results[0].outcome.ok).toBe(false);
-    expect(results[1].outcome.ok).toBe(true);
+    expect(results[0]?.outcome.ok).toBe(false);
+    expect(results[1]?.outcome.ok).toBe(true);
   });
 });

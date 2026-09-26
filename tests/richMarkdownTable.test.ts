@@ -30,20 +30,20 @@ describe("preview mode: inline Markdown inside table cells", () => {
     const table = renderTable("| **bold** | *em* |\n|---|---|\n| `code` | ~~gone~~ |");
     const [bold, em] = table.querySelectorAll("th");
     const [code, strike] = table.querySelectorAll("td");
-    expect(bold.querySelector(".dr-strong")?.textContent).toBe("bold");
-    expect(em.querySelector(".dr-em")?.textContent).toBe("em");
-    expect(code.querySelector(".dr-code")?.textContent).toBe("code");
-    expect(strike.querySelector("s")?.textContent).toBe("gone");
+    expect(bold?.querySelector(".dr-strong")?.textContent).toBe("bold");
+    expect(em?.querySelector(".dr-em")?.textContent).toBe("em");
+    expect(code?.querySelector(".dr-code")?.textContent).toBe("code");
+    expect(strike?.querySelector("s")?.textContent).toBe("gone");
     expect(table.textContent).not.toMatch(/[*`~]/);
   });
 
   test("a link renders as a safe anchor; unsafe schemes stay inert", () => {
     const table = renderTable("| a |\n|---|\n| see [ok](https://e.com) |\n| [bad](javascript:x) |");
     const [ok, bad] = table.querySelectorAll("a.dr-link");
-    expect(ok.getAttribute("href")).toBe("https://e.com");
-    expect(ok.textContent).toBe("ok");
-    expect(ok.parentElement!.textContent).toBe("see ok");
-    expect(bad.hasAttribute("href")).toBe(false);
+    expect(ok?.getAttribute("href")).toBe("https://e.com");
+    expect(ok?.textContent).toBe("ok");
+    expect(ok?.parentElement?.textContent).toBe("see ok");
+    expect(bad?.hasAttribute("href")).toBe(false);
   });
 
   test("an escaped pipe stays inside its cell", () => {

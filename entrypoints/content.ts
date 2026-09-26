@@ -19,7 +19,7 @@ export default defineContentScript({
 function parsePr(): { owner: string; repo: string; pr: string } | null {
   const m = location.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
   if (!m) return null;
-  return { owner: m[1], repo: m[2], pr: m[3] };
+  return { owner: m[1]!, repo: m[2]!, pr: m[3]! };
 }
 
 function syncEntryButton() {

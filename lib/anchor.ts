@@ -34,14 +34,14 @@ export function offsetToLineCol(
   let ans = 0;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    if (lineStarts[mid] <= offset) {
+    if (lineStarts[mid]! <= offset) {
       ans = mid;
       lo = mid + 1;
     } else {
       hi = mid - 1;
     }
   }
-  return { line: ans + 1, col: offset - lineStarts[ans] + 1 };
+  return { line: ans + 1, col: offset - (lineStarts[ans] ?? 0) + 1 };
 }
 
 /** line/col (1-based) → source offset. lineStarts is the return value of buildLineIndex. */

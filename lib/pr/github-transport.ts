@@ -389,12 +389,12 @@ async function findCommentMappings(
 ): Promise<CommentRemoteMapping[]> {
   if (cids.length === 0) return [];
   const sleep = client.delay ?? defaultDelay;
-  let out: CommentRemoteMapping[] = [];
-  for (let attempt = 0; ; attempt++) {
-    out = await listCommentMappings(client, prRef, new Set(cids));
-    if (out.length === cids.length || attempt === CONFIRM_BACKOFF_MS.length) return out;
-    await sleep(CONFIRM_BACKOFF_MS[attempt]);
+  for (const backoff of CONFIRM_BACKOFF_MS) {
+    const out = await listCommentMappings(client, prRef, new Set(cids));
+    if (out.length === cids.length) return out;
+    await sleep(backoff);
   }
+  return listCommentMappings(client, prRef, new Set(cids));
 }
 
 async function listCommentMappings(
