@@ -335,9 +335,9 @@ url_api = "https://api.github.com/repos/zizmorcore/zizmor/releases/assets/552067
 provenance = "github-attestations"
 
 [[tools."npm:oxfmt"]]
-version = "0.71.0"
+version = "0.72.0"
 backend = "npm:oxfmt"
 
 [[tools."npm:oxlint"]]
-version = "1.86.0"
+version = "1.87.0"
 backend = "npm:oxlint"
