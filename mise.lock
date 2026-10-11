@@ -256,43 +256,43 @@ url_api = "https://api.github.com/repos/suzuki-shunsuke/ghalint/releases/assets/
 url = "https://github.com/suzuki-shunsuke/ghalint/releases/download/v1.5.6/multiple.intoto.jsonl"
 
 [[tools."aqua:trufflesecurity/trufflehog"]]
-version = "3.99.0"
+version = "3.99.1"
 backend = "aqua:trufflesecurity/trufflehog"
 
 [tools."aqua:trufflesecurity/trufflehog"."platforms.linux-arm64"]
-checksum = "sha256:ad6fb802f0e6f097829c1eee659b97fc0533a08fa34633cde15bc8fc3258dfb7"
-url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.0/trufflehog_3.99.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/616256579"
+checksum = "sha256:a333b6f798cafe72cf1fe4795d9dcf7e21ea82d6b09fcb175b3baa4616bd023d"
+url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.1/trufflehog_3.99.1_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/621509344"
 
 [tools."aqua:trufflesecurity/trufflehog"."platforms.linux-arm64-musl"]
-checksum = "sha256:ad6fb802f0e6f097829c1eee659b97fc0533a08fa34633cde15bc8fc3258dfb7"
-url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.0/trufflehog_3.99.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/616256579"
+checksum = "sha256:a333b6f798cafe72cf1fe4795d9dcf7e21ea82d6b09fcb175b3baa4616bd023d"
+url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.1/trufflehog_3.99.1_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/621509344"
 
 [tools."aqua:trufflesecurity/trufflehog"."platforms.linux-x64"]
-checksum = "sha256:e35ae3fd1e4b7a0c1699d0fda1814282bf906d03379bd4337b092b3a84c6740b"
-url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.0/trufflehog_3.99.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/616256576"
+checksum = "sha256:a15492ba041e4574ed604ba52a6a49b5f628ff0f13833c18e3cb617021c37d86"
+url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.1/trufflehog_3.99.1_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/621509351"
 
 [tools."aqua:trufflesecurity/trufflehog"."platforms.linux-x64-musl"]
-checksum = "sha256:e35ae3fd1e4b7a0c1699d0fda1814282bf906d03379bd4337b092b3a84c6740b"
-url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.0/trufflehog_3.99.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/616256576"
+checksum = "sha256:a15492ba041e4574ed604ba52a6a49b5f628ff0f13833c18e3cb617021c37d86"
+url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.1/trufflehog_3.99.1_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/621509351"
 
 [tools."aqua:trufflesecurity/trufflehog"."platforms.macos-arm64"]
-checksum = "sha256:9f33b39458d3e3dba69867cd85bcd1df9a6a52083495ed770eb9f42b4e2a63a9"
-url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.0/trufflehog_3.99.0_darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/616256577"
+checksum = "sha256:e9044b23d6bc11694af7a97771fe7630d693b67308c3276ac3260b5967e075d8"
+url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.1/trufflehog_3.99.1_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/621509349"
 
 [tools."aqua:trufflesecurity/trufflehog"."platforms.macos-x64"]
-checksum = "sha256:96eea7bda1969c51e3eb8fa0e7659a9cc1ffa975393a7732498d2e8d20c63060"
-url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.0/trufflehog_3.99.0_darwin_amd64.tar.gz"
-url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/616256695"
+checksum = "sha256:c0fbb724fd4a7c6c115b4789b9264e9cc425e9bafa189408481e8b3db33fc197"
+url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.1/trufflehog_3.99.1_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/621509436"
 
 [tools."aqua:trufflesecurity/trufflehog"."platforms.windows-x64"]
-checksum = "sha256:336c8557d7264f5ef30afd3abf7bba017daba12bb549bd541ec77ac244209cf2"
-url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.0/trufflehog_3.99.0_windows_amd64.tar.gz"
-url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/616256682"
+checksum = "sha256:bfa7128d43b2b059196a846753b20fc139101501a6ed58092409de1ed50ce11f"
+url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.1/trufflehog_3.99.1_windows_amd64.tar.gz"
+url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/621509425"
 
 [[tools."aqua:zizmorcore/zizmor"]]
 version = "1.30.1"
