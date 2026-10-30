@@ -196,7 +196,7 @@ url_api = "https://api.github.com/repos/rhysd/actionlint/releases/assets/3849249
 provenance = "github-attestations"
 
 [[tools."aqua:suzuki-shunsuke/ghalint"]]
-version = "1.5.6"
+version = "1.5.7"
 backend = "aqua:suzuki-shunsuke/ghalint"
 
 [tools."aqua:suzuki-shunsuke/ghalint"."platforms.linux-arm64"]
