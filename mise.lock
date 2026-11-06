@@ -359,5 +359,5 @@ version = "0.76.0"
 backend = "npm:oxfmt"
 
 [[tools."npm:oxlint"]]
-version = "1.90.0"
+version = "1.91.0"
 backend = "npm:oxlint"
