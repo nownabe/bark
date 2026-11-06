@@ -263,7 +263,7 @@ url_api = "https://api.github.com/repos/suzuki-shunsuke/ghalint/releases/assets/
 url = "https://github.com/suzuki-shunsuke/ghalint/releases/download/v1.5.6/multiple.intoto.jsonl"
 
 [[tools."aqua:trufflesecurity/trufflehog"]]
-version = "3.99.7"
+version = "3.99.8"
 backend = "aqua:trufflesecurity/trufflehog"
 
 [tools."aqua:trufflesecurity/trufflehog"."platforms.linux-arm64"]
@@ -309,7 +309,7 @@ url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.7/t
 url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/671473627"
 
 [[tools."aqua:zizmorcore/zizmor"]]
-version = "1.31.1"
+version = "1.32.0"
 backend = "aqua:zizmorcore/zizmor"
 
 [tools."aqua:zizmorcore/zizmor"."platforms.linux-arm64"]
