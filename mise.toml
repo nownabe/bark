@@ -7,7 +7,7 @@
 "aqua:betterleaks/betterleaks" = "1.9.0"
 "aqua:trufflesecurity/trufflehog" = "3.99.8"
 "aqua:direnv/direnv" = "2.38.2"
-"npm:oxlint" = "1.90.0"
+"npm:oxlint" = "1.91.0"
 "npm:oxfmt" = "0.76.0"
 
 [settings]
