@@ -7,8 +7,8 @@
 "aqua:betterleaks/betterleaks" = "1.10.0"
 "aqua:trufflesecurity/trufflehog" = "3.99.8"
 "aqua:direnv/direnv" = "2.38.2"
-"npm:oxlint" = "1.92.0"
-"npm:oxfmt" = "0.77.0"
+"npm:oxlint" = "1.93.0"
+"npm:oxfmt" = "0.78.0"
 
 [settings]
 lockfile = true
