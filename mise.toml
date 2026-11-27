@@ -5,7 +5,7 @@
 "aqua:suzuki-shunsuke/ghalint" = "1.6.0"
 "aqua:zizmorcore/zizmor" = "1.33.1"
 "aqua:betterleaks/betterleaks" = "1.10.1"
-"aqua:trufflesecurity/trufflehog" = "3.100.0"
+"aqua:trufflesecurity/trufflehog" = "3.100.1"
 "aqua:direnv/direnv" = "2.38.2"
 "npm:oxlint" = "1.95.0"
 "npm:oxfmt" = "0.80.0"
